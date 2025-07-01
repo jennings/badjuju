@@ -1,0 +1,4 @@
+= Bad Juju
+
+An LSP-powered, editor-agnostic front-end for
+https://jj-vcs.github.com/jj/[Jujutsu].

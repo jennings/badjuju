@@ -1,0 +1,25 @@
+STATUS:
+
+Working copy  (@) : zzzzzzzz 111111111 (no description) (empty)
+Parent commit (@-): yyyyyyyy 222222222 this is a description
+
+
+WORKING COPY CHANGES:
+
+A .gitignore
+A Makefile
+A README.adoc
+
+
+STACK: ancestors(reachable(@, mutable()), 2)
+
+@  ynrzwrot 9691bfa1 36 seconds ago (no description set)
+│  
+◆  kxuttqto c58e5798 [trunk] zsh: add z alias to replace z.sh
+│  
+◆  wlorloux c0c09829 add atuin config
+│  
+◆  smskwyxl 88281f49 jj: config updates
+│  
+◆  rwmoopmr 3534c637 zsh: ignore on Windows
+│  
