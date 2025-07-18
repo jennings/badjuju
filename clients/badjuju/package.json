@@ -1,0 +1,25 @@
+{
+  "name": "badjuju",
+  "displayName": "badjuju",
+  "description": "Jujutsu VCS client",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.102.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "jujutsu",
+      "aliases": ["Jujutsu VCS", "jujutsu"],
+      "extensions": [".jj"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "jujutsu",
+      "scopeName": "",
+      "path": "./syntaxes/jujutsu.tmLanguage.json"
+    }]
+  }
+}

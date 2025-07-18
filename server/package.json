@@ -1,0 +1,8 @@
+{
+  "name": "@repo/server",
+  "scripts": {
+    "build": "cargo build",
+    "install": "cargo install --locked",
+    "test": "cargo nextest"
+  }
+}

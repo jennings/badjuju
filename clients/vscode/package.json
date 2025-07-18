@@ -1,0 +1,34 @@
+{
+  "name": "vscode-badjuju-lsp",
+  "description": "Bad Juju Jujutsu VCS",
+  "license": "MIT",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "9.0.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "catalog:",
+    "@types/node": "^17.0.18",
+    "@types/vscode": "1.85.0",
+    "vscode-test": "^1.3.0"
+  },
+  "contributes": {
+    "configuration": {
+      "title": "Bad Juju",
+      "properties": {
+        "badjuju.binaryPath": {
+          "description": "Path to jj binary (blank to use jj on PATH)."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "badjuju.status.open",
+        "title": "Open status window"
+      }
+    ]
+  }
+}

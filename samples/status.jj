@@ -23,3 +23,10 @@ STACK: ancestors(reachable(@, mutable()), 2)
 │  
 ◆  rwmoopmr 3534c637 zsh: ignore on Windows
 │  
+
+
+COMMAND REFERENCE:
+n   new
+c   commit
+l   log
+r   rebase

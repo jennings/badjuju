@@ -1,6 +1,9 @@
+use std::os::unix::process::CommandExt;
+use std::process::{Command, Stdio};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
+use watchman_client::Connector;
 
 #[derive(Debug)]
 struct Backend {
@@ -24,11 +27,12 @@ impl LanguageServer for Backend {
     }
 }
 
-#[tokio::main]
-async fn main() {
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
+// #[tokio::main]
+fn main() {
+    // let stdin = tokio::io::stdin();
+    // let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| Backend { client });
-    Server::new(stdin, stdout, socket).serve(service).await;
+    let status_output = Command::new("jj").args(&["status"]).output().unwrap();
+
+    println!("{}", String::from_utf8(status_output.stdout).unwrap());
 }
