@@ -51,7 +51,14 @@
       "title": "Bad Juju",
       "properties": {
         "badjuju.binaryPath": {
-          "description": "Path to jj binary (blank to use jj on PATH)."
+          "type": "string",
+          "default": "",
+          "description": "Path to jj binary. Leave blank to use jj on PATH."
+        },
+        "badjuju.defaultLogRevset": {
+          "type": "string",
+          "default": "",
+          "description": "Default revset for badjuju.log.open. Leave blank to use jj's default."
         }
       }
     },

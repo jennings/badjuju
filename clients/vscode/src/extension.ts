@@ -23,12 +23,17 @@ export async function activate(context: ExtensionContext) {
   };
   const serverOptions: ServerOptions = { run, debug: run };
 
+  const config = workspace.getConfiguration("badjuju");
+  const binaryPath: string | undefined = config.get("binaryPath");
+  const initializationOptions = binaryPath ? { binaryPath } : undefined;
+
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "jujutsu" }],
     synchronize: {
       fileEvents: workspace.createFileSystemWatcher("**/.jj/**"),
     },
     traceOutputChannel,
+    initializationOptions,
   };
 
   context.subscriptions.push(
@@ -49,9 +54,11 @@ export async function activate(context: ExtensionContext) {
       await window.showTextDocument(doc, { preview: false, preserveFocus: false });
     }),
     commands.registerCommand("badjuju.log.open", async () => {
+      const defaultRevset: string =
+        workspace.getConfiguration("badjuju").get("defaultLogRevset") ?? "";
       const result = await client.sendRequest("workspace/executeCommand", {
         command: "badjuju.log",
-        arguments: [],
+        arguments: defaultRevset ? [defaultRevset] : [],
       });
       const doc = await workspace.openTextDocument(Uri.parse(result as string));
       await window.showTextDocument(doc, { preserveFocus: false });
