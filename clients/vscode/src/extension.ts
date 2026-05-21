@@ -53,6 +53,9 @@ const STATUS_FILE_LINE_RE = /^([MADCR])\s+(.+)$/;
 // Skips the summary line ("N files changed, ...") because it has no " | <N> <+/->".
 const STAT_LINE_RE =
   /^[\s│○●◆~*╭╮╯╰─├┤┬┴┼]*\s(\S[\S ]*?)\s+\|\s+\d+\s+[+-]+\s*$/;
+// A commit header line in jj log output: graph node char + spaces + change_id.
+// Graph node chars: @ (current), ○ ● (other), ◆ (immutable), * (rare). NOT ~ (elided continuation).
+const COMMIT_HEADER_RE = /^[@○●◆*]\s+([a-z]+)\b/;
 
 /** Parse a status.jj line and return the file path it refers to, or null. */
 export function parseStatusFile(line: string): string | null {
@@ -62,6 +65,28 @@ export function parseStatusFile(line: string): string | null {
   // jj renders renames/copies as "old => new" — squash needs the destination path.
   const arrow = rest.lastIndexOf(" => ");
   return arrow >= 0 ? rest.slice(arrow + 4).trim() : rest;
+}
+
+/**
+ * Return the revision that owns the file at the cursor.
+ *
+ * - STATUS-section lines (matched by STATUS_FILE_LINE_RE) belong to the working copy → "@".
+ * - --stat lines in the stack section belong to the closest commit header above them.
+ */
+export function findRevisionForLine(
+  lines: readonly string[],
+  cursorLine: number,
+): string {
+  const current = lines[cursorLine] ?? "";
+  if (STATUS_FILE_LINE_RE.test(current)) return "@";
+  for (let i = cursorLine - 1; i >= 0; i--) {
+    const text = lines[i] ?? "";
+    const h = text.match(COMMIT_HEADER_RE);
+    if (h) return h[1];
+    // Hit the STATUS section header without finding a commit — must be a working-copy file.
+    if (text.startsWith("STATUS:")) return "@";
+  }
+  return "@";
 }
 
 function isStatusFile(uri: Uri): boolean {
@@ -133,7 +158,8 @@ async function runFileScopedStatusCommand(
   const editor = window.activeTextEditor;
   if (!editor) return;
   if (!isStatusFile(editor.document.uri)) return;
-  const lineText = editor.document.lineAt(editor.selection.active.line).text;
+  const cursorLine = editor.selection.active.line;
+  const lineText = editor.document.lineAt(cursorLine).text;
   const file = parseStatusFile(lineText);
   if (!file) {
     window.showInformationMessage(
@@ -141,9 +167,14 @@ async function runFileScopedStatusCommand(
     );
     return;
   }
+  const allLines: string[] = [];
+  for (let i = 0; i < editor.document.lineCount; i++) {
+    allLines.push(editor.document.lineAt(i).text);
+  }
+  const revision = findRevisionForLine(allLines, cursorLine);
   const result = await client.sendRequest("workspace/executeCommand", {
     command: serverCommand,
-    arguments: [file],
+    arguments: [file, revision],
   });
   await openServerResult(result as string);
 }

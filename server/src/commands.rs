@@ -6,15 +6,15 @@ const STATUS_REVSET: &str = "ancestors(reachable(@, mutable()), 2)";
 
 const STATUS_COMMAND_REFERENCE: &str = "\
 COMMAND REFERENCE:
-n   new change
-l   open log
-d   describe
-s   squash file at cursor into parent
-U   unsquash file at cursor from parent into child
-u   jj undo (revert last operation)
-=   toggle --stat on the stack log
-g   refresh
-q   close";
+n     new change
+l     open log
+d     describe
+s     squash file at cursor into parent
+U     unsquash file at cursor from parent into child   (or Cmd+K U / Ctrl+K U when vim shadows U)
+u     jj undo (revert last operation)
+=     toggle --stat on the stack log
+g     refresh
+q     close";
 
 const LOG_COMMAND_REFERENCE: &str = "\
 COMMAND REFERENCE:
@@ -128,61 +128,79 @@ fn write_status(
     Ok(file_uri(&path))
 }
 
-/// Run `badjuju.squash`: move the file's changes from @ into @-, then refresh status.
-/// If @ has multiple parents, no action is taken and the status buffer reports the error.
-pub fn run_squash(jj: &Jj, workspace: &Path, file: &str) -> Result<String, CommandError> {
+/// Normalize a revision argument from the client. Empty string falls back to `@`.
+fn revision_or_at(revision: &str) -> &str {
+    if revision.is_empty() { "@" } else { revision }
+}
+
+/// Run `badjuju.squash`: move `file` from `revision` into `revision`'s parent (`jj squash -r REV FILE`).
+/// If `revision` has anything other than exactly one parent, no action is taken and the
+/// status buffer reports the error.
+pub fn run_squash(
+    jj: &Jj,
+    workspace: &Path,
+    file: &str,
+    revision: &str,
+) -> Result<String, CommandError> {
     let stat = read_current_stat(workspace);
+    let rev = revision_or_at(revision);
     if file.is_empty() {
         return write_status(jj, workspace, Some("squash: no file selected"), stat);
     }
-    let parents = jj.change_ids("parents(@)")?;
+    let parents = jj.change_ids(&format!("parents({rev})"))?;
     if parents.len() != 1 {
         return write_status(
             jj,
             workspace,
             Some(&format!(
-                "squash {file}: working copy has {} parents (need exactly 1)",
+                "squash {file} from {rev}: revision has {} parents (need exactly 1)",
                 parents.len()
             )),
             stat,
         );
     }
-    match jj.squash_file_into_parent("@", file) {
+    match jj.squash_file_into_parent(rev, file) {
         Ok(()) => run_status(jj, workspace),
         Err(e) => write_status(
             jj,
             workspace,
-            Some(&format!("squash {file} failed: {e}")),
+            Some(&format!("squash {file} from {rev} failed: {e}")),
             stat,
         ),
     }
 }
 
-/// Run `badjuju.unsquash`: move the file's changes from @ into its child, then refresh status.
-/// If @ has zero or multiple children, no action is taken and the status buffer reports the error.
-pub fn run_unsquash(jj: &Jj, workspace: &Path, file: &str) -> Result<String, CommandError> {
+/// Run `badjuju.unsquash`: move `file` from `revision` into `revision`'s immediate child
+/// (`jj squash --from REV --into CHILD FILE`). Errors if 0 or >1 children.
+pub fn run_unsquash(
+    jj: &Jj,
+    workspace: &Path,
+    file: &str,
+    revision: &str,
+) -> Result<String, CommandError> {
     let stat = read_current_stat(workspace);
+    let rev = revision_or_at(revision);
     if file.is_empty() {
         return write_status(jj, workspace, Some("unsquash: no file selected"), stat);
     }
-    let children = jj.change_ids("(@)+")?;
+    let children = jj.change_ids(&format!("({rev})+"))?;
     if children.len() != 1 {
         return write_status(
             jj,
             workspace,
             Some(&format!(
-                "unsquash {file}: working copy has {} children (need exactly 1)",
+                "unsquash {file} from {rev}: revision has {} children (need exactly 1)",
                 children.len()
             )),
             stat,
         );
     }
-    match jj.squash_file_into("@", &children[0], file) {
+    match jj.squash_file_into(rev, &children[0], file) {
         Ok(()) => run_status(jj, workspace),
         Err(e) => write_status(
             jj,
             workspace,
-            Some(&format!("unsquash {file} failed: {e}")),
+            Some(&format!("unsquash {file} from {rev} failed: {e}")),
             stat,
         ),
     }
@@ -350,14 +368,14 @@ mod tests {
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         for key in [
-            "n   new",
-            "l   open log",
-            "d   describe",
-            "s   squash",
-            "U   unsquash",
-            "u   jj undo",
-            "g   refresh",
-            "q   close",
+            "n     new",
+            "l     open log",
+            "d     describe",
+            "s     squash",
+            "U     unsquash",
+            "u     jj undo",
+            "g     refresh",
+            "q     close",
         ] {
             assert!(
                 content.contains(key),
@@ -620,7 +638,7 @@ mod tests {
     fn run_squash_with_empty_file_reports_error() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
-        let uri = run_squash(&jj, dir.path(), "").expect("run_squash failed");
+        let uri = run_squash(&jj, dir.path(), "", "").expect("run_squash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(content.starts_with("MESSAGE: squash: no file selected"));
     }
@@ -635,7 +653,7 @@ mod tests {
         jj.new_change().unwrap();
         // Working copy modifies the file.
         std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
-        let uri = run_squash(&jj, dir.path(), "readme.txt").expect("run_squash failed");
+        let uri = run_squash(&jj, dir.path(), "readme.txt", "").expect("run_squash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(content.starts_with("STATUS:"));
         assert!(
@@ -648,10 +666,10 @@ mod tests {
     fn run_squash_reports_error_when_file_does_not_exist() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
-        let uri = run_squash(&jj, dir.path(), "does-not-exist.txt").expect("run_squash failed");
+        let uri = run_squash(&jj, dir.path(), "does-not-exist.txt", "").expect("run_squash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
-            content.starts_with("MESSAGE: squash does-not-exist.txt failed:"),
+            content.starts_with("MESSAGE: squash does-not-exist.txt from @ failed:"),
             "expected error message, got:\n{content}"
         );
     }
@@ -662,10 +680,10 @@ mod tests {
         let jj = init_repo(dir.path());
         std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
         // @ has no children — unsquash should fail with descriptive message.
-        let uri = run_unsquash(&jj, dir.path(), "readme.txt").expect("run_unsquash failed");
+        let uri = run_unsquash(&jj, dir.path(), "readme.txt", "").expect("run_unsquash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
-            content.starts_with("MESSAGE: unsquash readme.txt: working copy has 0 children"),
+            content.starts_with("MESSAGE: unsquash readme.txt from @: revision has 0 children"),
             "got:\n{content}"
         );
     }
@@ -674,7 +692,7 @@ mod tests {
     fn run_unsquash_with_empty_file_reports_error() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
-        let uri = run_unsquash(&jj, dir.path(), "").expect("run_unsquash failed");
+        let uri = run_unsquash(&jj, dir.path(), "", "").expect("run_unsquash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(content.starts_with("MESSAGE: unsquash: no file selected"));
     }
@@ -696,9 +714,70 @@ mod tests {
             .current_dir(dir.path())
             .output()
             .expect("jj edit failed");
-        let uri = run_unsquash(&jj, dir.path(), "readme.txt").expect("run_unsquash failed");
+        let uri = run_unsquash(&jj, dir.path(), "readme.txt", "").expect("run_unsquash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(content.starts_with("STATUS:"));
+    }
+
+    #[test]
+    fn run_unsquash_targets_explicit_revision() {
+        // Set up parent (has the file) → @ (the working copy / child of parent).
+        // Cursor in the stack section sits on parent's stat line. Unsquash with revision="@-"
+        // should move the file from parent → @ (its only child).
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
+        jj.describe_set("parent with the file").unwrap();
+        jj.new_change().unwrap();
+        // @ is now a fresh child of parent. Parent has the only copy of readme.txt.
+        let uri = run_unsquash(&jj, dir.path(), "readme.txt", "@-").expect("run_unsquash failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.starts_with("STATUS:"),
+            "expected status (operation should have succeeded), got:\n{content}"
+        );
+        // After unsquash, @ now owns the file change rather than the parent.
+        let status = jj.status().unwrap();
+        assert!(
+            status.contains("readme.txt"),
+            "expected readme.txt in working copy after unsquash; status was:\n{status}"
+        );
+    }
+
+    #[test]
+    fn run_squash_targets_explicit_revision() {
+        // parent (file) → middle (no diff) → @ (no diff).
+        // Squash readme.txt from "middle" should move from middle → parent.
+        // Since middle has no changes initially, set up so middle DOES have a change.
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        // Parent: empty.
+        jj.describe_set("parent").unwrap();
+        jj.new_change().unwrap();
+        // Middle (@): add readme.txt.
+        std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
+        jj.describe_set("middle").unwrap();
+        jj.new_change().unwrap();
+        // @: now child of middle.
+        let uri = run_squash(&jj, dir.path(), "readme.txt", "@-").expect("run_squash failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.starts_with("STATUS:"),
+            "expected status, got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn run_squash_with_explicit_revision_reports_parent_count() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        // root() has 0 parents — squashing from root should report 0 parents.
+        let uri = run_squash(&jj, dir.path(), "readme.txt", "root()").expect("run_squash failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.starts_with("MESSAGE: squash readme.txt from root(): revision has 0 parents"),
+            "got:\n{content}"
+        );
     }
 
     #[test]
@@ -793,7 +872,7 @@ mod tests {
         jj.new_change().unwrap();
         std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
         run_toggle_stat(&jj, dir.path()).unwrap(); // stat on
-        let uri = run_squash(&jj, dir.path(), "readme.txt").unwrap();
+        let uri = run_squash(&jj, dir.path(), "readme.txt", "").unwrap();
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
             content.contains("STATS: on"),

@@ -163,6 +163,12 @@
       {
         "command": "badjuju.unsquash.file",
         "key": "shift+u",
+        "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus && !vim.active"
+      },
+      {
+        "command": "badjuju.unsquash.file",
+        "key": "ctrl+k u",
+        "mac": "cmd+k u",
         "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
       },
       {

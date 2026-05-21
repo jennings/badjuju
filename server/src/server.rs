@@ -257,7 +257,12 @@ impl LanguageServer for Backend {
                     .first()
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let uri = commands::run_squash(&jj, &workspace, file).map_err(lsp_err)?;
+                let revision = params
+                    .arguments
+                    .get(1)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let uri = commands::run_squash(&jj, &workspace, file, revision).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.unsquash" => {
@@ -266,7 +271,13 @@ impl LanguageServer for Backend {
                     .first()
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let uri = commands::run_unsquash(&jj, &workspace, file).map_err(lsp_err)?;
+                let revision = params
+                    .arguments
+                    .get(1)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let uri =
+                    commands::run_unsquash(&jj, &workspace, file, revision).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.toggleStat" => {
