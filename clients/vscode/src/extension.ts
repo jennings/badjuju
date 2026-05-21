@@ -172,11 +172,44 @@ async function runFileScopedStatusCommand(
     allLines.push(editor.document.lineAt(i).text);
   }
   const revision = findRevisionForLine(allLines, cursorLine);
+  const reloaded = waitForDocumentChange(editor.document, 1500);
   const result = await client.sendRequest("workspace/executeCommand", {
     command: serverCommand,
     arguments: [file, revision],
   });
   await openServerResult(result as string);
+  await reloaded;
+  moveCursorToFile(file);
+}
+
+/**
+ * Move the cursor of the active status.jj editor onto the line that owns `file`.
+ *
+ * A file can appear twice when its destination is the working copy: once as
+ * `M file` in the STATUS section and again as a stat line under @ in the STACK
+ * section. Prefer the stat line so the cursor lands inside the commit context
+ * the user just operated on; only fall back to the STATUS line if no stat line
+ * exists (e.g. when STATS is off).
+ */
+function moveCursorToFile(file: string): void {
+  const editor = window.activeTextEditor;
+  if (!editor || !isStatusFile(editor.document.uri)) return;
+  const doc = editor.document;
+  let firstMatch = -1;
+  let firstStatMatch = -1;
+  for (let i = 0; i < doc.lineCount; i++) {
+    const text = doc.lineAt(i).text;
+    if (parseStatusFile(text) !== file) continue;
+    if (firstMatch === -1) firstMatch = i;
+    if (!STATUS_FILE_LINE_RE.test(text) && firstStatMatch === -1) {
+      firstStatMatch = i;
+    }
+  }
+  const target = firstStatMatch !== -1 ? firstStatMatch : firstMatch;
+  if (target === -1) return;
+  const pos = new Position(target, 0);
+  editor.selection = new Selection(pos, pos);
+  editor.revealRange(new Range(pos, pos), TextEditorRevealType.Default);
 }
 
 function resolveServerCommand(context: ExtensionContext): string {
