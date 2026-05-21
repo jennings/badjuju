@@ -132,6 +132,7 @@ dependencies = [
  "clap",
  "serde_json",
  "tempfile",
+ "thiserror",
  "tokio",
  "tower-lsp",
  "tracing",
