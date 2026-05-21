@@ -33,6 +33,35 @@ Place the cursor on a shortcut line and press Enter to apply it.
 d     describe commit at cursor (opens in a split)
 a     abandon commit at cursor";
 
+/// Client-supplied overrides for the in-buffer COMMAND REFERENCE blocks.
+/// Each field defaults to `None`, in which case the built-in VS Code-flavored
+/// constant above is used. The neovim client (and any future client whose
+/// keymap differs) supplies its own text via `initializationOptions`.
+#[derive(Debug, Default, Clone)]
+pub struct CommandReference {
+    status: Option<String>,
+    log: Option<String>,
+    diff: Option<String>,
+}
+
+impl CommandReference {
+    pub fn new(status: Option<String>, log: Option<String>, diff: Option<String>) -> Self {
+        Self { status, log, diff }
+    }
+
+    pub fn status(&self) -> &str {
+        self.status.as_deref().unwrap_or(STATUS_COMMAND_REFERENCE)
+    }
+
+    pub fn log(&self) -> &str {
+        self.log.as_deref().unwrap_or(LOG_COMMAND_REFERENCE)
+    }
+
+    pub fn diff(&self) -> &str {
+        self.diff.as_deref().unwrap_or(DIFF_COMMAND_REFERENCE)
+    }
+}
+
 /// Pre-defined revset shortcuts shown in the log.jujutsu header.
 /// Each entry is (label, revset). The label is also used to align columns.
 const LOG_SHORTCUTS: &[(&str, &str)] = &[
@@ -117,7 +146,7 @@ fn write_status(
         status.trim_end(),
         STATUS_REVSET,
         stack.trim_end(),
-        STATUS_COMMAND_REFERENCE,
+        jj.command_reference().status(),
     );
 
     let dir = badjuju_dir(workspace)?;
@@ -219,7 +248,7 @@ pub fn run_log(jj: &Jj, workspace: &Path, revset: &str) -> Result<String, Comman
         revset,
         render_log_shortcuts(),
         output.trim_end(),
-        LOG_COMMAND_REFERENCE,
+        jj.command_reference().log(),
     );
 
     let dir = badjuju_dir(workspace)?;
@@ -244,7 +273,7 @@ pub fn run_diff(jj: &Jj, workspace: &Path, revision: &str) -> Result<String, Com
         "REVISION: {}\n\nDIFF:\n\n{}\n\n{}",
         rev,
         output.trim_end(),
-        DIFF_COMMAND_REFERENCE,
+        jj.command_reference().diff(),
     );
 
     let dir = badjuju_dir(workspace)?;
@@ -549,6 +578,95 @@ mod tests {
                 "missing `{key}` in status command reference:\n{content}"
             );
         }
+    }
+
+    #[test]
+    fn command_reference_defaults_match_built_in_constants() {
+        let default = CommandReference::default();
+        assert_eq!(default.status(), STATUS_COMMAND_REFERENCE);
+        assert_eq!(default.log(), LOG_COMMAND_REFERENCE);
+        assert_eq!(default.diff(), DIFF_COMMAND_REFERENCE);
+    }
+
+    #[test]
+    fn command_reference_override_passes_through_each_buffer() {
+        let dir = tempdir().unwrap();
+        let reference = CommandReference::new(
+            Some("CUSTOM STATUS REF".to_string()),
+            Some("CUSTOM LOG REF".to_string()),
+            Some("CUSTOM DIFF REF".to_string()),
+        );
+        let jj = Jj::with_binary_or_default(None, dir.path()).with_command_reference(reference);
+        std::process::Command::new("jj")
+            .args(["git", "init"])
+            .current_dir(dir.path())
+            .output()
+            .expect("jj git init failed");
+
+        let status_uri = run_status(&jj, dir.path()).unwrap();
+        let status_content =
+            std::fs::read_to_string(status_uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            status_content.contains("CUSTOM STATUS REF"),
+            "expected status override in:\n{status_content}"
+        );
+        assert!(
+            !status_content.contains("Ctrl+n"),
+            "default reference text should not leak through when overridden:\n{status_content}"
+        );
+
+        let log_uri = run_log(&jj, dir.path(), "@").unwrap();
+        let log_content =
+            std::fs::read_to_string(log_uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            log_content.contains("CUSTOM LOG REF"),
+            "expected log override in:\n{log_content}"
+        );
+
+        let diff_uri = run_diff(&jj, dir.path(), "@").unwrap();
+        let diff_content =
+            std::fs::read_to_string(diff_uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            diff_content.contains("CUSTOM DIFF REF"),
+            "expected diff override in:\n{diff_content}"
+        );
+    }
+
+    #[test]
+    fn command_reference_partial_override_falls_back_per_field() {
+        let dir = tempdir().unwrap();
+        // Only override the log reference; status and diff should use defaults.
+        let reference = CommandReference::new(None, Some("LOG ONLY OVERRIDE".to_string()), None);
+        let jj = Jj::with_binary_or_default(None, dir.path()).with_command_reference(reference);
+        std::process::Command::new("jj")
+            .args(["git", "init"])
+            .current_dir(dir.path())
+            .output()
+            .expect("jj git init failed");
+
+        let status_content = std::fs::read_to_string(
+            run_status(&jj, dir.path())
+                .unwrap()
+                .strip_prefix("file://")
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            status_content.contains("Ctrl+n"),
+            "status reference should still be the default; got:\n{status_content}"
+        );
+
+        let log_content = std::fs::read_to_string(
+            run_log(&jj, dir.path(), "@")
+                .unwrap()
+                .strip_prefix("file://")
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            log_content.contains("LOG ONLY OVERRIDE"),
+            "log reference should be overridden; got:\n{log_content}"
+        );
     }
 
     #[test]

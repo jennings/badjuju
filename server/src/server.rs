@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 use tracing::{info, warn};
 
-use crate::commands;
+use crate::commands::{self, CommandReference};
 use crate::jj::Jj;
 use crate::workspace::find_workspace_root;
 
@@ -31,6 +31,10 @@ pub const COMMANDS: &[&str] = &[
 struct State {
     workspace_root: Option<PathBuf>,
     binary_path: Option<String>,
+    /// Client-supplied COMMAND REFERENCE overrides (one entry per generated
+    /// buffer). Captured at `initialize` time and attached to every `Jj`
+    /// instance the server creates.
+    command_reference: CommandReference,
     /// Latest text content for open documents, keyed by URI string.
     documents: HashMap<String, String>,
 }
@@ -38,10 +42,10 @@ struct State {
 impl State {
     fn jj(&self) -> Option<Jj> {
         let root = self.workspace_root.as_ref()?;
-        Some(Jj::with_binary_or_default(
-            self.binary_path.as_deref(),
-            root,
-        ))
+        Some(
+            Jj::with_binary_or_default(self.binary_path.as_deref(), root)
+                .with_command_reference(self.command_reference.clone()),
+        )
     }
 }
 
@@ -66,6 +70,19 @@ fn lsp_err(msg: impl ToString) -> Error {
     err
 }
 
+/// Parse the optional `commandReference` object passed in `initializationOptions`.
+/// Each of `status`, `log`, and `diff` is an optional string. Missing or
+/// non-string values fall back to the server's built-in defaults.
+fn parse_command_reference(value: &serde_json::Value) -> CommandReference {
+    let pick = |key: &str| -> Option<String> {
+        value
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    };
+    CommandReference::new(pick("status"), pick("log"), pick("diff"))
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
@@ -75,6 +92,13 @@ impl LanguageServer for Backend {
             .and_then(|o| o.get("binaryPath"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+
+        let command_reference = params
+            .initialization_options
+            .as_ref()
+            .and_then(|o| o.get("commandReference"))
+            .map(parse_command_reference)
+            .unwrap_or_default();
 
         let search_start = params
             .root_uri
@@ -93,6 +117,7 @@ impl LanguageServer for Backend {
         {
             let mut state = self.state.write().await;
             state.binary_path = binary_path;
+            state.command_reference = command_reference;
             state.workspace_root = workspace_root.clone();
         }
 

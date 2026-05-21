@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Arc;
+
+use crate::commands::CommandReference;
 
 #[derive(Debug, thiserror::Error)]
 pub enum JjError {
@@ -12,6 +15,7 @@ pub enum JjError {
 pub struct Jj {
     binary: PathBuf,
     workdir: PathBuf,
+    command_reference: Arc<CommandReference>,
 }
 
 impl Jj {
@@ -19,6 +23,7 @@ impl Jj {
         Self {
             binary: binary.into(),
             workdir: workdir.into(),
+            command_reference: Arc::new(CommandReference::default()),
         }
     }
 
@@ -26,6 +31,20 @@ impl Jj {
     pub fn with_binary_or_default(binary: Option<&str>, workdir: impl Into<PathBuf>) -> Self {
         let binary = binary.unwrap_or("jj");
         Self::new(binary, workdir)
+    }
+
+    /// Attach client-supplied command-reference overrides. Used by the LSP
+    /// entry point so editor-specific hotkey text is rendered into the
+    /// generated buffers. Returns `self` to support the builder pattern.
+    pub fn with_command_reference(mut self, reference: CommandReference) -> Self {
+        self.command_reference = Arc::new(reference);
+        self
+    }
+
+    /// Reference text overrides supplied by the client at initialize-time.
+    /// Falls back to the built-in defaults when a field is unset.
+    pub fn command_reference(&self) -> &CommandReference {
+        &self.command_reference
     }
 
     fn run(&self, args: &[&str]) -> Result<String, JjError> {
