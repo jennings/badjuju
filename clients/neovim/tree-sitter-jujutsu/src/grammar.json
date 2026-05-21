@@ -22,7 +22,15 @@
         },
         {
           "type": "SYMBOL",
-          "name": "_plain_line"
+          "name": "file_status_line"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_content_line"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_blank_line"
         }
       ]
     },
@@ -38,41 +46,41 @@
       }
     },
     "section_header": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "FIELD",
-          "name": "header",
-          "content": {
-            "type": "SYMBOL",
-            "name": "section_keyword"
-          }
-        },
-        {
-          "type": "STRING",
-          "value": ":"
-        },
-        {
-          "type": "FIELD",
-          "name": "trailing",
-          "content": {
-            "type": "SYMBOL",
-            "name": "section_trailing"
-          }
-        },
-        {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "STRING",
-              "value": "\n"
-            },
-            {
-              "type": "BLANK"
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "header",
+            "content": {
+              "type": "SYMBOL",
+              "name": "section_keyword"
             }
-          ]
-        }
-      ]
+          },
+          {
+            "type": "FIELD",
+            "name": "trailing",
+            "content": {
+              "type": "SYMBOL",
+              "name": "section_trailing"
+            }
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "\n"
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        ]
+      }
     },
     "section_keyword": {
       "type": "TOKEN",
@@ -81,7 +89,7 @@
         "value": 2,
         "content": {
           "type": "PATTERN",
-          "value": "[A-Z][A-Z ]*"
+          "value": "[A-Z][A-Z ]*:"
         }
       }
     },
@@ -89,9 +97,113 @@
       "type": "PATTERN",
       "value": "[^\\n]*"
     },
-    "_plain_line": {
+    "file_status_line": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "file_status"
+          },
+          {
+            "type": "REPEAT",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_content_atom"
+            }
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "\n"
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "file_status": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 2,
+        "content": {
+          "type": "PATTERN",
+          "value": "[AMDR] "
+        }
+      }
+    },
+    "_content_line": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "_content_atom"
+          },
+          {
+            "type": "REPEAT",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_content_atom"
+            }
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "\n"
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "_blank_line": {
+      "type": "STRING",
+      "value": "\n"
+    },
+    "_content_atom": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "empty_marker"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "bookmark"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_content_text"
+        }
+      ]
+    },
+    "empty_marker": {
       "type": "PATTERN",
-      "value": "[^\\n]*\\n?"
+      "value": "\\((empty|no description set)\\)"
+    },
+    "bookmark": {
+      "type": "PATTERN",
+      "value": "\\[[^\\]\\n]+\\]"
+    },
+    "_content_text": {
+      "type": "PATTERN",
+      "value": "[^\\x5b(\\n]+|\\(|\\["
     }
   },
   "extras": [],

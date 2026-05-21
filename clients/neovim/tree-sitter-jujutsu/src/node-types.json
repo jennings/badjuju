@@ -1,5 +1,28 @@
 [
   {
+    "type": "file_status_line",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "bookmark",
+          "named": true
+        },
+        {
+          "type": "empty_marker",
+          "named": true
+        },
+        {
+          "type": "file_status",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "section_header",
     "named": true,
     "fields": {
@@ -35,6 +58,18 @@
       "required": false,
       "types": [
         {
+          "type": "bookmark",
+          "named": true
+        },
+        {
+          "type": "empty_marker",
+          "named": true
+        },
+        {
+          "type": "file_status_line",
+          "named": true
+        },
+        {
           "type": "jj_comment",
           "named": true
         },
@@ -50,8 +85,16 @@
     "named": false
   },
   {
-    "type": ":",
-    "named": false
+    "type": "bookmark",
+    "named": true
+  },
+  {
+    "type": "empty_marker",
+    "named": true
+  },
+  {
+    "type": "file_status",
+    "named": true
   },
   {
     "type": "jj_comment",
