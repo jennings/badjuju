@@ -17,6 +17,8 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.describe",
     "badjuju.diff",
     "badjuju.new",
+    "badjuju.next",
+    "badjuju.prev",
     "badjuju.refresh",
     "badjuju.squash",
     "badjuju.unsquash",
@@ -258,6 +260,24 @@ impl LanguageServer for Backend {
                 let uri = commands::run_new(&jj, &workspace).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
+            "badjuju.next" => {
+                let edit = params
+                    .arguments
+                    .first()
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let uri = commands::run_next(&jj, &workspace, edit).map_err(lsp_err)?;
+                Ok(Some(serde_json::Value::String(uri)))
+            }
+            "badjuju.prev" => {
+                let edit = params
+                    .arguments
+                    .first()
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let uri = commands::run_prev(&jj, &workspace, edit).map_err(lsp_err)?;
+                Ok(Some(serde_json::Value::String(uri)))
+            }
             "badjuju.refresh" => {
                 let doc_uri = params
                     .arguments
@@ -334,6 +354,8 @@ mod tests {
         assert!(COMMANDS.contains(&"badjuju.describe"));
         assert!(COMMANDS.contains(&"badjuju.diff"));
         assert!(COMMANDS.contains(&"badjuju.new"));
+        assert!(COMMANDS.contains(&"badjuju.next"));
+        assert!(COMMANDS.contains(&"badjuju.prev"));
         assert!(COMMANDS.contains(&"badjuju.refresh"));
         assert!(COMMANDS.contains(&"badjuju.squash"));
         assert!(COMMANDS.contains(&"badjuju.unsquash"));

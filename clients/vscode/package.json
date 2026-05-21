@@ -89,6 +89,26 @@
         "title": "New commit"
       },
       {
+        "command": "badjuju.next.open",
+        "category": "jj",
+        "title": "Move working copy forward (jj next)"
+      },
+      {
+        "command": "badjuju.next.edit",
+        "category": "jj",
+        "title": "Edit next change in place (jj next --edit)"
+      },
+      {
+        "command": "badjuju.prev.open",
+        "category": "jj",
+        "title": "Move working copy back (jj prev)"
+      },
+      {
+        "command": "badjuju.prev.edit",
+        "category": "jj",
+        "title": "Edit previous change in place (jj prev --edit)"
+      },
+      {
         "command": "badjuju.refresh.open",
         "category": "jj",
         "title": "Refresh"
@@ -143,6 +163,30 @@
       {
         "command": "badjuju.new.open",
         "key": "n",
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.next.open",
+        "key": "ctrl+n",
+        "mac": "cmd+n",
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.prev.open",
+        "key": "ctrl+p",
+        "mac": "cmd+p",
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.next.edit",
+        "key": "ctrl+shift+n",
+        "mac": "cmd+shift+n",
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.prev.edit",
+        "key": "ctrl+shift+p",
+        "mac": "cmd+shift+p",
         "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {

@@ -363,6 +363,34 @@ export async function activate(context: ExtensionContext) {
       });
       await openServerResult(result as string);
     }),
+    commands.registerCommand("badjuju.next.open", async () => {
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.next",
+        arguments: [false],
+      });
+      await openServerResult(result as string);
+    }),
+    commands.registerCommand("badjuju.next.edit", async () => {
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.next",
+        arguments: [true],
+      });
+      await openServerResult(result as string);
+    }),
+    commands.registerCommand("badjuju.prev.open", async () => {
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.prev",
+        arguments: [false],
+      });
+      await openServerResult(result as string);
+    }),
+    commands.registerCommand("badjuju.prev.edit", async () => {
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.prev",
+        arguments: [true],
+      });
+      await openServerResult(result as string);
+    }),
     commands.registerCommand("badjuju.refresh.open", async () => {
       const activeDoc = window.activeTextEditor?.document.uri;
       const serverUri =

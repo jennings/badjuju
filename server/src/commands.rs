@@ -6,16 +6,20 @@ const STATUS_REVSET: &str = "ancestors(reachable(@, mutable()), 2)";
 
 const STATUS_COMMAND_REFERENCE: &str = "\
 COMMAND REFERENCE:
-n     new change
-l     open log
-d     describe commit at cursor (opens in a split)
-s     squash file at cursor into parent
-U     unsquash file at cursor from parent into child   (or Cmd+K U / Ctrl+K U when vim shadows U)
-a     abandon commit at cursor (or working copy)
-u     jj undo (revert last operation)
-=     toggle --stat on the stack log
-g     refresh
-q     close";
+n            new change
+l            open log
+d            describe commit at cursor (opens in a split)
+s            squash file at cursor into parent
+U            unsquash file at cursor from parent into child   (or Cmd+K U / Ctrl+K U when vim shadows U)
+a            abandon commit at cursor (or working copy)
+u            jj undo (revert last operation)
+Cmd+n        jj next (move working copy forward)
+Cmd+p        jj prev (move working copy back)
+Cmd+Shift+n  jj next --edit (edit the child in place)
+Cmd+Shift+p  jj prev --edit (edit the parent in place)
+=            toggle --stat on the stack log
+g            refresh
+q            close";
 
 const LOG_COMMAND_REFERENCE: &str = "\
 COMMAND REFERENCE:
@@ -312,6 +316,34 @@ pub fn run_new(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     run_status(jj, workspace)
 }
 
+/// Run `badjuju.next`: move the working copy to a child revision (`jj next`),
+/// optionally with `--edit`. On failure, surface the error as a MESSAGE prelude
+/// in the status buffer (typical when @ has no descendants).
+pub fn run_next(jj: &Jj, workspace: &Path, edit: bool) -> Result<String, CommandError> {
+    let stat = read_current_stat(workspace);
+    match jj.next_change(edit) {
+        Ok(()) => run_status(jj, workspace),
+        Err(e) => {
+            let label = if edit { "next --edit" } else { "next" };
+            write_status(jj, workspace, Some(&format!("{label} failed: {e}")), stat)
+        }
+    }
+}
+
+/// Run `badjuju.prev`: move the working copy to an ancestor revision (`jj prev`),
+/// optionally with `--edit`. On failure, surface the error as a MESSAGE prelude
+/// in the status buffer.
+pub fn run_prev(jj: &Jj, workspace: &Path, edit: bool) -> Result<String, CommandError> {
+    let stat = read_current_stat(workspace);
+    match jj.prev_change(edit) {
+        Ok(()) => run_status(jj, workspace),
+        Err(e) => {
+            let label = if edit { "prev --edit" } else { "prev" };
+            write_status(jj, workspace, Some(&format!("{label} failed: {e}")), stat)
+        }
+    }
+}
+
 /// Run `badjuju.undo`: revert the last operation with `jj undo`, then refresh status.
 /// Surfaces failures as a MESSAGE: prelude in the status buffer.
 pub fn run_undo(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
@@ -467,15 +499,19 @@ mod tests {
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         for key in [
-            "n     new",
-            "l     open log",
-            "d     describe",
-            "s     squash",
-            "U     unsquash",
-            "a     abandon",
-            "u     jj undo",
-            "g     refresh",
-            "q     close",
+            "n            new",
+            "l            open log",
+            "d            describe",
+            "s            squash",
+            "U            unsquash",
+            "a            abandon",
+            "u            jj undo",
+            "Cmd+n        jj next",
+            "Cmd+p        jj prev",
+            "Cmd+Shift+n  jj next --edit",
+            "Cmd+Shift+p  jj prev --edit",
+            "g            refresh",
+            "q            close",
         ] {
             assert!(
                 content.contains(key),
@@ -1222,6 +1258,64 @@ mod tests {
         assert!(
             read_current_stat(dir.path()),
             "squash should preserve stat=on"
+        );
+    }
+
+    #[test]
+    fn run_next_with_no_descendants_reports_error_in_status() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        // Fresh repo: @ has no descendants. `jj next` should fail and surface
+        // the error as a MESSAGE prelude rather than propagating it.
+        let uri = run_next(&jj, dir.path(), false).expect("run_next failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.starts_with("MESSAGE: next failed:"),
+            "expected MESSAGE prelude on next failure, got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn run_prev_moves_working_copy_and_refreshes_status() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        jj.describe_set("@", "parent").unwrap();
+        jj.new_change().unwrap();
+        jj.describe_set("@", "child").unwrap();
+        let uri = run_prev(&jj, dir.path(), false).expect("run_prev failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.starts_with("STATUS:"),
+            "expected status, got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn run_prev_with_edit_moves_at_to_parent() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        jj.describe_set("@", "parent").unwrap();
+        jj.new_change().unwrap();
+        jj.describe_set("@", "child").unwrap();
+        run_prev(&jj, dir.path(), true).expect("run_prev edit failed");
+        let desc = jj.describe_get("@").unwrap();
+        assert!(
+            desc.contains("parent"),
+            "expected @ on parent after prev --edit; got: {desc}"
+        );
+    }
+
+    #[test]
+    fn run_next_preserves_stat_state_on_failure() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        run_toggle_stat(&jj, dir.path()).unwrap(); // stat on
+        // Fresh repo's @ has no descendants → next fails → status is rendered
+        // with stat preserved.
+        run_next(&jj, dir.path(), false).expect("run_next failed");
+        assert!(
+            read_current_stat(dir.path()),
+            "next failure should preserve stat=on"
         );
     }
 

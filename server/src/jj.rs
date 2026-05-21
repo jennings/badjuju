@@ -89,6 +89,30 @@ impl Jj {
         Ok(())
     }
 
+    /// Move the working copy forward to a child revision (`jj next`).
+    /// When `edit` is true, edit that child in place instead of creating a
+    /// new empty change on top of it.
+    pub fn next_change(&self, edit: bool) -> Result<(), JjError> {
+        if edit {
+            self.run(&["next", "--edit"])?;
+        } else {
+            self.run(&["next"])?;
+        }
+        Ok(())
+    }
+
+    /// Move the working copy backward to an ancestor revision (`jj prev`).
+    /// When `edit` is true, edit that ancestor in place instead of creating
+    /// a new empty change on top of it.
+    pub fn prev_change(&self, edit: bool) -> Result<(), JjError> {
+        if edit {
+            self.run(&["prev", "--edit"])?;
+        } else {
+            self.run(&["prev"])?;
+        }
+        Ok(())
+    }
+
     /// Run `jj undo` to revert the last operation.
     pub fn undo(&self) -> Result<(), JjError> {
         self.run(&["undo"])?;
@@ -383,6 +407,50 @@ mod tests {
             before, after,
             "@ should still be the same change after --keep-emptied squash; before: {before:?}, after: {after:?}"
         );
+    }
+
+    #[test]
+    fn next_change_advances_working_copy() {
+        // Set up: parent → @ . `jj prev` first to back up, then `next` should
+        // land on a fresh empty change on top of the original @.
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        jj.describe_set("@", "root commit").unwrap();
+        jj.new_change().unwrap();
+        jj.describe_set("@", "leaf").unwrap();
+        // Back up one step; the new @ is an empty change above "root commit".
+        jj.prev_change(false).expect("prev failed");
+        let parents = jj.change_ids("@-").unwrap();
+        assert!(
+            !parents.is_empty(),
+            "expected @ to have a parent after prev"
+        );
+    }
+
+    #[test]
+    fn prev_change_with_edit_moves_to_parent() {
+        // Layout: parent → @. `prev --edit` should move @ onto the parent,
+        // not create a new commit. So describe_get("@") should return "parent".
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        jj.describe_set("@", "parent description").unwrap();
+        jj.new_change().unwrap();
+        jj.describe_set("@", "child description").unwrap();
+        jj.prev_change(true).expect("prev --edit failed");
+        let desc = jj.describe_get("@").unwrap();
+        assert!(
+            desc.contains("parent description"),
+            "expected @ to be on parent after prev --edit; got: {desc}"
+        );
+    }
+
+    #[test]
+    fn next_change_with_no_descendants_returns_error() {
+        // Fresh repo: @ has no descendants, so `jj next` should fail.
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let result = jj.next_change(false);
+        assert!(matches!(result, Err(JjError::JjFailed { .. })));
     }
 
     #[test]
