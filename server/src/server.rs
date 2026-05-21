@@ -6,6 +6,7 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 use tracing::{info, warn};
 
+use crate::commands;
 use crate::jj::Jj;
 use crate::workspace::find_workspace_root;
 
@@ -118,14 +119,21 @@ impl LanguageServer for Backend {
         let state = self.state.read().await;
         let jj = state.jj().ok_or_else(|| Error::invalid_request())?;
 
+        let workspace = state
+            .workspace_root
+            .clone()
+            .ok_or_else(Error::invalid_request)?;
+
+        let map_err = |e: commands::CommandError| {
+            let mut err = Error::internal_error();
+            err.message = e.to_string().into();
+            err
+        };
+
         match params.command.as_str() {
             "badjuju.status" => {
-                let output = jj.status().map_err(|e| {
-                    let mut err = Error::internal_error();
-                    err.message = e.to_string().into();
-                    err
-                })?;
-                Ok(Some(serde_json::Value::String(output)))
+                let uri = commands::run_status(&jj, &workspace).map_err(map_err)?;
+                Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.log" => {
                 let revset = params
@@ -133,16 +141,19 @@ impl LanguageServer for Backend {
                     .first()
                     .and_then(|v| v.as_str())
                     .unwrap_or("@");
-                let output = jj.log(revset).map_err(|e| {
-                    let mut err = Error::internal_error();
-                    err.message = e.to_string().into();
-                    err
-                })?;
-                Ok(Some(serde_json::Value::String(output)))
+                let uri = commands::run_log(&jj, &workspace, revset).map_err(map_err)?;
+                Ok(Some(serde_json::Value::String(uri)))
             }
-            "badjuju.describe" | "badjuju.new" => {
+            "badjuju.describe" => {
+                let uri = commands::run_describe(&jj, &workspace).map_err(map_err)?;
+                Ok(Some(serde_json::Value::String(uri)))
+            }
+            "badjuju.new" => {
                 self.client
-                    .log_message(MessageType::INFO, format!("command: {}", params.command))
+                    .log_message(
+                        MessageType::INFO,
+                        "command: badjuju.new (not yet implemented)",
+                    )
                     .await;
                 Ok(None)
             }
