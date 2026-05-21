@@ -290,7 +290,26 @@ export async function activate(context: ExtensionContext) {
     initializationOptions,
   };
 
+  // Watch badjuju output files so server-side rewrites (e.g. on describe save
+  // regenerating status.jujutsu / log.jujutsu) propagate to open editors.
+  // Regular file:// buffers (log.jujutsu) reload automatically; the readonly
+  // scheme used for status/diff requires firing the content provider.
+  const outputWatcher = workspace.createFileSystemWatcher(
+    "**/.jj/badjuju/*.jujutsu",
+  );
+  outputWatcher.onDidChange((uri) => {
+    if (isReadonlyOutput(uri)) {
+      statusProvider.refresh(toReadonlyUri(uri));
+    }
+  });
+  outputWatcher.onDidCreate((uri) => {
+    if (isReadonlyOutput(uri)) {
+      statusProvider.refresh(toReadonlyUri(uri));
+    }
+  });
+
   context.subscriptions.push(
+    outputWatcher,
     workspace.registerTextDocumentContentProvider(
       READONLY_SCHEME,
       statusProvider,

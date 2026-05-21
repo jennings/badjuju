@@ -452,15 +452,31 @@ pub fn parse_describe_revision(content: &str) -> Option<String> {
 }
 
 /// On describe.jujutsu save: apply stripped description via `jj describe -r REV`,
-/// then regenerate status.jujutsu. The revision is taken from the embedded
-/// `JJ: revision:` header so the description routes back to the same commit
-/// that was opened, even when @ has since moved.
+/// then regenerate status.jujutsu and, when an existing log.jujutsu is present,
+/// regenerate it too so its rendered descriptions stay in sync. The revision is
+/// taken from the embedded `JJ: revision:` header so the description routes
+/// back to the same commit that was opened, even when @ has since moved.
 pub fn on_describe_save(jj: &Jj, workspace: &Path, content: &str) -> Result<(), CommandError> {
     if let Some(desc) = parse_describe_content(content) {
         let rev = parse_describe_revision(content).unwrap_or_else(|| "@".to_string());
         jj.describe_set(&rev, &desc)?;
         run_status(jj, workspace)?;
+        regenerate_log_if_present(jj, workspace)?;
     }
+    Ok(())
+}
+
+/// Regenerate log.jujutsu when it already exists on disk (i.e. the log window
+/// has been opened in this workspace). Preserves the persisted REVSET header
+/// so the same query is re-run. No-op when the file is absent.
+fn regenerate_log_if_present(jj: &Jj, workspace: &Path) -> Result<(), CommandError> {
+    let log_path = workspace.join(".jj").join("badjuju").join("log.jujutsu");
+    if !log_path.exists() {
+        return Ok(());
+    }
+    let content = std::fs::read_to_string(&log_path)?;
+    let revset = parse_log_revset(&content).unwrap_or_else(|| DEFAULT_LOG_REVSET.to_string());
+    run_log(jj, workspace, &revset)?;
     Ok(())
 }
 
@@ -846,6 +862,44 @@ mod tests {
         on_describe_save(&jj, dir.path(), content).expect("on_describe_save failed");
         let desc = jj.describe_get("@").unwrap();
         assert!(desc.contains("new description"));
+    }
+
+    #[test]
+    fn on_describe_save_regenerates_log_when_present() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        jj.describe_set("@", "before").unwrap();
+        // Open a log window so log.jujutsu exists on disk with a known REVSET.
+        run_log(&jj, dir.path(), "@").unwrap();
+        let content = "after\n\nJJ: separator\nJJ: revision: @\n";
+        on_describe_save(&jj, dir.path(), content).expect("on_describe_save failed");
+        let log_path = dir.path().join(".jj/badjuju/log.jujutsu");
+        let new_log = std::fs::read_to_string(&log_path).unwrap();
+        assert!(
+            new_log.starts_with("REVSET: @"),
+            "expected REVSET header preserved; got:\n{new_log}"
+        );
+        assert!(
+            new_log.contains("after"),
+            "expected refreshed log to show new description; got:\n{new_log}"
+        );
+        assert!(
+            !new_log.contains("before"),
+            "expected log no longer to show old description; got:\n{new_log}"
+        );
+    }
+
+    #[test]
+    fn on_describe_save_skips_log_regen_when_absent() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let content = "new desc\n\nJJ: separator\nJJ: revision: @\n";
+        on_describe_save(&jj, dir.path(), content).expect("on_describe_save failed");
+        let log_path = dir.path().join(".jj/badjuju/log.jujutsu");
+        assert!(
+            !log_path.exists(),
+            "log.jujutsu should not be created when it didn't already exist"
+        );
     }
 
     #[test]
