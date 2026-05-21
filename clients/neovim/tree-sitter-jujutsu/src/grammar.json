@@ -6,12 +6,92 @@
       "type": "REPEAT",
       "content": {
         "type": "SYMBOL",
-        "name": "_any"
+        "name": "_line"
       }
     },
-    "_any": {
+    "_line": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "jj_comment"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "section_header"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_plain_line"
+        }
+      ]
+    },
+    "jj_comment": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 3,
+        "content": {
+          "type": "PATTERN",
+          "value": "JJ:[^\\n]*\\n?"
+        }
+      }
+    },
+    "section_header": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "header",
+          "content": {
+            "type": "SYMBOL",
+            "name": "section_keyword"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ":"
+        },
+        {
+          "type": "FIELD",
+          "name": "trailing",
+          "content": {
+            "type": "SYMBOL",
+            "name": "section_trailing"
+          }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "\n"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        }
+      ]
+    },
+    "section_keyword": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 2,
+        "content": {
+          "type": "PATTERN",
+          "value": "[A-Z][A-Z ]*"
+        }
+      }
+    },
+    "section_trailing": {
       "type": "PATTERN",
-      "value": "[\\s\\S]"
+      "value": "[^\\n]*"
+    },
+    "_plain_line": {
+      "type": "PATTERN",
+      "value": "[^\\n]*\\n?"
     }
   },
   "extras": [],
