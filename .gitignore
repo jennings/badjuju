@@ -5,6 +5,7 @@ clients/vscode/out/
 clients/vscode/dist/
 clients/neovim/.test-deps/
 /configuration
+*.vsix
 
 # Beads / Dolt files (added by bd init)
 .dolt/
