@@ -11,3 +11,6 @@ clients/neovim/.test-deps/
 .dolt/
 *.db
 .beads-credential-key
+
+# Per-developer Claude Code overrides — settings.json is shared, .local is not.
+.claude/settings.local.json
