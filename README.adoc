@@ -41,3 +41,43 @@ redo
 ----
 redo test
 ----
+
+== Development
+
+To work on Bad Juju locally:
+
+. Install the prerequisites listed above, including
+  https://github.com/apenwarr/redo[redo] (`brew install redo` on macOS).
+. Install JS dependencies and build the workspace:
++
+[source,shell]
+----
+pnpm install
+redo
+----
+. Install the `badjuju` server binary to your Cargo bin directory (`~/.cargo/bin`):
++
+[source,shell]
+----
+redo server/install
+----
++
+The build configuration (`debug` or `release`) is read from the `configuration`
+file at the repo root.
+. Iterate on the VS Code extension:
+.. Open the `clients/vscode` directory in VS Code (open it as the workspace root,
+   not the repo root, so the launch config and `package.json` scripts resolve
+   correctly).
+.. Press kbd:[F5] to launch an Extension Development Host with the extension
+   loaded. Open a Jujutsu repo inside the host window and run a command such as
+   `Bad Juju: Open status window` from the command palette to exercise the
+   extension.
+.. Edits to `clients/vscode/src/` are picked up by rebuilding (`redo
+   clients/vscode/all`) and restarting the Extension Development Host.
+. Before committing, run the CI-equivalent check (formatting, clippy, tests,
+  Biome):
++
+[source,shell]
+----
+redo check
+----
