@@ -74,7 +74,7 @@ export async function activate(context: ExtensionContext) {
       const doc = await workspace.openTextDocument(Uri.parse(result as string));
       await window.showTextDocument(doc, { preserveFocus: false });
     }),
-    commands.registerCommand("badjuju.new", async () => {
+    commands.registerCommand("badjuju.new.open", async () => {
       const result = await client.sendRequest("workspace/executeCommand", {
         command: "badjuju.new",
         arguments: [],
@@ -82,7 +82,7 @@ export async function activate(context: ExtensionContext) {
       const doc = await workspace.openTextDocument(Uri.parse(result as string));
       await window.showTextDocument(doc, { preserveFocus: false });
     }),
-    commands.registerCommand("badjuju.refresh", async () => {
+    commands.registerCommand("badjuju.refresh.open", async () => {
       const activeUri = window.activeTextEditor?.document.uri.toString() ?? "";
       const result = await client.sendRequest("workspace/executeCommand", {
         command: "badjuju.refresh",

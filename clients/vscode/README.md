@@ -9,7 +9,8 @@ Editor integration for the [Jujutsu VCS](https://jj-vcs.github.io/jj/) via the B
 | `badjuju.status.open` | Bad Juju: Open status window | Show working copy status and stack |
 | `badjuju.log.open` | Bad Juju: Open log | Open the revision log |
 | `badjuju.describe.open` | Bad Juju: Describe working copy | Edit the current commit message |
-| `badjuju.new` | Bad Juju: New commit | Create a new empty change (`jj new`) |
+| `badjuju.new.open` | Bad Juju: New commit | Create a new empty change (`jj new`) |
+| `badjuju.refresh.open` | Bad Juju: Refresh | Re-run the command behind the current buffer |
 
 ## Settings
 

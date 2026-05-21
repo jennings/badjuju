@@ -81,27 +81,27 @@
         "title": "Bad Juju: Open log"
       },
       {
-        "command": "badjuju.new",
+        "command": "badjuju.new.open",
         "title": "Bad Juju: New commit"
       },
       {
-        "command": "badjuju.refresh",
+        "command": "badjuju.refresh.open",
         "title": "Bad Juju: Refresh"
       }
     ],
     "keybindings": [
       {
-        "command": "badjuju.refresh",
+        "command": "badjuju.refresh.open",
         "key": "g",
         "when": "resourceLangId == jujutsu && editorTextFocus"
       },
       {
-        "command": "badjuju.refresh",
+        "command": "badjuju.refresh.open",
         "key": "r",
         "when": "resourceLangId == jujutsu && editorTextFocus"
       },
       {
-        "command": "badjuju.new",
+        "command": "badjuju.new.open",
         "key": "n",
         "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
       },
