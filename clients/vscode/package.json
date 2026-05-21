@@ -133,98 +133,98 @@
       {
         "command": "badjuju.refresh.open",
         "key": "g",
-        "when": "resourceFilename == status.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.refresh.open",
         "key": "r",
-        "when": "resourceFilename == status.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.new.open",
         "key": "n",
-        "when": "resourceFilename == status.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.log.open",
         "key": "l",
-        "when": "resourceFilename == status.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.describe.open",
         "key": "d",
-        "when": "resourceFilename == status.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "workbench.action.closeActiveEditor",
         "key": "q",
-        "when": "resourceFilename == status.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.squash.file",
         "key": "s",
-        "when": "resourceFilename == status.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.undo.open",
         "key": "u",
-        "when": "resourceFilename == status.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.unsquash.file",
         "key": "shift+u",
-        "when": "resourceFilename == status.jujutsu && resourceLangId == jujutsu && editorTextFocus && !vim.active"
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !vim.active"
       },
       {
         "command": "badjuju.unsquash.file",
         "key": "ctrl+k u",
         "mac": "cmd+k u",
-        "when": "resourceFilename == status.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.toggleStat.open",
         "key": "=",
-        "when": "resourceFilename == status.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.log.applyShortcut",
         "key": "enter",
-        "when": "badjuju.onLogShortcutLine && resourceFilename == log.jujutsu && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
+        "when": "badjuju.onLogShortcutLine && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
       },
       {
         "command": "badjuju.abandon.cursor",
         "key": "a",
-        "when": "resourceFilename == status.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.abandon.cursor",
         "key": "a",
-        "when": "resourceFilename == log.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.diff.cursor",
         "key": "shift+d",
-        "when": "resourceFilename == status.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.diff.cursor",
         "key": "shift+d",
-        "when": "resourceFilename == log.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.refresh.open",
         "key": "g",
-        "when": "resourceFilename == diff.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.refresh.open",
         "key": "r",
-        "when": "resourceFilename == diff.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "workbench.action.closeActiveEditor",
         "key": "q",
-        "when": "resourceFilename == diff.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       }
     ]
   }
