@@ -1,4 +1,5 @@
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
+import * as path from "node:path";
 import {
   commands,
   type Disposable,
@@ -111,11 +112,19 @@ async function openServerResult(resultUri: string): Promise<void> {
   await window.showTextDocument(doc, { preserveFocus: false });
 }
 
+function resolveServerCommand(context: ExtensionContext): string {
+  if (process.env.SERVER_PATH) return process.env.SERVER_PATH;
+  const binaryName = process.platform === "win32" ? "badjuju.exe" : "badjuju";
+  const bundled = path.join(context.extensionPath, "out", "bin", binaryName);
+  if (existsSync(bundled)) return bundled;
+  return "badjuju";
+}
+
 export async function activate(context: ExtensionContext) {
   const traceOutputChannel = window.createOutputChannel(
     "Bad Juju - Jujutsu VCS",
   );
-  const command = process.env.SERVER_PATH || "badjuju";
+  const command = resolveServerCommand(context);
   const run: Executable = {
     command,
     args: ["lsp"],
