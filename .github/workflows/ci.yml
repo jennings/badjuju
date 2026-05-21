@@ -38,7 +38,7 @@ jobs:
       - name: Install redo
         run: |
           git clone --depth 1 https://github.com/apenwarr/redo /tmp/redo
-          cd /tmp/redo && sudo ./do install
+          cd /tmp/redo && sudo DESTDIR= ./do install
 
       - name: Check (fmt + clippy + test)
         run: redo server/check
@@ -61,7 +61,7 @@ jobs:
       - name: Install redo
         run: |
           git clone --depth 1 https://github.com/apenwarr/redo /tmp/redo
-          cd /tmp/redo && sudo ./do install
+          cd /tmp/redo && sudo DESTDIR= ./do install
 
       - name: Install dependencies
         run: pnpm install
