@@ -299,14 +299,40 @@ pub fn parse_describe_content(content: &str) -> Option<String> {
     }
 }
 
-/// Extract the revset from the `REVSET: <revset>` header line of log.jj.
+/// Extract the revset from the `REVSET:` header block of log.jj.
+///
+/// The block begins on the line starting with `REVSET: ` and continues across
+/// subsequent lines until a blank line or an `OUTPUT:` section header is
+/// reached. `JJ:` comment lines inside the block are skipped, so the rendered
+/// shortcut comments don't bleed into the revset. Continuation lines preserve
+/// the user's formatting (trimmed of trailing whitespace) and are joined with
+/// newlines — jj treats newlines as ordinary whitespace inside a revset.
 pub fn parse_log_revset(content: &str) -> Option<String> {
-    content
-        .lines()
-        .next()
-        .and_then(|line| line.strip_prefix("REVSET: "))
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+    let mut lines = content.lines();
+    let first = lines.next()?.strip_prefix("REVSET:")?;
+    let mut parts: Vec<String> = Vec::new();
+    let first = first.strip_prefix(' ').unwrap_or(first).trim_end();
+    if !first.is_empty() {
+        parts.push(first.to_string());
+    }
+    for line in lines {
+        if line.is_empty() || line.starts_with("OUTPUT:") {
+            break;
+        }
+        if line.starts_with("JJ:") {
+            continue;
+        }
+        let trimmed_end = line.trim_end();
+        if !trimmed_end.is_empty() {
+            parts.push(trimmed_end.to_string());
+        }
+    }
+    let joined = parts.join("\n");
+    if joined.trim().is_empty() {
+        None
+    } else {
+        Some(joined)
+    }
 }
 
 /// On describe.jj save: apply stripped description via jj describe, then regenerate status.jj.
@@ -560,6 +586,54 @@ mod tests {
     fn parse_log_revset_returns_none_for_empty_revset() {
         let content = "REVSET: \n\nlog output";
         assert_eq!(parse_log_revset(content), None);
+    }
+
+    #[test]
+    fn parse_log_revset_accepts_multiline_revset() {
+        let content = "REVSET: @\n| @-\n| @--\n\nOUTPUT:\n\nlog output";
+        assert_eq!(
+            parse_log_revset(content),
+            Some("@\n| @-\n| @--".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_log_revset_skips_jj_comments_inside_block() {
+        let content = "REVSET: @\nJJ: Mutable:  ancestors(reachable(@, mutable()))\nJJ: Stack:    (immutable_heads()..@)::\n\nOUTPUT:\n\nlog output";
+        assert_eq!(parse_log_revset(content), Some("@".to_string()));
+    }
+
+    #[test]
+    fn parse_log_revset_skips_jj_comments_between_revset_lines() {
+        let content =
+            "REVSET: @\nJJ: a shortcut hint\n| @-\nJJ: another comment\n\nOUTPUT:\n\nlog output";
+        assert_eq!(parse_log_revset(content), Some("@\n| @-".to_string()));
+    }
+
+    #[test]
+    fn parse_log_revset_stops_at_blank_line() {
+        let content = "REVSET: @\n| @-\n\n| @-- (should not be included)\nOUTPUT:\n\nlog output";
+        assert_eq!(parse_log_revset(content), Some("@\n| @-".to_string()));
+    }
+
+    #[test]
+    fn parse_log_revset_handles_only_continuation_lines() {
+        // First REVSET: line is empty, but a continuation line provides the revset.
+        let content = "REVSET:\n@ | @-\n\nOUTPUT:\n\nlog output";
+        assert_eq!(parse_log_revset(content), Some("@ | @-".to_string()));
+    }
+
+    #[test]
+    fn on_log_save_handles_multiline_revset() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let content = "REVSET: @\n| @-\n\nOUTPUT:\n\nstale";
+        let uri = on_log_save(&jj, dir.path(), content).expect("on_log_save failed");
+        let new_content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            new_content.starts_with("REVSET: @\n| @-\n"),
+            "expected multi-line REVSET header to roundtrip, got:\n{new_content}"
+        );
     }
 
     #[test]
