@@ -70,27 +70,33 @@
     "commands": [
       {
         "command": "badjuju.status.open",
-        "title": "Bad Juju: Open status window"
+        "category": "jj",
+        "title": "Open status window"
       },
       {
         "command": "badjuju.describe.open",
-        "title": "Bad Juju: Describe working copy"
+        "category": "jj",
+        "title": "Describe working copy"
       },
       {
         "command": "badjuju.log.open",
-        "title": "Bad Juju: Open log"
+        "category": "jj",
+        "title": "Open log"
       },
       {
         "command": "badjuju.new.open",
-        "title": "Bad Juju: New commit"
+        "category": "jj",
+        "title": "New commit"
       },
       {
         "command": "badjuju.refresh.open",
-        "title": "Bad Juju: Refresh"
+        "category": "jj",
+        "title": "Refresh"
       },
       {
         "command": "badjuju.log.applyShortcut",
-        "title": "Bad Juju: Apply revset shortcut under cursor"
+        "category": "jj",
+        "title": "Apply revset shortcut under cursor"
       }
     ],
     "keybindings": [
