@@ -58,5 +58,7 @@ All commands send a `workspace/executeCommand` request to the running
 | `:JJUndo` | Run `jj undo` and refresh |
 | `:JJAbandon [revision]` | Abandon a revision (defaults to `@`) |
 
-All commands require an active `jujutsu` LSP client. Open any `.jj` file in a
-jj workspace first to start the server.
+Commands auto-start the `jujutsu` LSP for the current workspace if it isn't
+already running, so `:JJStatus` works from any buffer inside a jj workspace
+(no need to open a `.jj` file first). Outside a jj workspace, the command
+reports an error.

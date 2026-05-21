@@ -38,14 +38,60 @@ function M.get_client()
   return clients[1]
 end
 
+--- Locate the .jj workspace root from the current buffer's path or cwd.
+--- Returns nil when neither is inside a jj workspace.
+---@return string?
+function M.find_workspace_root()
+  local source = vim.api.nvim_buf_get_name(0)
+  if source == '' then
+    source = vim.fn.getcwd()
+  end
+  return vim.fs.root(source, '.jj')
+end
+
+--- Start the jujutsu LSP client for the current workspace, without attaching
+--- to any buffer. Returns the client (existing or freshly started), or nil if
+--- the current location isn't inside a jj workspace.
+---@return vim.lsp.Client?
+function M.ensure_client()
+  local existing = M.get_client()
+  if existing then
+    return existing
+  end
+
+  local root = M.find_workspace_root()
+  if not root then
+    return nil
+  end
+
+  local init_options
+  if M.config.binary_path and M.config.binary_path ~= '' then
+    init_options = { binaryPath = M.config.binary_path }
+  end
+
+  local client_id = vim.lsp.start({
+    name = CLIENT_NAME,
+    cmd = { 'badjuju', 'lsp' },
+    root_dir = root,
+    init_options = init_options,
+  }, { attach = false })
+
+  if not client_id then
+    return nil
+  end
+  return vim.lsp.get_client_by_id(client_id)
+end
+
 --- Send workspace/executeCommand to the jujutsu LSP and open the returned file URI.
+--- Starts the LSP client on demand if none is attached, so :JJ* commands work
+--- from any buffer inside a jj workspace (not only after opening a .jj file).
 ---@param command string  badjuju.* server command name
 ---@param arguments any[]?  optional arguments forwarded to the server
 function M.execute(command, arguments)
-  local client = M.get_client()
+  local client = M.ensure_client()
   if not client then
     vim.notify(
-      'badjuju: no jujutsu LSP client attached. Open a .jj file in a jj workspace first.',
+      'badjuju: not in a jj workspace (no .jj directory found from current buffer or cwd).',
       vim.log.levels.ERROR
     )
     return
