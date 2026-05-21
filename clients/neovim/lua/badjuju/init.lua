@@ -49,9 +49,20 @@ function M.find_workspace_root()
   return vim.fs.root(source, '.jj')
 end
 
+--- Maximum time (ms) M.ensure_client() will block waiting for a freshly-started
+--- LSP client to finish its initialize handshake.
+local INITIALIZE_TIMEOUT_MS = 2000
+
 --- Start the jujutsu LSP client for the current workspace, without attaching
 --- to any buffer. Returns the client (existing or freshly started), or nil if
 --- the current location isn't inside a jj workspace.
+---
+--- Blocks until the client finishes the LSP initialize handshake. vim.lsp.start
+--- returns as soon as the child process is spawned, but tower-lsp rejects
+--- workspace/executeCommand requests sent before the initialized notification
+--- with "Server not initialized" — which is what the first :JJStatus call
+--- after a fresh start would otherwise hit. vim.wait pumps the event loop so
+--- the response message can actually be processed.
 ---@return vim.lsp.Client?
 function M.ensure_client()
   local existing = M.get_client()
@@ -79,7 +90,23 @@ function M.ensure_client()
   if not client_id then
     return nil
   end
-  return vim.lsp.get_client_by_id(client_id)
+
+  local client = vim.lsp.get_client_by_id(client_id)
+  if client and not client.initialized then
+    vim.wait(INITIALIZE_TIMEOUT_MS, function()
+      return client.initialized == true
+    end, 10)
+    if not client.initialized then
+      vim.notify(
+        'badjuju: LSP server failed to initialize within '
+          .. INITIALIZE_TIMEOUT_MS
+          .. 'ms.',
+        vim.log.levels.ERROR
+      )
+      return nil
+    end
+  end
+  return client
 end
 
 --- Send workspace/executeCommand to the jujutsu LSP and open the returned file URI.
