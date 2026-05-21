@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use tower_lsp::lsp_types::Url;
+
 use crate::jj::{Jj, JjError};
 
 const STATUS_REVSET: &str = "ancestors(reachable(@, mutable()), 2)";
@@ -93,8 +95,26 @@ fn badjuju_dir(workspace: &Path) -> std::io::Result<PathBuf> {
     Ok(dir)
 }
 
+/// Render an absolute filesystem path as a `file://` URI the client can open.
+///
+/// Uses [`Url::from_file_path`] so the result is well-formed on every platform.
+/// On Unix the output is `file:///abs/path`; on Windows it's
+/// `file:///C:/Users/…` — note the leading `/` before the drive letter. A naive
+/// `format!("file://{}", path.display())` produces `file://C:\Users\…` on
+/// Windows, which VS Code rejects with "Unable to read file '\'" (bad-juju-z5j).
 fn file_uri(path: &Path) -> String {
-    format!("file://{}", path.display())
+    Url::from_file_path(path)
+        .expect("badjuju output paths are always absolute")
+        .to_string()
+}
+
+/// Inverse of [`file_uri`]: convert a `file://` URI back to a filesystem path.
+///
+/// Returns `None` for non-`file:` URIs or paths the URL crate can't decode
+/// (e.g. relative paths, missing Windows drive prefixes). Used by `run_refresh`
+/// to read the file the client just told us to regenerate.
+fn path_from_uri(uri: &str) -> Option<PathBuf> {
+    Url::parse(uri).ok()?.to_file_path().ok()
 }
 
 /// Run `badjuju.status`: write status.jujutsu (preserving any current STATS toggle) and return its URI.
@@ -327,21 +347,24 @@ pub fn run_describe(jj: &Jj, workspace: &Path, revision: &str) -> Result<String,
 
 /// Run `badjuju.refresh`: regenerate the file identified by `uri`.
 /// For status.jujutsu → regenerate status. For log.jujutsu → re-run log with current REVSET header.
+/// Falls back to status when the URI doesn't decode to a known badjuju buffer.
 pub fn run_refresh(jj: &Jj, workspace: &Path, uri: &str) -> Result<String, CommandError> {
-    let path = uri.strip_prefix("file://").unwrap_or(uri);
-    let filename = std::path::Path::new(path)
+    let Some(path) = path_from_uri(uri) else {
+        return run_status(jj, workspace);
+    };
+    let filename = path
         .file_name()
         .and_then(|n| n.to_str())
-        .unwrap_or("");
+        .unwrap_or_default();
 
     match filename {
         "log.jujutsu" => {
-            let content = std::fs::read_to_string(path)?;
+            let content = std::fs::read_to_string(&path)?;
             let revset = parse_log_revset(&content).unwrap_or_else(|| "@".to_string());
             run_log(jj, workspace, &revset)
         }
         "diff.jujutsu" => {
-            let content = std::fs::read_to_string(path)?;
+            let content = std::fs::read_to_string(&path)?;
             let revision = parse_diff_revision(&content).unwrap_or_else(|| "@".to_string());
             run_diff(jj, workspace, &revision)
         }
@@ -817,6 +840,45 @@ mod tests {
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         assert!(content.contains("my feature work"));
+    }
+
+    #[test]
+    fn file_uri_uses_three_slashes_and_roundtrips() {
+        // file:// URIs must have three slashes before the absolute path:
+        // file:///abs/path on Unix, file:///C:/… on Windows. The naive
+        // `format!("file://{}", path.display())` produced the right shape on
+        // Unix by accident (path starts with "/") but emitted file://C:\… on
+        // Windows, which VS Code couldn't open.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("foo.jujutsu");
+        std::fs::write(&path, "hi").unwrap();
+        let uri = file_uri(&path);
+        assert!(
+            uri.starts_with("file:///"),
+            "expected three slashes; got: {uri}"
+        );
+        let parsed = path_from_uri(&uri).expect("uri should roundtrip");
+        assert_eq!(parsed, path);
+    }
+
+    #[test]
+    fn path_from_uri_rejects_non_file_scheme() {
+        assert_eq!(path_from_uri("http://example.com/foo"), None);
+        assert_eq!(path_from_uri("not a uri at all"), None);
+        assert_eq!(path_from_uri(""), None);
+    }
+
+    #[test]
+    fn run_refresh_with_garbage_uri_falls_back_to_status() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        // A malformed URI shouldn't crash — earlier code panicked on Windows
+        // because `Path::new("/C:/...")` after the naive strip wasn't a valid
+        // path. With path_from_uri the unparseable case takes the status
+        // fallback.
+        let refreshed = run_refresh(&jj, dir.path(), "not a uri").unwrap();
+        let content = std::fs::read_to_string(refreshed.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.contains("STATUS:"));
     }
 
     #[test]
