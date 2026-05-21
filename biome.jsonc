@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**", "!.beads/**", "!.claude/**"]
+    "includes": ["**", "!.beads/**"]
   },
   "formatter": {
     "enabled": true,
