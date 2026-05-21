@@ -1,11 +1,17 @@
 import { promises as fs } from "node:fs";
 import {
   commands,
+  type Disposable,
   EventEmitter,
   type ExtensionContext,
   languages,
+  Position,
+  Range,
+  Selection,
+  type TextDocument,
   type TextDocumentContentProvider,
   type TextEditor,
+  TextEditorRevealType,
   Uri,
   window,
   workspace,
@@ -48,6 +54,26 @@ function isStatusFile(uri: Uri): boolean {
 
 function isLogFile(uri: Uri): boolean {
   return uri.path.endsWith("/log.jj");
+}
+
+function waitForDocumentChange(
+  doc: TextDocument,
+  timeoutMs: number,
+): Promise<void> {
+  return new Promise((resolve) => {
+    const disposables: Disposable[] = [];
+    const done = () => {
+      for (const d of disposables) d.dispose();
+      resolve();
+    };
+    disposables.push(
+      workspace.onDidChangeTextDocument((e) => {
+        if (e.document === doc) done();
+      }),
+    );
+    const timer = setTimeout(done, timeoutMs);
+    disposables.push({ dispose: () => clearTimeout(timer) });
+  });
 }
 
 function updateLogShortcutContext(editor: TextEditor | undefined): void {
@@ -154,18 +180,29 @@ export async function activate(context: ExtensionContext) {
     commands.registerCommand("badjuju.log.applyShortcut", async () => {
       const editor = window.activeTextEditor;
       if (!editor) return;
-      const lineText = editor.document.lineAt(
-        editor.selection.active.line,
-      ).text;
+      const cursorLine = editor.selection.active.line;
+      const cursorChar = editor.selection.active.character;
+      const doc = editor.document;
+      const lineText = doc.lineAt(cursorLine).text;
       const match = lineText.match(LOG_SHORTCUT_LINE_RE);
       if (!match) return;
       const revset = match[2].trim();
-      const result = await client.sendRequest("workspace/executeCommand", {
+
+      const reloaded = waitForDocumentChange(doc, 1000);
+      await client.sendRequest("workspace/executeCommand", {
         command: "badjuju.log",
         arguments: [revset],
       });
-      const doc = await workspace.openTextDocument(Uri.parse(result as string));
-      await window.showTextDocument(doc, { preserveFocus: false });
+      await reloaded;
+
+      const restoredLine = Math.min(cursorLine, doc.lineCount - 1);
+      const restoredChar = Math.min(
+        cursorChar,
+        doc.lineAt(restoredLine).text.length,
+      );
+      const pos = new Position(restoredLine, restoredChar);
+      editor.selection = new Selection(pos, pos);
+      editor.revealRange(new Range(pos, pos), TextEditorRevealType.Default);
     }),
     window.onDidChangeTextEditorSelection((e) => {
       updateLogShortcutContext(e.textEditor);
