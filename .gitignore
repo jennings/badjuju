@@ -3,6 +3,7 @@ target/
 node_modules/
 clients/vscode/out/
 clients/vscode/dist/
+/configuration
 
 # Beads / Dolt files (added by bd init)
 .dolt/
