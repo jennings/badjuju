@@ -31,11 +31,33 @@ describe('keymap.setup_for_buffer', function()
     end
   end)
 
-  it('installs log.jujutsu maps for refresh, abandon, and describe', function()
+  it('installs log.jujutsu maps for refresh, abandon, describe, and diff', function()
     local buf = open_named('.jj/badjuju/log.jujutsu')
-    for _, key in ipairs({ 'g', 'r', 'a', 'd' }) do
+    for _, key in ipairs({ 'g', 'r', 'a', 'd', 'D' }) do
       local found = has_buffer_map(buf, key)
       assert.is_true(found, 'expected log.jujutsu map for ' .. key)
+    end
+  end)
+
+  it('installs D for diff on status.jujutsu', function()
+    local buf = open_named('.jj/badjuju/status.jujutsu')
+    local found = has_buffer_map(buf, 'D')
+    assert.is_true(found, 'expected status.jujutsu map for D')
+  end)
+
+  it('installs diff.jujutsu maps for refresh and close', function()
+    local buf = open_named('.jj/badjuju/diff.jujutsu')
+    for _, key in ipairs({ 'g', 'r', 'q' }) do
+      local found = has_buffer_map(buf, key)
+      assert.is_true(found, 'expected diff.jujutsu map for ' .. key)
+    end
+  end)
+
+  it('does NOT install commit-action maps on diff.jujutsu', function()
+    local buf = open_named('.jj/badjuju/diff.jujutsu')
+    for _, key in ipairs({ 'n', 'l', 'd', 'D', 'a', '=', 'u', 's', 'U' }) do
+      local found = has_buffer_map(buf, key)
+      assert.is_false(found, 'diff.jujutsu should not bind ' .. key)
     end
   end)
 

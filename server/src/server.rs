@@ -15,6 +15,7 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.status",
     "badjuju.log",
     "badjuju.describe",
+    "badjuju.diff",
     "badjuju.new",
     "badjuju.refresh",
     "badjuju.squash",
@@ -241,8 +242,16 @@ impl LanguageServer for Backend {
                     .first()
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let uri =
-                    commands::run_describe(&jj, &workspace, revision).map_err(lsp_err)?;
+                let uri = commands::run_describe(&jj, &workspace, revision).map_err(lsp_err)?;
+                Ok(Some(serde_json::Value::String(uri)))
+            }
+            "badjuju.diff" => {
+                let revision = params
+                    .arguments
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let uri = commands::run_diff(&jj, &workspace, revision).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.new" => {
@@ -323,6 +332,7 @@ mod tests {
         assert!(COMMANDS.contains(&"badjuju.status"));
         assert!(COMMANDS.contains(&"badjuju.log"));
         assert!(COMMANDS.contains(&"badjuju.describe"));
+        assert!(COMMANDS.contains(&"badjuju.diff"));
         assert!(COMMANDS.contains(&"badjuju.new"));
         assert!(COMMANDS.contains(&"badjuju.refresh"));
         assert!(COMMANDS.contains(&"badjuju.squash"));

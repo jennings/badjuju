@@ -116,6 +116,17 @@ function isLogFile(uri: Uri): boolean {
   return uri.path.endsWith("/log.jujutsu");
 }
 
+function isDiffFile(uri: Uri): boolean {
+  return uri.path.endsWith("/diff.jujutsu");
+}
+
+// Generated buffers the server rewrites on every command must open through
+// the readonly scheme. log.jujutsu is intentionally excluded — its REVSET
+// header is editable and re-runs the query on save.
+function isReadonlyOutput(uri: Uri): boolean {
+  return isStatusFile(uri) || isDiffFile(uri);
+}
+
 function waitForDocumentChange(
   doc: TextDocument,
   timeoutMs: number,
@@ -157,18 +168,25 @@ function toFileUri(readonlyUri: Uri): Uri {
   return readonlyUri.with({ scheme: "file" });
 }
 
-async function openServerResult(resultUri: string): Promise<void> {
+async function openServerResult(
+  resultUri: string,
+  opts: { aside?: boolean } = {},
+): Promise<void> {
   const parsed = Uri.parse(resultUri);
-  if (parsed.scheme === "file" && isStatusFile(parsed)) {
+  const showOpts = {
+    preserveFocus: false,
+    viewColumn: opts.aside ? -2 : undefined, // -2 = ViewColumn.Beside
+  };
+  if (parsed.scheme === "file" && isReadonlyOutput(parsed)) {
     const readonlyUri = toReadonlyUri(parsed);
     statusProvider.refresh(readonlyUri);
     const doc = await workspace.openTextDocument(readonlyUri);
     await languages.setTextDocumentLanguage(doc, "jujutsu");
-    await window.showTextDocument(doc, { preserveFocus: false });
+    await window.showTextDocument(doc, showOpts);
     return;
   }
   const doc = await workspace.openTextDocument(parsed);
-  await window.showTextDocument(doc, { preserveFocus: false });
+  await window.showTextDocument(doc, showOpts);
 }
 
 async function runFileScopedStatusCommand(
@@ -376,6 +394,35 @@ export async function activate(context: ExtensionContext) {
         arguments: [],
       });
       await openServerResult(result as string);
+    }),
+    commands.registerCommand("badjuju.diff.cursor", async () => {
+      const editor = window.activeTextEditor;
+      let revision = "@";
+      if (editor) {
+        const uri = editor.document.uri;
+        const lines: string[] = [];
+        for (let i = 0; i < editor.document.lineCount; i++) {
+          lines.push(editor.document.lineAt(i).text);
+        }
+        const cursorLine = editor.selection.active.line;
+        if (isStatusFile(uri)) {
+          revision = findRevisionForLine(lines, cursorLine);
+        } else if (isLogFile(uri)) {
+          const found = findLogRevision(lines, cursorLine);
+          if (!found) {
+            window.showInformationMessage(
+              "diff: place cursor on a commit line",
+            );
+            return;
+          }
+          revision = found;
+        }
+      }
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.diff",
+        arguments: [revision],
+      });
+      await openServerResult(result as string, { aside: true });
     }),
     commands.registerCommand("badjuju.abandon.cursor", async () => {
       const editor = window.activeTextEditor;

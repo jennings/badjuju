@@ -102,7 +102,8 @@ All commands send a `workspace/executeCommand` request to the running
 |---|---|
 | `:JJStatus` | Open `.jj/badjuju/status.jujutsu` |
 | `:JJLog [revset]` | Open `.jj/badjuju/log.jujutsu`; defaults to `@` |
-| `:JJDescribe` | Open the describe buffer for the working copy |
+| `:JJDescribe [revision]` | Open the describe buffer for a revision (defaults to `@`) |
+| `:JJDiff [revision]` | Open `.jj/badjuju/diff.jujutsu` for a revision (defaults to `@`) |
 | `:JJNew` | Create a new change and refresh log |
 | `:JJRefresh` | Refresh the badjuju buffer at the cursor |
 | `:JJSquash [file] [revision]` | Squash a file into its parent (see `s` keymap below) |
@@ -129,7 +130,8 @@ in the COMMAND REFERENCE block at the bottom of each buffer.
 | `g`, `r` | refresh |
 | `n` | `:JJNew` — create a new change |
 | `l` | `:JJLog` — open log |
-| `d` | `:JJDescribe` — edit the working-copy description |
+| `d` | describe the commit under the cursor in a split (defaults to `@`) |
+| `D` | open the diff for the commit under the cursor in a split (defaults to `@`) |
 | `s` | squash the file under the cursor into its parent |
 | `U` | unsquash the file under the cursor from parent into child |
 | `a` | abandon the commit under the cursor (defaults to `@`) |
@@ -142,5 +144,14 @@ in the COMMAND REFERENCE block at the bottom of each buffer.
 | Key | Action |
 |---|---|
 | `g`, `r` | refresh |
+| `d` | describe the commit under the cursor in a split |
+| `D` | open the diff for the commit under the cursor in a split |
 | `a` | abandon the commit under the cursor |
 | `<CR>` | apply the revset shortcut on the current line (no-op elsewhere) |
+
+### `diff.jujutsu`
+
+| Key | Action |
+|---|---|
+| `g`, `r` | refresh (re-runs `jj diff` for the same revision) |
+| `q` | close the window |

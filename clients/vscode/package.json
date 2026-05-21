@@ -122,6 +122,11 @@
         "command": "badjuju.abandon.cursor",
         "category": "jj",
         "title": "Abandon commit at cursor (or working copy)"
+      },
+      {
+        "command": "badjuju.diff.cursor",
+        "category": "jj",
+        "title": "Show diff for commit at cursor"
       }
     ],
     "keybindings": [
@@ -195,6 +200,31 @@
         "command": "badjuju.abandon.cursor",
         "key": "a",
         "when": "resourceFilename == log.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.diff.cursor",
+        "key": "shift+d",
+        "when": "resourceFilename == status.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.diff.cursor",
+        "key": "shift+d",
+        "when": "resourceFilename == log.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.refresh.open",
+        "key": "g",
+        "when": "resourceFilename == diff.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.refresh.open",
+        "key": "r",
+        "when": "resourceFilename == diff.jujutsu && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "workbench.action.closeActiveEditor",
+        "key": "q",
+        "when": "resourceFilename == diff.jujutsu && resourceLangId == jujutsu && editorTextFocus"
       }
     ]
   }

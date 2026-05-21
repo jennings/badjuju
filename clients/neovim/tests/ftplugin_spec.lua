@@ -31,6 +31,12 @@ describe('ftplugin/jujutsu.lua', function()
     assert.is_true(vim.bo.readonly)
   end)
 
+  it('makes diff.jujutsu buffers read-only', function()
+    make_buffer('.jj/badjuju/diff.jujutsu')
+    assert.is_false(vim.bo.modifiable)
+    assert.is_true(vim.bo.readonly)
+  end)
+
   it('leaves log.jujutsu buffers modifiable (REVSET header is editable)', function()
     make_buffer('.jj/badjuju/log.jujutsu')
     assert.is_true(vim.bo.modifiable)

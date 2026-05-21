@@ -214,6 +214,44 @@ pub fn run_log(jj: &Jj, workspace: &Path, revset: &str) -> Result<String, Comman
     Ok(file_uri(&path))
 }
 
+const DIFF_COMMAND_REFERENCE: &str = "\
+COMMAND REFERENCE:
+g     refresh
+q     close";
+
+/// Run `badjuju.diff`: write diff.jujutsu showing `jj diff -r REV` for the
+/// given revision (defaults to `@` when empty). Embeds a `REVISION:` header
+/// so refresh can re-run against the same commit.
+pub fn run_diff(jj: &Jj, workspace: &Path, revision: &str) -> Result<String, CommandError> {
+    let rev = revision_or_at(revision);
+    let output = jj.diff(rev)?;
+
+    let content = format!(
+        "REVISION: {}\n\nDIFF:\n\n{}\n\n{}",
+        rev,
+        output.trim_end(),
+        DIFF_COMMAND_REFERENCE,
+    );
+
+    let dir = badjuju_dir(workspace)?;
+    let path = dir.join("diff.jujutsu");
+    std::fs::write(&path, content)?;
+    Ok(file_uri(&path))
+}
+
+/// Extract the revision from the `REVISION:` header of diff.jujutsu. Used by
+/// `run_refresh` so refreshing a diff buffer re-runs against the same commit
+/// rather than falling back to status.
+pub fn parse_diff_revision(content: &str) -> Option<String> {
+    let first = content.lines().next()?;
+    let rest = first.strip_prefix("REVISION:")?.trim();
+    if rest.is_empty() {
+        None
+    } else {
+        Some(rest.to_string())
+    }
+}
+
 /// Run `badjuju.describe`: write describe.jujutsu with the current description
 /// of `revision` (defaults to `@` when empty). Embeds a `JJ: revision: <rev>`
 /// header line so `on_describe_save` can route the saved description back to
@@ -258,6 +296,11 @@ pub fn run_refresh(jj: &Jj, workspace: &Path, uri: &str) -> Result<String, Comma
             let content = std::fs::read_to_string(path)?;
             let revset = parse_log_revset(&content).unwrap_or_else(|| "@".to_string());
             run_log(jj, workspace, &revset)
+        }
+        "diff.jujutsu" => {
+            let content = std::fs::read_to_string(path)?;
+            let revision = parse_diff_revision(&content).unwrap_or_else(|| "@".to_string());
+            run_diff(jj, workspace, &revision)
         }
         _ => run_status(jj, workspace),
     }
@@ -750,6 +793,82 @@ mod tests {
         on_describe_save(&jj, dir.path(), content).expect("on_describe_save failed");
         let desc = jj.describe_get("@").unwrap();
         assert!(desc.contains("original description"));
+    }
+
+    #[test]
+    fn run_diff_writes_file_with_revision_header() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("readme.txt"), "hello\n").unwrap();
+        jj.describe_set("@", "add readme").unwrap();
+        let uri = run_diff(&jj, dir.path(), "@").expect("run_diff failed");
+        let path = uri.strip_prefix("file://").unwrap();
+        let content = std::fs::read_to_string(path).unwrap();
+        assert!(
+            content.starts_with("REVISION: @\n"),
+            "missing REVISION header:\n{content}"
+        );
+        assert!(
+            content.contains("DIFF:"),
+            "missing DIFF section:\n{content}"
+        );
+        assert!(
+            content.contains("readme.txt"),
+            "diff body should mention readme.txt:\n{content}"
+        );
+        assert!(
+            content.contains("COMMAND REFERENCE:"),
+            "missing command reference:\n{content}"
+        );
+    }
+
+    #[test]
+    fn run_diff_with_empty_revision_defaults_to_at() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_diff(&jj, dir.path(), "").expect("run_diff failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.starts_with("REVISION: @\n"));
+    }
+
+    #[test]
+    fn run_diff_writes_file_to_badjuju_dir() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_diff(&jj, dir.path(), "@").expect("run_diff failed");
+        let path = uri.strip_prefix("file://").unwrap();
+        assert!(
+            path.ends_with(".jj/badjuju/diff.jujutsu"),
+            "unexpected path: {path}"
+        );
+    }
+
+    #[test]
+    fn parse_diff_revision_extracts_header() {
+        let content = "REVISION: abc123\n\nDIFF:\n...";
+        assert_eq!(parse_diff_revision(content), Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn parse_diff_revision_returns_none_for_missing_header() {
+        let content = "no header here\n";
+        assert_eq!(parse_diff_revision(content), None);
+    }
+
+    #[test]
+    fn parse_diff_revision_returns_none_for_empty_value() {
+        let content = "REVISION:   \n";
+        assert_eq!(parse_diff_revision(content), None);
+    }
+
+    #[test]
+    fn run_refresh_with_diff_uri_regenerates_diff() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let diff_uri = run_diff(&jj, dir.path(), "@").unwrap();
+        let refreshed = run_refresh(&jj, dir.path(), &diff_uri).expect("run_refresh failed");
+        let content = std::fs::read_to_string(refreshed.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.starts_with("REVISION: @"));
     }
 
     #[test]
