@@ -78,6 +78,25 @@ pub fn run_describe(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     Ok(file_uri(&path))
 }
 
+/// Run `badjuju.refresh`: regenerate the file identified by `uri`.
+/// For status.jj → regenerate status. For log.jj → re-run log with current REVSET header.
+pub fn run_refresh(jj: &Jj, workspace: &Path, uri: &str) -> Result<String, CommandError> {
+    let path = uri.strip_prefix("file://").unwrap_or(uri);
+    let filename = std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+
+    match filename {
+        "log.jj" => {
+            let content = std::fs::read_to_string(path)?;
+            let revset = parse_log_revset(&content).unwrap_or_else(|| "@".to_string());
+            run_log(jj, workspace, &revset)
+        }
+        _ => run_status(jj, workspace),
+    }
+}
+
 /// Run `badjuju.new`: create a new change and regenerate status.jj. Returns the status URI.
 pub fn run_new(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     jj.new_change()?;
@@ -267,6 +286,37 @@ mod tests {
         on_describe_save(&jj, dir.path(), content).expect("on_describe_save failed");
         let desc = jj.describe_get().unwrap();
         assert!(desc.contains("original description"));
+    }
+
+    #[test]
+    fn run_refresh_with_status_uri_regenerates_status() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let status_uri = run_status(&jj, dir.path()).unwrap();
+        let refreshed = run_refresh(&jj, dir.path(), &status_uri).expect("run_refresh failed");
+        assert!(refreshed.starts_with("file://"));
+        let content = std::fs::read_to_string(refreshed.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.contains("STATUS:"));
+    }
+
+    #[test]
+    fn run_refresh_with_log_uri_regenerates_log() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let log_uri = run_log(&jj, dir.path(), "@").unwrap();
+        let refreshed = run_refresh(&jj, dir.path(), &log_uri).expect("run_refresh failed");
+        assert!(refreshed.starts_with("file://"));
+        let content = std::fs::read_to_string(refreshed.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.contains("REVSET:"));
+    }
+
+    #[test]
+    fn run_refresh_with_empty_uri_falls_back_to_status() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_refresh(&jj, dir.path(), "").expect("run_refresh failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.contains("STATUS:"));
     }
 
     #[test]
