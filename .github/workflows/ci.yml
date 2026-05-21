@@ -4,12 +4,20 @@ on:
   push:
   pull_request:
 
+# Read-only by default; jobs override only if they need more.
+permissions:
+  contents: read
+
 jobs:
   rust:
     name: Rust
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -46,8 +54,12 @@ jobs:
   neovim:
     name: Neovim
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install Neovim
         uses: rhysd/action-setup-vim@v1
@@ -78,8 +90,12 @@ jobs:
   typescript:
     name: TypeScript
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4

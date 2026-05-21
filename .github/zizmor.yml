@@ -1,0 +1,10 @@
+# Zizmor configuration — https://docs.zizmor.sh/configuration/
+#
+# Allow tag-pinning for `uses:` references (e.g. `actions/checkout@v4`) rather
+# than enforcing zizmor's default blanket hash-pin policy. The project uses
+# tag-pinning consistently in .github/workflows.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "*": ref-pin
