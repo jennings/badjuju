@@ -21,6 +21,7 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.unsquash",
     "badjuju.toggleStat",
     "badjuju.undo",
+    "badjuju.abandon",
 ];
 
 #[derive(Debug, Default)]
@@ -288,6 +289,15 @@ impl LanguageServer for Backend {
                 let uri = commands::run_undo(&jj, &workspace).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
+            "badjuju.abandon" => {
+                let revision = params
+                    .arguments
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let uri = commands::run_abandon(&jj, &workspace, revision).map_err(lsp_err)?;
+                Ok(Some(serde_json::Value::String(uri)))
+            }
             _ => Err(Error::method_not_found()),
         }
     }
@@ -313,5 +323,6 @@ mod tests {
         assert!(COMMANDS.contains(&"badjuju.unsquash"));
         assert!(COMMANDS.contains(&"badjuju.toggleStat"));
         assert!(COMMANDS.contains(&"badjuju.undo"));
+        assert!(COMMANDS.contains(&"badjuju.abandon"));
     }
 }

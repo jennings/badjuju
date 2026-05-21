@@ -11,6 +11,7 @@ l     open log
 d     describe
 s     squash file at cursor into parent
 U     unsquash file at cursor from parent into child   (or Cmd+K U / Ctrl+K U when vim shadows U)
+a     abandon commit at cursor (or working copy)
 u     jj undo (revert last operation)
 =     toggle --stat on the stack log
 g     refresh
@@ -284,6 +285,22 @@ pub fn run_undo(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     }
 }
 
+/// Run `badjuju.abandon`: abandon `revision` (defaults to `@`) and refresh status.
+/// Surfaces failures as a MESSAGE: prelude in the status buffer.
+pub fn run_abandon(jj: &Jj, workspace: &Path, revision: &str) -> Result<String, CommandError> {
+    let stat = read_current_stat(workspace);
+    let rev = revision_or_at(revision);
+    match jj.abandon(rev) {
+        Ok(()) => run_status(jj, workspace),
+        Err(e) => write_status(
+            jj,
+            workspace,
+            Some(&format!("abandon {rev} failed: {e}")),
+            stat,
+        ),
+    }
+}
+
 /// Strip JJ: comment lines and the separator from describe.jj content.
 /// Returns the trimmed description, or `None` if nothing remains.
 pub fn parse_describe_content(content: &str) -> Option<String> {
@@ -399,6 +416,7 @@ mod tests {
             "d     describe",
             "s     squash",
             "U     unsquash",
+            "a     abandon",
             "u     jj undo",
             "g     refresh",
             "q     close",
@@ -867,6 +885,69 @@ mod tests {
         assert!(
             desc.contains("first"),
             "expected undo to roll back to first; got: {desc}"
+        );
+    }
+
+    #[test]
+    fn run_abandon_abandons_explicit_revision_and_refreshes_status() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        // Create stack: parent → middle → @. Abandon middle.
+        jj.describe_set("parent").unwrap();
+        jj.new_change().unwrap();
+        jj.describe_set("middle to abandon").unwrap();
+        jj.new_change().unwrap();
+        let middle_id = jj.change_ids("@-").unwrap().first().cloned().unwrap();
+        let uri = run_abandon(&jj, dir.path(), &middle_id).expect("run_abandon failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.starts_with("STATUS:"));
+        let log = jj.log("::@").unwrap();
+        assert!(
+            !log.contains("middle to abandon"),
+            "expected middle change abandoned; log still shows it:\n{log}"
+        );
+    }
+
+    #[test]
+    fn run_abandon_with_invalid_revision_reports_error() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_abandon(&jj, dir.path(), "not-a-real-change")
+            .expect("run_abandon should still produce a status URI on error");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.starts_with("MESSAGE: abandon not-a-real-change failed:"),
+            "expected error MESSAGE prelude, got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn run_abandon_with_empty_revision_defaults_to_at() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        jj.describe_set("a description").unwrap();
+        let uri = run_abandon(&jj, dir.path(), "").expect("run_abandon failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.starts_with("STATUS:"));
+        // After abandoning @, the new working copy should be empty (no description carried over).
+        let desc = jj.describe_get().unwrap();
+        assert!(
+            !desc.contains("a description"),
+            "expected @ abandoned, but description survived: {desc}"
+        );
+    }
+
+    #[test]
+    fn run_abandon_preserves_stat_state() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        run_toggle_stat(&jj, dir.path()).unwrap();
+        jj.describe_set("to abandon").unwrap();
+        let uri = run_abandon(&jj, dir.path(), "@").expect("run_abandon failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.contains("STATS: on"),
+            "abandon should preserve STATS: on:\n{content}"
         );
     }
 

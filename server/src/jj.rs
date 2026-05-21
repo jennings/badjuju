@@ -88,6 +88,15 @@ impl Jj {
         Ok(())
     }
 
+    /// Abandon the given revision (`jj abandon REV`). The revision must be
+    /// non-empty; callers should normalize to `@` if no explicit revision is
+    /// supplied. The revset is passed positionally because `jj abandon` does
+    /// not accept the `--revisions` flag.
+    pub fn abandon(&self, revision: &str) -> Result<(), JjError> {
+        self.run(&["abandon", revision])?;
+        Ok(())
+    }
+
     /// List change IDs matching the given revset, one per line.
     pub fn change_ids(&self, revset: &str) -> Result<Vec<String>, JjError> {
         let out = self.run(&[
@@ -185,6 +194,38 @@ mod tests {
         jj.new_change().expect("new failed");
         let out = jj.log("@-").expect("log failed");
         assert!(!out.is_empty());
+    }
+
+    #[test]
+    fn abandon_removes_revision_from_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        // Create a stack: parent → middle (abandon target) → @.
+        jj.describe_set("parent").unwrap();
+        jj.new_change().unwrap();
+        jj.describe_set("middle to abandon").unwrap();
+        jj.new_change().unwrap();
+        let middle_id = jj
+            .change_ids("@-")
+            .expect("change_ids failed")
+            .first()
+            .cloned()
+            .expect("expected middle change_id");
+        jj.abandon(&middle_id).expect("abandon failed");
+        // After abandoning middle, the reachable log should no longer contain its description.
+        let log = jj.log("::@").expect("log failed");
+        assert!(
+            !log.contains("middle to abandon"),
+            "expected middle change abandoned; log still shows it:\n{log}"
+        );
+    }
+
+    #[test]
+    fn abandon_invalid_revision_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let result = jj.abandon("not-a-real-change");
+        assert!(matches!(result, Err(JjError::JjFailed { .. })));
     }
 
     #[test]

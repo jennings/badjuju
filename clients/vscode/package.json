@@ -117,6 +117,11 @@
         "command": "badjuju.undo.open",
         "category": "jj",
         "title": "Undo last operation (jj undo)"
+      },
+      {
+        "command": "badjuju.abandon.cursor",
+        "category": "jj",
+        "title": "Abandon commit at cursor (or working copy)"
       }
     ],
     "keybindings": [
@@ -180,6 +185,11 @@
         "command": "badjuju.log.applyShortcut",
         "key": "enter",
         "when": "badjuju.onLogShortcutLine && resourceFilename == log.jj && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
+      },
+      {
+        "command": "badjuju.abandon.cursor",
+        "key": "a",
+        "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
       }
     ]
   }

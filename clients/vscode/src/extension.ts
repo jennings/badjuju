@@ -358,6 +358,22 @@ export async function activate(context: ExtensionContext) {
       });
       await openServerResult(result as string);
     }),
+    commands.registerCommand("badjuju.abandon.cursor", async () => {
+      const editor = window.activeTextEditor;
+      let revision = "@";
+      if (editor && isStatusFile(editor.document.uri)) {
+        const lines: string[] = [];
+        for (let i = 0; i < editor.document.lineCount; i++) {
+          lines.push(editor.document.lineAt(i).text);
+        }
+        revision = findRevisionForLine(lines, editor.selection.active.line);
+      }
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.abandon",
+        arguments: [revision],
+      });
+      await openServerResult(result as string);
+    }),
   );
 
   client = new LanguageClient(
