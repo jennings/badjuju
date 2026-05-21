@@ -87,7 +87,10 @@ end
 --- from any buffer inside a jj workspace (not only after opening a .jujutsu file).
 ---@param command string  badjuju.* server command name
 ---@param arguments any[]?  optional arguments forwarded to the server
-function M.execute(command, arguments)
+---@param opts { after?: fun(result_uri: string) }?
+---   after: optional callback invoked on the main loop after the result file
+---   has been opened and reloaded. Receives the server-returned URI string.
+function M.execute(command, arguments, opts)
   local client = M.ensure_client()
   if not client then
     vim.notify(
@@ -121,6 +124,9 @@ function M.execute(command, arguments)
       local fname = vim.uri_to_fname(result)
       if not fname:match('/describe%.jujutsu$') then
         pcall(vim.cmd, 'silent! edit!')
+      end
+      if opts and opts.after then
+        opts.after(result)
       end
     end)
   end)

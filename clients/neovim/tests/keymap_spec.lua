@@ -39,6 +39,18 @@ describe('keymap.setup_for_buffer', function()
     end
   end)
 
+  it('installs <CR> on log.jujutsu for revset shortcut application', function()
+    local buf = open_named('.jj/badjuju/log.jujutsu')
+    local found = has_buffer_map(buf, '<CR>')
+    assert.is_true(found, 'expected log.jujutsu map for <CR>')
+  end)
+
+  it('does NOT install <CR> on status.jujutsu', function()
+    local buf = open_named('.jj/badjuju/status.jujutsu')
+    local found = has_buffer_map(buf, '<CR>')
+    assert.is_false(found, 'status.jujutsu should not bind <CR>')
+  end)
+
   it('does NOT install status-only maps on log.jujutsu', function()
     local buf = open_named('.jj/badjuju/log.jujutsu')
     for _, key in ipairs({ 'n', 'l', 'd', 'q', '=', 'u' }) do

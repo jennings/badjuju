@@ -1,0 +1,55 @@
+local shortcut = require('badjuju.log_shortcut')
+
+describe('log_shortcut.parse', function()
+  it('returns nil for nil or empty input', function()
+    local label, revset = shortcut.parse(nil)
+    assert.is_nil(label)
+    assert.is_nil(revset)
+    label, revset = shortcut.parse('')
+    assert.is_nil(label)
+    assert.is_nil(revset)
+  end)
+
+  it('parses a typical Mutable shortcut line', function()
+    local label, revset = shortcut.parse('JJ: Mutable:  ancestors(reachable(@, mutable()))')
+    assert.are.equal('Mutable', label)
+    assert.are.equal('ancestors(reachable(@, mutable()))', revset)
+  end)
+
+  it('parses a Stack shortcut line', function()
+    local label, revset = shortcut.parse('JJ: Stack:    (immutable_heads()..@)::')
+    assert.are.equal('Stack', label)
+    assert.are.equal('(immutable_heads()..@)::', revset)
+  end)
+
+  it('accepts multi-word labels', function()
+    local label, revset = shortcut.parse('JJ: My Label:  @')
+    assert.are.equal('My Label', label)
+    assert.are.equal('@', revset)
+  end)
+
+  it('strips trailing whitespace from the revset', function()
+    local _label, revset = shortcut.parse('JJ: X:  @   ')
+    assert.are.equal('@', revset)
+  end)
+
+  it('returns nil for a plain JJ: comment without a label', function()
+    local label, revset = shortcut.parse('JJ: this is a comment, not a shortcut')
+    -- A bare "JJ: comment text" lacks the "Label: revset" structure (no colon
+    -- between a label and value), so it must not be interpreted as a shortcut.
+    assert.is_nil(label)
+    assert.is_nil(revset)
+  end)
+
+  it('returns nil for the REVSET: header line', function()
+    local label, revset = shortcut.parse('REVSET: @')
+    assert.is_nil(label)
+    assert.is_nil(revset)
+  end)
+
+  it('returns nil for a regular log output line', function()
+    local label, revset = shortcut.parse('@  kpkzwvqm 909679d0 stephen@example.com')
+    assert.is_nil(label)
+    assert.is_nil(revset)
+  end)
+end)
