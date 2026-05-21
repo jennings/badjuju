@@ -50,15 +50,26 @@ impl Jj {
     }
 
     pub fn log(&self, revset: &str) -> Result<String, JjError> {
-        self.run(&["log", "--revisions", revset])
+        self.log_with_stat(revset, false)
     }
 
     pub fn log_with_stat(&self, revset: &str, stat: bool) -> Result<String, JjError> {
+        // Pin the per-commit and graph-node templates so a user's
+        // `templates.log` / `templates.log_node` overrides don't change the
+        // shape of bad-juju's log buffers (which the clients parse).
+        let mut args: Vec<&str> = vec![
+            "--config",
+            "templates.log_node=builtin_log_node",
+            "log",
+            "--revisions",
+            revset,
+            "--template",
+            "builtin_log_compact",
+        ];
         if stat {
-            self.run(&["log", "--revisions", revset, "--stat"])
-        } else {
-            self.run(&["log", "--revisions", revset])
+            args.push("--stat");
         }
+        self.run(&args)
     }
 
     pub fn describe_get(&self, revision: &str) -> Result<String, JjError> {
@@ -206,6 +217,37 @@ mod tests {
         let jj = init_jj_repo(dir.path());
         let out = jj.log("@").expect("log failed");
         assert!(!out.is_empty());
+    }
+
+    /// Verify that bad-juju's `jj log` output is unaffected by a user's
+    /// `templates.log` / `templates.log_node` overrides — the clients parse
+    /// these buffers by regex and rely on the builtin_log_compact shape.
+    #[test]
+    fn log_pins_template_against_user_overrides() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        // Set custom repo-level templates that would otherwise distort the
+        // commit body and graph node.
+        let cfg_path = dir.path().join(".jj/repo/config.toml");
+        std::fs::write(
+            &cfg_path,
+            "[templates]\n\
+             log = '\"USER_TEMPLATE\\n\"'\n\
+             log_node = '\"X\"'\n",
+        )
+        .expect("write config.toml failed");
+
+        let out = jj.log("@").expect("log failed");
+        // The pinned builtin_log_node renders @ for the working copy; the
+        // user override would have rendered "X".
+        assert!(
+            out.contains('@'),
+            "expected pinned @ working-copy node; got:\n{out}"
+        );
+        assert!(
+            !out.contains("USER_TEMPLATE"),
+            "user templates.log leaked into output:\n{out}"
+        );
     }
 
     #[test]
