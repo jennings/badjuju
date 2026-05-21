@@ -114,9 +114,11 @@ end
 --- from any buffer inside a jj workspace (not only after opening a .jujutsu file).
 ---@param command string  badjuju.* server command name
 ---@param arguments any[]?  optional arguments forwarded to the server
----@param opts { after?: fun(result_uri: string) }?
+---@param opts { after?: fun(result_uri: string), split?: 'h'|'v' }?
 ---   after: optional callback invoked on the main loop after the result file
----   has been opened and reloaded. Receives the server-returned URI string.
+---     has been opened and reloaded. Receives the server-returned URI string.
+---   split: open the result file in a new horizontal ('h') or vertical ('v')
+---     split window instead of replacing the current window's buffer.
 function M.execute(command, arguments, opts)
   local client = M.ensure_client()
   if not client then
@@ -139,6 +141,11 @@ function M.execute(command, arguments, opts)
       return
     end
     vim.schedule(function()
+      if opts and opts.split == 'h' then
+        vim.cmd('split')
+      elseif opts and opts.split == 'v' then
+        vim.cmd('vsplit')
+      end
       vim.lsp.util.show_document(
         { uri = result },
         client.offset_encoding,

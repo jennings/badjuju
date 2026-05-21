@@ -61,20 +61,27 @@ impl Jj {
         }
     }
 
-    pub fn describe_get(&self) -> Result<String, JjError> {
+    pub fn describe_get(&self, revision: &str) -> Result<String, JjError> {
         self.run(&[
             "log",
             "--revisions",
-            "@",
+            revision,
             "--no-graph",
             "--template",
             "description",
         ])
     }
 
-    pub fn describe_set(&self, message: &str) -> Result<(), JjError> {
-        self.run(&["describe", "--message", message])?;
+    pub fn describe_set(&self, revision: &str, message: &str) -> Result<(), JjError> {
+        // jj describe takes revisions positionally (REVSETS), not as a flag.
+        self.run(&["describe", "--message", message, revision])?;
         Ok(())
+    }
+
+    /// Show the diff for a single revision (`jj diff -r REV`). Returns the
+    /// rendered diff text; uses the workspace's default diff renderer.
+    pub fn diff(&self, revision: &str) -> Result<String, JjError> {
+        self.run(&["diff", "--revisions", revision])
     }
 
     pub fn new_change(&self) -> Result<(), JjError> {
@@ -181,10 +188,54 @@ mod tests {
     fn describe_set_and_get_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
-        jj.describe_set("test commit message")
+        jj.describe_set("@", "test commit message")
             .expect("describe_set failed");
-        let desc = jj.describe_get().expect("describe_get failed");
+        let desc = jj.describe_get("@").expect("describe_get failed");
         assert!(desc.contains("test commit message"));
+    }
+
+    #[test]
+    fn describe_set_targets_explicit_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        jj.describe_set("@", "first").unwrap();
+        jj.new_change().unwrap();
+        jj.describe_set("@", "second").unwrap();
+        // Update the parent commit directly. Without the --revision flag this
+        // would describe @ instead.
+        jj.describe_set("@-", "rewritten parent")
+            .expect("describe_set with explicit rev failed");
+        let parent_desc = jj.describe_get("@-").expect("describe_get @-");
+        assert!(
+            parent_desc.contains("rewritten parent"),
+            "expected parent desc rewritten; got: {parent_desc}"
+        );
+        let at_desc = jj.describe_get("@").expect("describe_get @");
+        assert!(
+            at_desc.contains("second"),
+            "expected @ unchanged; got: {at_desc}"
+        );
+    }
+
+    #[test]
+    fn diff_returns_changes_for_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        std::fs::write(dir.path().join("file.txt"), "hello\n").unwrap();
+        jj.describe_set("@", "add file").unwrap();
+        let out = jj.diff("@").expect("diff failed");
+        assert!(
+            out.contains("file.txt"),
+            "expected diff to mention file.txt; got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn diff_invalid_revision_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let result = jj.diff("not-a-real-rev");
+        assert!(matches!(result, Err(JjError::JjFailed { .. })));
     }
 
     #[test]
@@ -201,9 +252,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
         // Create a stack: parent → middle (abandon target) → @.
-        jj.describe_set("parent").unwrap();
+        jj.describe_set("@", "parent").unwrap();
         jj.new_change().unwrap();
-        jj.describe_set("middle to abandon").unwrap();
+        jj.describe_set("@", "middle to abandon").unwrap();
         jj.new_change().unwrap();
         let middle_id = jj
             .change_ids("@-")
@@ -232,10 +283,10 @@ mod tests {
     fn undo_reverts_last_operation() {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
-        jj.describe_set("first description").unwrap();
-        jj.describe_set("second description").unwrap();
+        jj.describe_set("@", "first description").unwrap();
+        jj.describe_set("@", "second description").unwrap();
         jj.undo().expect("undo failed");
-        let desc = jj.describe_get().unwrap();
+        let desc = jj.describe_get("@").unwrap();
         assert!(
             desc.contains("first description"),
             "expected undo to revert to first description, got: {desc}"
@@ -298,7 +349,7 @@ mod tests {
         let jj = init_jj_repo(dir.path());
         // Set up parent commit with a placeholder file.
         std::fs::write(dir.path().join("readme.txt"), "hello\n").unwrap();
-        jj.describe_set("parent commit").unwrap();
+        jj.describe_set("@", "parent commit").unwrap();
         jj.new_change().unwrap();
         // Working copy modifies the file.
         std::fs::write(dir.path().join("readme.txt"), "hello world\n").unwrap();
@@ -319,11 +370,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
         // Parent commit, with no changes of its own.
-        jj.describe_set("parent").unwrap();
+        jj.describe_set("@", "parent").unwrap();
         jj.new_change().unwrap();
         // @ has only this one file.
         std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
-        jj.describe_set("middle change").unwrap();
+        jj.describe_set("@", "middle change").unwrap();
         let before = jj.change_ids("@").unwrap();
         jj.squash_file_into_parent("@", "readme.txt")
             .expect("squash failed");
@@ -340,10 +391,10 @@ mod tests {
         let jj = init_jj_repo(dir.path());
         // Layout: parent (@-) describes "first"; @ has a file; child gets added later.
         std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
-        jj.describe_set("source change").unwrap();
+        jj.describe_set("@", "source change").unwrap();
         // Create a child commit on top.
         jj.new_change().unwrap();
-        jj.describe_set("dest change").unwrap();
+        jj.describe_set("@", "dest change").unwrap();
         let dest = jj
             .change_ids("@")
             .expect("change_ids failed")

@@ -122,6 +122,25 @@ function M.find_revision_for_line(lines, cursor_line)
   return '@'
 end
 
+--- Return the change_id of the commit at or above the cursor in a log.jujutsu
+--- buffer. Mirrors findLogRevision in extension.ts.
+---
+--- Walks up from `cursor_line` (inclusive) looking for a commit header line.
+--- Returns nil if none is found (e.g. cursor in the REVSET header section).
+---@param lines string[]
+---@param cursor_line integer  0-indexed
+---@return string?
+function M.find_log_revision(lines, cursor_line)
+  for i = cursor_line, 0, -1 do
+    local text = lines[i + 1] or ''
+    local change_id = match_commit_header(text)
+    if change_id then
+      return change_id
+    end
+  end
+  return nil
+end
+
 --- Parse a `status.jujutsu` line and return the file path it refers to, or nil.
 ---
 --- Handles two line shapes:

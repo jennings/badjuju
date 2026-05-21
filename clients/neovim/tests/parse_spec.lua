@@ -1,5 +1,31 @@
 local parse = require('badjuju.parse')
 
+describe('find_log_revision', function()
+  it('returns the change_id on a commit header line', function()
+    local lines = { '@  qpvuntsm 1234abcd', '   description here' }
+    assert.are.equal('qpvuntsm', parse.find_log_revision(lines, 0))
+  end)
+
+  it('walks up to the nearest commit header', function()
+    local lines = {
+      '@  qpvuntsm 1234abcd',
+      '   first line',
+      '   second line',
+    }
+    assert.are.equal('qpvuntsm', parse.find_log_revision(lines, 2))
+  end)
+
+  it('returns nil when no commit header is above the cursor', function()
+    local lines = { 'REVSET: @', 'JJ: comment', '' }
+    assert.is_nil(parse.find_log_revision(lines, 2))
+  end)
+
+  it('handles non-current commit symbols (○/●/◆)', function()
+    local lines = { '○  abcdwxyz e6f7' }
+    assert.are.equal('abcdwxyz', parse.find_log_revision(lines, 0))
+  end)
+end)
+
 describe('parse_status_file', function()
   it('returns nil for blank lines', function()
     assert.is_nil(parse.parse_status_file(''))

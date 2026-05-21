@@ -31,9 +31,9 @@ describe('keymap.setup_for_buffer', function()
     end
   end)
 
-  it('installs log.jujutsu maps for refresh and abandon', function()
+  it('installs log.jujutsu maps for refresh, abandon, and describe', function()
     local buf = open_named('.jj/badjuju/log.jujutsu')
-    for _, key in ipairs({ 'g', 'r', 'a' }) do
+    for _, key in ipairs({ 'g', 'r', 'a', 'd' }) do
       local found = has_buffer_map(buf, key)
       assert.is_true(found, 'expected log.jujutsu map for ' .. key)
     end
@@ -53,7 +53,7 @@ describe('keymap.setup_for_buffer', function()
 
   it('does NOT install status-only maps on log.jujutsu', function()
     local buf = open_named('.jj/badjuju/log.jujutsu')
-    for _, key in ipairs({ 'n', 'l', 'd', 'q', '=', 'u' }) do
+    for _, key in ipairs({ 'n', 'l', 'q', '=', 'u' }) do
       local found = has_buffer_map(buf, key)
       assert.is_false(found, 'log.jujutsu should not bind ' .. key)
     end

@@ -29,8 +29,9 @@ function M.register_all()
     badjuju.execute('badjuju.log', arguments)
   end)
 
-  cmd('JJDescribe', {}, function()
-    badjuju.execute('badjuju.describe')
+  cmd('JJDescribe', { nargs = '?' }, function(args)
+    local revision = args.args ~= '' and args.args or nil
+    badjuju.execute('badjuju.describe', revision and { revision } or {})
   end)
 
   cmd('JJNew', {}, function()

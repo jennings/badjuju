@@ -18,11 +18,32 @@ local STATUS_MAPS = {
   { 'r', 'JJRefresh',    'badjuju: refresh' },
   { 'n', 'JJNew',        'badjuju: new change' },
   { 'l', 'JJLog',        'badjuju: open log' },
-  { 'd', 'JJDescribe',   'badjuju: describe' },
   { 'u', 'JJUndo',       'badjuju: undo' },
   { '=', 'JJToggleStat', 'badjuju: toggle --stat' },
   { 'a', 'JJAbandon',    'badjuju: abandon revision' },
 }
+
+--- Open describe.jujutsu in a horizontal split for the commit under the cursor.
+--- On status.jujutsu, the cursor's commit is found via find_revision_for_line
+--- (defaults to `@` when there is no commit context). On log.jujutsu it must
+--- sit on a commit header line; otherwise a notification is shown.
+---@param buffer 'status'|'log'
+local function describe_at_cursor(buffer)
+  local parse = require('badjuju.parse')
+  local cursor_line = vim.api.nvim_win_get_cursor(0)[1] - 1 -- 0-indexed
+  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  local revision
+  if buffer == 'log' then
+    revision = parse.find_log_revision(lines, cursor_line)
+    if not revision then
+      vim.notify('describe: place cursor on a commit line', vim.log.levels.INFO)
+      return
+    end
+  else
+    revision = parse.find_revision_for_line(lines, cursor_line)
+  end
+  require('badjuju').execute('badjuju.describe', { revision }, { split = 'h' })
+end
 
 --- Run a file-scoped status command. The cursor line is parsed for a file
 --- path; if found, the command is invoked with [file, revision] where
@@ -104,6 +125,8 @@ function M.setup_for_buffer(bufnr)
       map_cmd(bufnr, m[1], m[2], m[3])
     end
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
+    nmap(bufnr, 'd', function() describe_at_cursor('status') end,
+      'badjuju: describe commit at cursor in a split')
     nmap(bufnr, 's', function() run_file_scoped('badjuju.squash') end,
       'badjuju: squash file at cursor into parent')
     nmap(bufnr, 'U', function() run_file_scoped('badjuju.unsquash') end,
@@ -112,6 +135,8 @@ function M.setup_for_buffer(bufnr)
     for _, m in ipairs(LOG_MAPS) do
       map_cmd(bufnr, m[1], m[2], m[3])
     end
+    nmap(bufnr, 'd', function() describe_at_cursor('log') end,
+      'badjuju: describe commit at cursor in a split')
     nmap(bufnr, '<CR>', apply_log_shortcut, 'badjuju: apply revset shortcut under cursor')
   end
 end

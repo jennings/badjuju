@@ -8,7 +8,7 @@ const STATUS_COMMAND_REFERENCE: &str = "\
 COMMAND REFERENCE:
 n     new change
 l     open log
-d     describe
+d     describe commit at cursor (opens in a split)
 s     squash file at cursor into parent
 U     unsquash file at cursor from parent into child   (or Cmd+K U / Ctrl+K U when vim shadows U)
 a     abandon commit at cursor (or working copy)
@@ -21,6 +21,7 @@ const LOG_COMMAND_REFERENCE: &str = "\
 COMMAND REFERENCE:
 Edit REVSET above and save to re-run the query.
 Place the cursor on a shortcut line and press Enter to apply it.
+d     describe commit at cursor (opens in a split)
 a     abandon commit at cursor";
 
 /// Pre-defined revset shortcuts shown in the log.jujutsu header.
@@ -213,9 +214,13 @@ pub fn run_log(jj: &Jj, workspace: &Path, revset: &str) -> Result<String, Comman
     Ok(file_uri(&path))
 }
 
-/// Run `badjuju.describe`: write describe.jujutsu with current description and return its URI.
-pub fn run_describe(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
-    let current_desc = jj.describe_get()?;
+/// Run `badjuju.describe`: write describe.jujutsu with the current description
+/// of `revision` (defaults to `@` when empty). Embeds a `JJ: revision: <rev>`
+/// header line so `on_describe_save` can route the saved description back to
+/// the same commit.
+pub fn run_describe(jj: &Jj, workspace: &Path, revision: &str) -> Result<String, CommandError> {
+    let rev = revision_or_at(revision);
+    let current_desc = jj.describe_get(rev)?;
     let desc = if current_desc.trim().is_empty() {
         String::new()
     } else {
@@ -228,8 +233,9 @@ pub fn run_describe(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
          JJ: ------------------------ >8 ------------------------\n\
          JJ: Do not modify or remove the separator line above.\n\
          JJ: Edit the description above and save this file.\n\
+         JJ: revision: {}\n\
          JJ: Lines starting with 'JJ:' will be removed.\n",
-        desc,
+        desc, rev,
     );
 
     let dir = badjuju_dir(workspace)?;
@@ -340,10 +346,29 @@ pub fn parse_log_revset(content: &str) -> Option<String> {
     }
 }
 
-/// On describe.jujutsu save: apply stripped description via jj describe, then regenerate status.jujutsu.
+/// Extract the embedded `JJ: revision: <rev>` header from describe.jujutsu
+/// content. Returns `None` when no header is present or the value is empty,
+/// in which case callers should fall back to `@`.
+pub fn parse_describe_revision(content: &str) -> Option<String> {
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("JJ: revision:") {
+            let rev = rest.trim();
+            if !rev.is_empty() {
+                return Some(rev.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// On describe.jujutsu save: apply stripped description via `jj describe -r REV`,
+/// then regenerate status.jujutsu. The revision is taken from the embedded
+/// `JJ: revision:` header so the description routes back to the same commit
+/// that was opened, even when @ has since moved.
 pub fn on_describe_save(jj: &Jj, workspace: &Path, content: &str) -> Result<(), CommandError> {
     if let Some(desc) = parse_describe_content(content) {
-        jj.describe_set(&desc)?;
+        let rev = parse_describe_revision(content).unwrap_or_else(|| "@".to_string());
+        jj.describe_set(&rev, &desc)?;
         run_status(jj, workspace)?;
     }
     Ok(())
@@ -535,7 +560,7 @@ mod tests {
     fn run_describe_writes_file_with_separator() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
-        let uri = run_describe(&jj, dir.path()).expect("run_describe failed");
+        let uri = run_describe(&jj, dir.path(), "@").expect("run_describe failed");
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         assert!(content.contains("JJ:"));
@@ -546,8 +571,8 @@ mod tests {
     fn run_describe_roundtrips_description() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
-        jj.describe_set("my feature work").unwrap();
-        let uri = run_describe(&jj, dir.path()).expect("run_describe failed");
+        jj.describe_set("@", "my feature work").unwrap();
+        let uri = run_describe(&jj, dir.path(), "@").expect("run_describe failed");
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         assert!(content.contains("my feature work"));
@@ -647,12 +672,72 @@ mod tests {
     }
 
     #[test]
+    fn parse_describe_revision_extracts_header() {
+        let content = "my new description\n\nJJ: separator\nJJ: revision: abc123\n";
+        assert_eq!(parse_describe_revision(content), Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn parse_describe_revision_returns_none_for_missing_header() {
+        let content = "no revision here\nJJ: only generic comment\n";
+        assert_eq!(parse_describe_revision(content), None);
+    }
+
+    #[test]
+    fn parse_describe_revision_returns_none_for_empty_value() {
+        let content = "desc\nJJ: revision:   \n";
+        assert_eq!(parse_describe_revision(content), None);
+    }
+
+    #[test]
+    fn run_describe_targets_explicit_revision_and_embeds_header() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        jj.describe_set("@", "parent description").unwrap();
+        jj.new_change().unwrap();
+        jj.describe_set("@", "child description").unwrap();
+        let uri = run_describe(&jj, dir.path(), "@-").expect("run_describe failed");
+        let path = uri.strip_prefix("file://").unwrap();
+        let content = std::fs::read_to_string(path).unwrap();
+        assert!(
+            content.starts_with("parent description"),
+            "expected parent desc in body; got:\n{content}"
+        );
+        assert!(
+            content.contains("JJ: revision: @-"),
+            "expected JJ: revision header; got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn on_describe_save_routes_to_embedded_revision() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        jj.describe_set("@", "parent v1").unwrap();
+        jj.new_change().unwrap();
+        jj.describe_set("@", "child v1").unwrap();
+        // Save content with an explicit revision header pointing at @-.
+        let content = "parent v2\n\nJJ: separator\nJJ: revision: @-\n";
+        on_describe_save(&jj, dir.path(), content).expect("on_describe_save failed");
+        let parent_desc = jj.describe_get("@-").unwrap();
+        assert!(
+            parent_desc.contains("parent v2"),
+            "expected parent updated; got: {parent_desc}"
+        );
+        let at_desc = jj.describe_get("@").unwrap();
+        assert!(
+            at_desc.contains("child v1"),
+            "expected @ untouched; got: {at_desc}"
+        );
+    }
+
+    #[test]
     fn on_describe_save_applies_description() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         let content = "new description\n\nJJ: separator\n";
         on_describe_save(&jj, dir.path(), content).expect("on_describe_save failed");
-        let desc = jj.describe_get().unwrap();
+        let desc = jj.describe_get("@").unwrap();
         assert!(desc.contains("new description"));
     }
 
@@ -660,10 +745,10 @@ mod tests {
     fn on_describe_save_skips_empty_content() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
-        jj.describe_set("original description").unwrap();
+        jj.describe_set("@", "original description").unwrap();
         let content = "\n\nJJ: separator\n";
         on_describe_save(&jj, dir.path(), content).expect("on_describe_save failed");
-        let desc = jj.describe_get().unwrap();
+        let desc = jj.describe_get("@").unwrap();
         assert!(desc.contains("original description"));
     }
 
@@ -733,7 +818,7 @@ mod tests {
         let jj = init_repo(dir.path());
         // Parent commit has the file with one content.
         std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
-        jj.describe_set("parent").unwrap();
+        jj.describe_set("@", "parent").unwrap();
         jj.new_change().unwrap();
         // Working copy modifies the file.
         std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
@@ -788,10 +873,10 @@ mod tests {
         let jj = init_repo(dir.path());
         // @-: source commit with the file we want to "unsquash".
         std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
-        jj.describe_set("source").unwrap();
+        jj.describe_set("@", "source").unwrap();
         // Create a child commit so @ has exactly one child after we edit back.
         jj.new_change().unwrap();
-        jj.describe_set("child").unwrap();
+        jj.describe_set("@", "child").unwrap();
         // Move back to source so @ has the child we just created.
         Command::new("jj")
             .args(["edit", "@-"])
@@ -811,7 +896,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
-        jj.describe_set("parent with the file").unwrap();
+        jj.describe_set("@", "parent with the file").unwrap();
         jj.new_change().unwrap();
         // @ is now a fresh child of parent. Parent has the only copy of readme.txt.
         let uri = run_unsquash(&jj, dir.path(), "readme.txt", "@-").expect("run_unsquash failed");
@@ -836,11 +921,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         // Parent: empty.
-        jj.describe_set("parent").unwrap();
+        jj.describe_set("@", "parent").unwrap();
         jj.new_change().unwrap();
         // Middle (@): add readme.txt.
         std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
-        jj.describe_set("middle").unwrap();
+        jj.describe_set("@", "middle").unwrap();
         jj.new_change().unwrap();
         // @: now child of middle.
         let uri = run_squash(&jj, dir.path(), "readme.txt", "@-").expect("run_squash failed");
@@ -868,12 +953,12 @@ mod tests {
     fn run_undo_reverts_last_operation_and_refreshes_status() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
-        jj.describe_set("first").unwrap();
-        jj.describe_set("second").unwrap();
+        jj.describe_set("@", "first").unwrap();
+        jj.describe_set("@", "second").unwrap();
         let uri = run_undo(&jj, dir.path()).expect("run_undo failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(content.starts_with("STATUS:"));
-        let desc = jj.describe_get().unwrap();
+        let desc = jj.describe_get("@").unwrap();
         assert!(
             desc.contains("first"),
             "expected undo to roll back to first; got: {desc}"
@@ -885,9 +970,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         // Create stack: parent → middle → @. Abandon middle.
-        jj.describe_set("parent").unwrap();
+        jj.describe_set("@", "parent").unwrap();
         jj.new_change().unwrap();
-        jj.describe_set("middle to abandon").unwrap();
+        jj.describe_set("@", "middle to abandon").unwrap();
         jj.new_change().unwrap();
         let middle_id = jj.change_ids("@-").unwrap().first().cloned().unwrap();
         let uri = run_abandon(&jj, dir.path(), &middle_id).expect("run_abandon failed");
@@ -917,12 +1002,12 @@ mod tests {
     fn run_abandon_with_empty_revision_defaults_to_at() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
-        jj.describe_set("a description").unwrap();
+        jj.describe_set("@", "a description").unwrap();
         let uri = run_abandon(&jj, dir.path(), "").expect("run_abandon failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(content.starts_with("STATUS:"));
         // After abandoning @, the new working copy should be empty (no description carried over).
-        let desc = jj.describe_get().unwrap();
+        let desc = jj.describe_get("@").unwrap();
         assert!(
             !desc.contains("a description"),
             "expected @ abandoned, but description survived: {desc}"
@@ -934,7 +1019,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         run_toggle_stat(&jj, dir.path()).unwrap();
-        jj.describe_set("to abandon").unwrap();
+        jj.describe_set("@", "to abandon").unwrap();
         let uri = run_abandon(&jj, dir.path(), "@").expect("run_abandon failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
@@ -952,7 +1037,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         run_toggle_stat(&jj, dir.path()).unwrap();
-        jj.describe_set("a description").unwrap();
+        jj.describe_set("@", "a description").unwrap();
         run_undo(&jj, dir.path()).expect("run_undo failed");
         assert!(
             read_current_stat(dir.path()),
@@ -1010,7 +1095,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
-        jj.describe_set("parent").unwrap();
+        jj.describe_set("@", "parent").unwrap();
         jj.new_change().unwrap();
         std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
         run_toggle_stat(&jj, dir.path()).unwrap(); // stat on
