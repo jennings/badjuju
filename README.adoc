@@ -20,6 +20,68 @@ docs/            Design documents
 samples/         Example jj repos used for testing
 ----
 
+== Example Output
+
+When the user runs `Bad Juju: Open status window`, the server regenerates
+`.jj/badjuju/status.jj` and opens it in the editor. The buffer combines `jj
+status`, the working-copy stack, and a one-screen command reference:
+
+[source]
+----
+STATUS:
+
+The working copy has no changes.
+Working copy  (@) : kpkzwvqm 909679d0 (empty) (no description set)
+Parent commit (@-): xorwskru 66bfbfdf feat(neovim): buffer-local keymaps on status.jj and log.jj (bad-juju-jb3)
+
+STACK: ancestors(reachable(@, mutable()), 2)
+
+@  kpkzwvqm 909679d0 1min stephen@example.com
+│  (empty) (no description set)
+○  xorwskru 66bfbfdf 2min stephen@example.com
+│  feat(neovim): buffer-local keymaps on status.jj and log.jj (bad-juju-jb3)
+○  mmqmovmy 0eca5029 3min stephen@example.com
+│  feat(neovim): make status.jj/log.jj buffers read-only and reload in place on refresh (bad-juju-uga)
+◆  spxlzwpr 18d66a82 20min stephen@example.com main
+│  fix(ci): set DESTDIR when installing redo (bad-juju-d16)
+~
+
+COMMAND REFERENCE:
+n     new change
+l     open log
+d     describe
+s     squash file at cursor into parent
+U     unsquash file at cursor from parent into child   (or Cmd+K U / Ctrl+K U when vim shadows U)
+a     abandon commit at cursor (or working copy)
+u     jj undo (revert last operation)
+=     toggle --stat on the stack log
+g     refresh
+q     close
+----
+
+`Bad Juju: Open log window` writes `.jj/badjuju/log.jj`. The first line is an
+editable `REVSET:` header — change it and save to re-run the query. The
+`JJ:`-prefixed lines are shortcut revsets you can apply by placing the cursor
+on the line and pressing Enter:
+
+[source]
+----
+REVSET: @
+JJ: Mutable:  ancestors(reachable(@, mutable()))
+JJ: Stack:    (immutable_heads()..@)::
+
+OUTPUT:
+
+@  kpkzwvqm 909679d0 1min stephen@example.com
+│  (empty) (no description set)
+~
+
+COMMAND REFERENCE:
+Edit REVSET above and save to re-run the query.
+Place the cursor on a shortcut line and press Enter to apply it.
+a     abandon commit at cursor
+----
+
 == Prerequisites
 
 * https://www.rust-lang.org/tools/install[Rust toolchain] (edition 2024)
