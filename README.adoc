@@ -23,8 +23,8 @@ samples/         Example jj repos used for testing
 == Prerequisites
 
 * https://www.rust-lang.org/tools/install[Rust toolchain] (edition 2024)
-* https://nexte.st/[cargo-nextest] (`cargo install cargo-nextest`)
 * https://pnpm.io/installation[pnpm] 10+
+* https://github.com/apenwarr/redo[redo] (apenwarr/redo — `brew install redo` on macOS)
 * https://facebook.github.io/watchman/[Watchman] (used by the server for file watching)
 
 == Building
@@ -32,21 +32,12 @@ samples/         Example jj repos used for testing
 [source,shell]
 ----
 pnpm install
-make build
+redo
 ----
 
 == Testing
 
 [source,shell]
 ----
-make test
-----
-
-== Development
-
-Run the VS Code extension in a dev host:
-
-[source,shell]
-----
-pnpm turbo dev
+redo test
 ----

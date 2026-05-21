@@ -1,5 +1,5 @@
 target/
-turbo/
+.redo/
 node_modules/
 clients/vscode/out/
 clients/vscode/dist/

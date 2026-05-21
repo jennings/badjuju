@@ -58,21 +58,19 @@ bd close <id>         # Complete work
 pnpm install
 
 # Build all packages
-make build              # turbo-orchestrated build
-pnpm turbo build        # equivalent
+redo all              # or just: redo
 
-# Run all Rust tests (cargo-nextest is NOT installed; use cargo test)
-cargo test --manifest-path server/Cargo.toml
+# Run all tests
+redo test
 
-# Build the VS Code extension
-cd clients/vscode && pnpm run build
+# Build the VS Code extension only
+redo clients/vscode/all
 
-# Format all code
-make fmt                # biome (JS/TS) + cargo fmt (Rust)
+# Format all code (biome + cargo fmt)
+redo fmt
 
-# Format individually
-pnpm biome format --write .
-cargo fmt --manifest-path server/Cargo.toml
+# CI-equivalent check (no writes: fmt-check + clippy + test + biome)
+redo check
 ```
 
 ## Testing
@@ -131,7 +129,7 @@ The server binary path defaults to `jj` on PATH but can be overridden via `initi
 ## Conventions & Patterns
 
 - **Version control**: Use `jj` (Jujutsu), not `git`. Run `jj new` before starting a new ticket; run `jj describe` to set the commit message when done.
-- **Formatting**: Biome for JS/TS, `cargo fmt` for Rust. Run `make fmt` before committing.
+- **Formatting**: Biome for JS/TS, `cargo fmt` for Rust. Run `redo fmt` before committing.
 - **Server stdio**: The LSP server communicates over stdin/stdout. Never write to stdout from the server; use `self.client.log_message(...)` instead.
 - **Rust edition**: 2024. Async runtime is `tokio` (`rt-multi-thread`, `macros`, `io-std` features).
 - **Error handling**: Return structured errors (`JjError`, `CommandError`) from library functions. Convert to `tower_lsp::jsonrpc::Error` only at the `execute_command` / `did_save` boundary.

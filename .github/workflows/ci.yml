@@ -35,14 +35,13 @@ jobs:
       - name: Install jj
         run: command -v jj || cargo install jj-cli
 
-      - name: Check formatting
-        run: cargo fmt --manifest-path server/Cargo.toml --check
+      - name: Install redo
+        run: |
+          git clone --depth 1 https://github.com/apenwarr/redo /tmp/redo
+          cd /tmp/redo && sudo ./do install
 
-      - name: Clippy
-        run: cargo clippy --manifest-path server/Cargo.toml -- -D warnings
-
-      - name: Test
-        run: cargo test --manifest-path server/Cargo.toml
+      - name: Check (fmt + clippy + test)
+        run: redo server/check
 
   typescript:
     name: TypeScript
@@ -59,11 +58,16 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
 
+      - name: Install redo
+        run: |
+          git clone --depth 1 https://github.com/apenwarr/redo /tmp/redo
+          cd /tmp/redo && sudo ./do install
+
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build
-        run: pnpm -r run build
+      - name: Build VS Code extension
+        run: redo clients/vscode/all
 
       - name: Biome check
         run: pnpm biome check .
