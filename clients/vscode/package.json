@@ -190,6 +190,11 @@
         "command": "badjuju.abandon.cursor",
         "key": "a",
         "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.abandon.cursor",
+        "key": "a",
+        "when": "resourceFilename == log.jj && resourceLangId == jujutsu && editorTextFocus"
       }
     ]
   }

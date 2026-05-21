@@ -20,7 +20,8 @@ q     close";
 const LOG_COMMAND_REFERENCE: &str = "\
 COMMAND REFERENCE:
 Edit REVSET above and save to re-run the query.
-Place the cursor on a shortcut line and press Enter to apply it.";
+Place the cursor on a shortcut line and press Enter to apply it.
+a     abandon commit at cursor";
 
 /// Pre-defined revset shortcuts shown in the log.jj header.
 /// Each entry is (label, revset). The label is also used to align columns.
@@ -63,38 +64,26 @@ pub fn run_status(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     write_status(jj, workspace, None, stat)
 }
 
-/// Toggle the STATS marker in status.jj and re-render.
+/// Toggle the STATS state and re-render.
 pub fn run_toggle_stat(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     let next = !read_current_stat(workspace);
     write_status(jj, workspace, None, next)
 }
 
-/// Read the STATS marker from the current status.jj if it exists, defaulting to `false`.
+/// Read the persisted STATS state from the sidecar file. Defaults to `false`.
 fn read_current_stat(workspace: &Path) -> bool {
     let Ok(dir) = badjuju_dir(workspace) else {
         return false;
     };
-    let path = dir.join("status.jj");
-    std::fs::read_to_string(&path)
-        .ok()
-        .as_deref()
-        .and_then(parse_status_stats)
-        .unwrap_or(false)
+    match std::fs::read_to_string(dir.join("stats")) {
+        Ok(s) => s.trim() == "on",
+        Err(_) => false,
+    }
 }
 
-/// Extract the STATS marker from a status.jj buffer. Returns `Some(true)` for "on",
-/// `Some(false)` for "off", and `None` if the marker is missing or unrecognized.
-pub fn parse_status_stats(content: &str) -> Option<bool> {
-    for line in content.lines() {
-        if let Some(rest) = line.strip_prefix("STATS: ") {
-            return match rest.trim() {
-                "on" => Some(true),
-                "off" => Some(false),
-                _ => None,
-            };
-        }
-    }
-    None
+fn write_stat_state(workspace: &Path, stat: bool) -> std::io::Result<()> {
+    let dir = badjuju_dir(workspace)?;
+    std::fs::write(dir.join("stats"), if stat { "on\n" } else { "off\n" })
 }
 
 /// Write status.jj, optionally prepending a MESSAGE: block. Returns the URI.
@@ -111,14 +100,12 @@ fn write_status(
         Some(m) => format!("MESSAGE: {}\n\n", m.trim()),
         None => String::new(),
     };
-    let stats_marker = if stat { "on" } else { "off" };
 
     let content = format!(
-        "{}STATUS:\n\n{}\n\nSTACK: {}\nSTATS: {}\n\n{}\n\n{}",
+        "{}STATUS:\n\n{}\n\nSTACK: {}\n\n{}\n\n{}",
         prelude,
         status.trim_end(),
         STATUS_REVSET,
-        stats_marker,
         stack.trim_end(),
         STATUS_COMMAND_REFERENCE,
     );
@@ -126,6 +113,7 @@ fn write_status(
     let dir = badjuju_dir(workspace)?;
     let path = dir.join("status.jj");
     std::fs::write(&path, content)?;
+    write_stat_state(workspace, stat)?;
     Ok(file_uri(&path))
 }
 
@@ -456,6 +444,10 @@ mod tests {
         assert!(
             content.contains("Edit REVSET above"),
             "missing revset edit hint:\n{content}"
+        );
+        assert!(
+            content.contains("a     abandon"),
+            "missing abandon hint:\n{content}"
         );
     }
 
@@ -946,8 +938,12 @@ mod tests {
         let uri = run_abandon(&jj, dir.path(), "@").expect("run_abandon failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
-            content.contains("STATS: on"),
-            "abandon should preserve STATS: on:\n{content}"
+            read_current_stat(dir.path()),
+            "abandon should preserve stat=on"
+        );
+        assert!(
+            !content.contains("STATS:"),
+            "status buffer must not leak STATS marker:\n{content}"
         );
     }
 
@@ -957,11 +953,10 @@ mod tests {
         let jj = init_repo(dir.path());
         run_toggle_stat(&jj, dir.path()).unwrap();
         jj.describe_set("a description").unwrap();
-        let uri = run_undo(&jj, dir.path()).expect("run_undo failed");
-        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        run_undo(&jj, dir.path()).expect("run_undo failed");
         assert!(
-            content.contains("STATS: on"),
-            "undo should preserve STATS: on:\n{content}"
+            read_current_stat(dir.path()),
+            "undo should preserve stat=on"
         );
     }
 
@@ -972,27 +967,29 @@ mod tests {
         let uri = run_status(&jj, dir.path()).unwrap();
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
-            content.contains("STATS: off"),
-            "expected STATS: off:\n{content}"
+            !read_current_stat(dir.path()),
+            "expected stat off by default"
+        );
+        assert!(
+            !content.contains("STATS:"),
+            "status buffer must not contain STATS marker:\n{content}"
         );
     }
 
     #[test]
-    fn toggle_stat_flips_marker() {
+    fn toggle_stat_flips_state() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         run_status(&jj, dir.path()).unwrap();
-        let uri = run_toggle_stat(&jj, dir.path()).unwrap();
-        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        run_toggle_stat(&jj, dir.path()).unwrap();
         assert!(
-            content.contains("STATS: on"),
-            "expected STATS: on after toggle:\n{content}"
+            read_current_stat(dir.path()),
+            "expected stat=on after toggle"
         );
-        let uri = run_toggle_stat(&jj, dir.path()).unwrap();
-        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        run_toggle_stat(&jj, dir.path()).unwrap();
         assert!(
-            content.contains("STATS: off"),
-            "expected STATS: off after second toggle:\n{content}"
+            !read_current_stat(dir.path()),
+            "expected stat=off after second toggle"
         );
     }
 
@@ -1001,21 +998,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         run_toggle_stat(&jj, dir.path()).unwrap(); // stat on
-        let uri = run_status(&jj, dir.path()).unwrap();
-        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        run_status(&jj, dir.path()).unwrap();
         assert!(
-            content.contains("STATS: on"),
-            "stat should be preserved:\n{content}"
+            read_current_stat(dir.path()),
+            "stat should be preserved across status calls"
         );
-    }
-
-    #[test]
-    fn parse_status_stats_recognizes_on_and_off() {
-        assert_eq!(parse_status_stats("STATS: on\n"), Some(true));
-        assert_eq!(parse_status_stats("STATS: off\n"), Some(false));
-        assert_eq!(parse_status_stats("STATUS:\nSTATS: on\n"), Some(true));
-        assert_eq!(parse_status_stats("no marker here"), None);
-        assert_eq!(parse_status_stats("STATS: weird\n"), None);
     }
 
     #[test]
@@ -1027,11 +1014,10 @@ mod tests {
         jj.new_change().unwrap();
         std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
         run_toggle_stat(&jj, dir.path()).unwrap(); // stat on
-        let uri = run_squash(&jj, dir.path(), "readme.txt", "").unwrap();
-        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        run_squash(&jj, dir.path(), "readme.txt", "").unwrap();
         assert!(
-            content.contains("STATS: on"),
-            "squash should preserve STATS: on:\n{content}"
+            read_current_stat(dir.path()),
+            "squash should preserve stat=on"
         );
     }
 

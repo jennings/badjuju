@@ -71,7 +71,10 @@ export function parseStatusFile(line: string): string | null {
  * Return the revision that owns the file at the cursor.
  *
  * - STATUS-section lines (matched by STATUS_FILE_LINE_RE) belong to the working copy → "@".
- * - --stat lines in the stack section belong to the closest commit header above them.
+ * - Walks up from `cursorLine` (inclusive) so a cursor parked on a commit header
+ *   returns that commit, not the one above it.
+ * - Hitting the STATUS section header without finding a commit means we were in
+ *   the STATUS file list with no commit context → working copy.
  */
 export function findRevisionForLine(
   lines: readonly string[],
@@ -79,14 +82,30 @@ export function findRevisionForLine(
 ): string {
   const current = lines[cursorLine] ?? "";
   if (STATUS_FILE_LINE_RE.test(current)) return "@";
-  for (let i = cursorLine - 1; i >= 0; i--) {
+  for (let i = cursorLine; i >= 0; i--) {
     const text = lines[i] ?? "";
     const h = text.match(COMMIT_HEADER_RE);
     if (h) return h[1];
-    // Hit the STATUS section header without finding a commit — must be a working-copy file.
     if (text.startsWith("STATUS:")) return "@";
   }
   return "@";
+}
+
+/**
+ * Return the change_id of the commit at or above the cursor in a log.jj buffer.
+ *
+ * Walks up from `cursorLine` (inclusive) looking for a commit header line. Returns
+ * null if none is found (e.g. cursor is inside the REVSET header section).
+ */
+export function findLogRevision(
+  lines: readonly string[],
+  cursorLine: number,
+): string | null {
+  for (let i = cursorLine; i >= 0; i--) {
+    const m = (lines[i] ?? "").match(COMMIT_HEADER_RE);
+    if (m) return m[1];
+  }
+  return null;
 }
 
 function isStatusFile(uri: Uri): boolean {
@@ -361,17 +380,41 @@ export async function activate(context: ExtensionContext) {
     commands.registerCommand("badjuju.abandon.cursor", async () => {
       const editor = window.activeTextEditor;
       let revision = "@";
-      if (editor && isStatusFile(editor.document.uri)) {
+      let logUri: string | null = null;
+      if (editor) {
+        const uri = editor.document.uri;
         const lines: string[] = [];
         for (let i = 0; i < editor.document.lineCount; i++) {
           lines.push(editor.document.lineAt(i).text);
         }
-        revision = findRevisionForLine(lines, editor.selection.active.line);
+        const cursorLine = editor.selection.active.line;
+        if (isStatusFile(uri)) {
+          revision = findRevisionForLine(lines, cursorLine);
+        } else if (isLogFile(uri)) {
+          const found = findLogRevision(lines, cursorLine);
+          if (!found) {
+            window.showInformationMessage(
+              "abandon: place cursor on a commit line",
+            );
+            return;
+          }
+          revision = found;
+          logUri = uri.toString();
+        }
       }
       const result = await client.sendRequest("workspace/executeCommand", {
         command: "badjuju.abandon",
         arguments: [revision],
       });
+      if (logUri) {
+        // Stay in the log view — refresh it instead of opening the returned status URI.
+        const logResult = await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.refresh",
+          arguments: [logUri],
+        });
+        await openServerResult(logResult as string);
+        return;
+      }
       await openServerResult(result as string);
     }),
   );
