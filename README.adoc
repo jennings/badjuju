@@ -68,12 +68,14 @@ file at the repo root.
 .. Open the `clients/vscode` directory in VS Code (open it as the workspace root,
    not the repo root, so the launch config and `package.json` scripts resolve
    correctly).
-.. Press kbd:[F5] to launch an Extension Development Host with the extension
-   loaded. Open a Jujutsu repo inside the host window and run a command such as
-   `Bad Juju: Open status window` from the command palette to exercise the
-   extension.
-.. Edits to `clients/vscode/src/` are picked up by rebuilding (`redo
-   clients/vscode/all`) and restarting the Extension Development Host.
+.. Press kbd:[F5] to launch an Extension Development Host. The checked-in
+   `.vscode/launch.json` runs the `build` task first (`pnpm run build`) and then
+   loads the freshly built extension. Open a Jujutsu repo inside the host
+   window and run a command such as `Bad Juju: Open status window` from the
+   command palette to exercise the extension.
+.. After editing `clients/vscode/src/`, stop the Extension Development Host and
+   press kbd:[F5] again (or run `pnpm run watch` for an incremental rebuild and
+   reload via `Developer: Reload Window` in the host).
 . Before committing, run the CI-equivalent check (formatting, clippy, tests,
   Biome):
 +
