@@ -87,6 +87,10 @@
       {
         "command": "badjuju.refresh.open",
         "title": "Bad Juju: Refresh"
+      },
+      {
+        "command": "badjuju.log.applyShortcut",
+        "title": "Bad Juju: Apply revset shortcut under cursor"
       }
     ],
     "keybindings": [
@@ -119,6 +123,11 @@
         "command": "workbench.action.closeActiveEditor",
         "key": "q",
         "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.log.applyShortcut",
+        "key": "enter",
+        "when": "badjuju.onLogShortcutLine && resourceFilename == log.jj && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
       }
     ]
   }

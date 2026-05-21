@@ -14,7 +14,32 @@ q   close";
 
 const LOG_COMMAND_REFERENCE: &str = "\
 COMMAND REFERENCE:
-Edit REVSET above and save to re-run the query.";
+Edit REVSET above and save to re-run the query.
+Place the cursor on a shortcut line and press Enter to apply it.";
+
+/// Pre-defined revset shortcuts shown in the log.jj header.
+/// Each entry is (label, revset). The label is also used to align columns.
+const LOG_SHORTCUTS: &[(&str, &str)] = &[
+    ("Mutable", "ancestors(reachable(@, mutable()))"),
+    ("Stack", "(immutable_heads()..@)::"),
+];
+
+/// Render the shortcut list as `JJ:` comment lines for the log.jj header.
+fn render_log_shortcuts() -> String {
+    let label_width = LOG_SHORTCUTS
+        .iter()
+        .map(|(label, _)| label.len())
+        .max()
+        .unwrap_or(0);
+    LOG_SHORTCUTS
+        .iter()
+        .map(|(label, revset)| {
+            let padding = " ".repeat(label_width - label.len() + 2);
+            format!("JJ: {label}:{padding}{revset}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 /// Returns the `<workspace>/.jj/badjuju/` directory, creating it if needed.
 fn badjuju_dir(workspace: &Path) -> std::io::Result<PathBuf> {
@@ -51,8 +76,9 @@ pub fn run_log(jj: &Jj, workspace: &Path, revset: &str) -> Result<String, Comman
     let output = jj.log(revset)?;
 
     let content = format!(
-        "REVSET: {}\n\nOUTPUT:\n\n{}\n\n{}",
+        "REVSET: {}\n{}\n\nOUTPUT:\n\n{}\n\n{}",
         revset,
+        render_log_shortcuts(),
         output.trim_end(),
         LOG_COMMAND_REFERENCE,
     );
@@ -250,6 +276,75 @@ mod tests {
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         assert!(content.starts_with(&format!("REVSET: {revset}")));
+    }
+
+    #[test]
+    fn run_log_renders_revset_shortcuts_after_header() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_log(&jj, dir.path(), "@").expect("run_log failed");
+        let path = uri.strip_prefix("file://").unwrap();
+        let content = std::fs::read_to_string(path).unwrap();
+
+        assert!(
+            content.contains("JJ: Mutable:"),
+            "missing Mutable shortcut:\n{content}"
+        );
+        assert!(
+            content.contains("ancestors(reachable(@, mutable()))"),
+            "missing Mutable revset:\n{content}"
+        );
+        assert!(
+            content.contains("JJ: Stack:"),
+            "missing Stack shortcut:\n{content}"
+        );
+        assert!(
+            content.contains("(immutable_heads()..@)::"),
+            "missing Stack revset:\n{content}"
+        );
+
+        let revset_line_idx = content
+            .lines()
+            .position(|l| l.starts_with("REVSET:"))
+            .expect("REVSET line not found");
+        let mutable_line_idx = content
+            .lines()
+            .position(|l| l.starts_with("JJ: Mutable:"))
+            .expect("Mutable shortcut line not found");
+        assert!(
+            mutable_line_idx > revset_line_idx,
+            "Mutable shortcut should appear after REVSET line"
+        );
+    }
+
+    #[test]
+    fn run_log_shortcut_lines_use_jj_comment_prefix() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_log(&jj, dir.path(), "@").expect("run_log failed");
+        let path = uri.strip_prefix("file://").unwrap();
+        let content = std::fs::read_to_string(path).unwrap();
+
+        for (label, _) in LOG_SHORTCUTS {
+            let prefix = format!("JJ: {label}:");
+            let found = content.lines().any(|line| line.starts_with(&prefix));
+            assert!(found, "no `JJ: {label}:` line found in:\n{content}");
+        }
+    }
+
+    #[test]
+    fn on_log_save_ignores_shortcut_comment_lines() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        // Simulate a saved log.jj that still contains the shortcut comment lines.
+        let content = format!(
+            "REVSET: @\n{}\n\nOUTPUT:\n\nstale output",
+            render_log_shortcuts()
+        );
+        let uri = on_log_save(&jj, dir.path(), &content).expect("on_log_save failed");
+        let new_content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        // REVSET should still be `@` — the JJ: lines must not have hijacked the header.
+        assert!(new_content.starts_with("REVSET: @"));
     }
 
     #[test]

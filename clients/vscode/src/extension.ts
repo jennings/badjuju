@@ -5,6 +5,7 @@ import {
   type ExtensionContext,
   languages,
   type TextDocumentContentProvider,
+  type TextEditor,
   Uri,
   window,
   workspace,
@@ -39,8 +40,27 @@ class StatusContentProvider implements TextDocumentContentProvider {
 
 const statusProvider = new StatusContentProvider();
 
+const LOG_SHORTCUT_LINE_RE = /^JJ:\s+([A-Za-z][\w ]*?):\s+(.+)$/;
+
 function isStatusFile(uri: Uri): boolean {
   return uri.path.endsWith("/status.jj");
+}
+
+function isLogFile(uri: Uri): boolean {
+  return uri.path.endsWith("/log.jj");
+}
+
+function updateLogShortcutContext(editor: TextEditor | undefined): void {
+  let onShortcutLine = false;
+  if (editor && isLogFile(editor.document.uri)) {
+    const lineText = editor.document.lineAt(editor.selection.active.line).text;
+    onShortcutLine = LOG_SHORTCUT_LINE_RE.test(lineText);
+  }
+  commands.executeCommand(
+    "setContext",
+    "badjuju.onLogShortcutLine",
+    onShortcutLine,
+  );
 }
 
 function toReadonlyUri(fileUri: Uri): Uri {
@@ -130,6 +150,28 @@ export async function activate(context: ExtensionContext) {
       });
       const doc = await workspace.openTextDocument(Uri.parse(result as string));
       await window.showTextDocument(doc, { preserveFocus: false });
+    }),
+    commands.registerCommand("badjuju.log.applyShortcut", async () => {
+      const editor = window.activeTextEditor;
+      if (!editor) return;
+      const lineText = editor.document.lineAt(
+        editor.selection.active.line,
+      ).text;
+      const match = lineText.match(LOG_SHORTCUT_LINE_RE);
+      if (!match) return;
+      const revset = match[2].trim();
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.log",
+        arguments: [revset],
+      });
+      const doc = await workspace.openTextDocument(Uri.parse(result as string));
+      await window.showTextDocument(doc, { preserveFocus: false });
+    }),
+    window.onDidChangeTextEditorSelection((e) => {
+      updateLogShortcutContext(e.textEditor);
+    }),
+    window.onDidChangeActiveTextEditor((editor) => {
+      updateLogShortcutContext(editor);
     }),
     commands.registerCommand("badjuju.new.open", async () => {
       const result = await client.sendRequest("workspace/executeCommand", {
