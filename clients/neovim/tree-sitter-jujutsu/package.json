@@ -1,0 +1,15 @@
+{
+  "name": "tree-sitter-jujutsu",
+  "version": "0.0.1",
+  "description": "Tree-sitter grammar for Jujutsu bad-juju buffers",
+  "license": "MIT",
+  "private": true,
+  "tree-sitter": [
+    {
+      "scope": "source.jujutsu",
+      "file-types": [
+        "jujutsu"
+      ]
+    }
+  ]
+}

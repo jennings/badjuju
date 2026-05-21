@@ -11,6 +11,13 @@ for d in tests lua ftplugin ftdetect plugin lsp; do
     deps="$deps $(find "$d" -type f \( -name '*.lua' -o -name '*.vim' \))"
   fi
 done
+# Also gate on the tree-sitter parser test target so a broken grammar
+# update fails the same `redo clients/neovim/test` invocation as a broken
+# Lua spec. test.do for tree-sitter-jujutsu skips cleanly if the CLI is
+# absent, so this stays green on machines without tree-sitter installed.
+if [ -f tree-sitter-jujutsu/test.do ]; then
+  deps="$deps tree-sitter-jujutsu/test"
+fi
 # shellcheck disable=SC2086
 redo-ifchange $deps
 ./scripts/test.sh
