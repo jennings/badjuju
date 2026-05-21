@@ -68,6 +68,14 @@ function M.execute(command, arguments)
         client.offset_encoding,
         { focus = true }
       )
+      -- The server just wrote this file; force the focused buffer to reload
+      -- so a previously-open status.jj/log.jj reflects the new content
+      -- instead of showing stale text. Skip describe.jj so an in-progress
+      -- commit message isn't discarded.
+      local fname = vim.uri_to_fname(result)
+      if not fname:match('/describe%.jj$') then
+        pcall(vim.cmd, 'silent! edit!')
+      end
     end)
   end)
 end
