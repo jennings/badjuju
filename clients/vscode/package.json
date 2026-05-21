@@ -67,6 +67,17 @@
       {
         "command": "badjuju.log.open",
         "title": "Bad Juju: Open log"
+      },
+      {
+        "command": "badjuju.new",
+        "title": "Bad Juju: New commit"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "badjuju.new",
+        "key": "n",
+        "when": "resourceFilename == status.jj && resourceLangId == jujutsu"
       }
     ]
   }

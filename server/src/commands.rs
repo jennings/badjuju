@@ -78,6 +78,12 @@ pub fn run_describe(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     Ok(file_uri(&path))
 }
 
+/// Run `badjuju.new`: create a new change and regenerate status.jj. Returns the status URI.
+pub fn run_new(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
+    jj.new_change()?;
+    run_status(jj, workspace)
+}
+
 /// Strip JJ: comment lines and the separator from describe.jj content.
 /// Returns the trimmed description, or `None` if nothing remains.
 pub fn parse_describe_content(content: &str) -> Option<String> {
@@ -261,6 +267,26 @@ mod tests {
         on_describe_save(&jj, dir.path(), content).expect("on_describe_save failed");
         let desc = jj.describe_get().unwrap();
         assert!(desc.contains("original description"));
+    }
+
+    #[test]
+    fn run_new_writes_status_and_returns_uri() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_new(&jj, dir.path()).expect("run_new failed");
+        assert!(uri.starts_with("file://"));
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.contains("STATUS:"));
+    }
+
+    #[test]
+    fn run_new_creates_new_change_in_log() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let log_before = jj.log("@").unwrap();
+        run_new(&jj, dir.path()).expect("run_new failed");
+        let log_after = jj.log("@").unwrap();
+        assert_ne!(log_before, log_after);
     }
 
     #[test]

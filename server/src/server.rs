@@ -234,13 +234,8 @@ impl LanguageServer for Backend {
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.new" => {
-                self.client
-                    .log_message(
-                        MessageType::INFO,
-                        "command: badjuju.new (not yet implemented)",
-                    )
-                    .await;
-                Ok(None)
+                let uri = commands::run_new(&jj, &workspace).map_err(lsp_err)?;
+                Ok(Some(serde_json::Value::String(uri)))
             }
             _ => Err(Error::method_not_found()),
         }

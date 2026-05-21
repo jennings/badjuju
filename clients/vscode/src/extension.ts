@@ -55,6 +55,14 @@ export async function activate(context: ExtensionContext) {
       });
       const doc = await workspace.openTextDocument(Uri.parse(result as string));
       await window.showTextDocument(doc, { preserveFocus: false });
+    }),
+    commands.registerCommand("badjuju.new", async () => {
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.new",
+        arguments: [],
+      });
+      const doc = await workspace.openTextDocument(Uri.parse(result as string));
+      await window.showTextDocument(doc, { preserveFocus: false });
     })
   );
 
