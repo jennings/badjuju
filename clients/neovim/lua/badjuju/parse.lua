@@ -68,6 +68,60 @@ local function strip_rename_arrow(path)
   return path
 end
 
+-- Graph node bytes that introduce a commit header line in jj log output.
+-- Mirrors the JS COMMIT_HEADER_RE class in clients/vscode/src/extension.ts.
+-- Does NOT include `~` (the elided-continuation marker).
+local COMMIT_HEADER_GRAPH_CHARS = {
+  '@',
+  '%*', -- literal '*' escaped for Lua patterns
+  '\xE2\x97\x8B', -- ○
+  '\xE2\x97\x8F', -- ●
+  '\xE2\x97\x86', -- ◆
+}
+
+--- Match a commit-header line (graph char + spaces + change_id). Returns the
+--- change_id, or nil if `line` is not a commit header.
+local function match_commit_header(line)
+  if not line then return nil end
+  for _, ch in ipairs(COMMIT_HEADER_GRAPH_CHARS) do
+    local change_id = line:match('^' .. ch .. '%s+(%l+)')
+    if change_id then
+      return change_id
+    end
+  end
+  return nil
+end
+
+--- Return the revision that owns the line at `cursor_line` (0-indexed) in a
+--- status.jujutsu buffer. Mirrors findRevisionForLine in extension.ts.
+---
+--- - A STATUS-section file line (`M file`, `A file`, etc.) belongs to the
+---   working copy → `@`.
+--- - Otherwise walk up from `cursor_line` (inclusive) until we hit a commit
+---   header line; return that commit's change_id.
+--- - Hitting the `STATUS:` section header without finding a commit means we
+---   were in the STATUS file list with no commit context → working copy.
+---@param lines string[]
+---@param cursor_line integer  0-indexed
+---@return string
+function M.find_revision_for_line(lines, cursor_line)
+  local current = lines[cursor_line + 1] or ''
+  if current:match(STATUS_FILE_PATTERN) then
+    return '@'
+  end
+  for i = cursor_line, 0, -1 do
+    local text = lines[i + 1] or ''
+    local change_id = match_commit_header(text)
+    if change_id then
+      return change_id
+    end
+    if text:sub(1, 7) == 'STATUS:' then
+      return '@'
+    end
+  end
+  return '@'
+end
+
 --- Parse a `status.jujutsu` line and return the file path it refers to, or nil.
 ---
 --- Handles two line shapes:
