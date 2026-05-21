@@ -1,4 +1,4 @@
-import { workspace, window, commands, ExtensionContext } from "vscode";
+import { workspace, window, commands, Uri, ExtensionContext } from "vscode";
 import {
   Executable,
   LanguageClient,
@@ -33,13 +33,12 @@ export async function activate(context: ExtensionContext) {
 
   context.subscriptions.push(
     commands.registerCommand("badjuju.status.open", async () => {
-      const folders = workspace.workspaceFolders;
-      if (!folders?.length) return;
-      const uri = folders[0].uri.with({
-        path: folders[0].uri.path + "/.jj/badjuju/status.jj",
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.status",
+        arguments: [],
       });
-      const doc = await workspace.openTextDocument(uri);
-      await window.showTextDocument(doc);
+      const doc = await workspace.openTextDocument(Uri.parse(result as string));
+      await window.showTextDocument(doc, { preserveFocus: false });
     })
   );
 

@@ -58,7 +58,7 @@
     "commands": [
       {
         "command": "badjuju.status.open",
-        "title": "Open status window"
+        "title": "Bad Juju: Open status window"
       }
     ]
   }
