@@ -1,6 +1,8 @@
 target/
 turbo/
 node_modules/
+clients/vscode/out/
+clients/vscode/dist/
 
 # Beads / Dolt files (added by bd init)
 .dolt/

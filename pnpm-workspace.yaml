@@ -1,5 +1,6 @@
 packages:
   - "clients/*"
+  - "server"
 
 catalog:
   "@biomejs/biome": "^2.1.2"

@@ -1,3 +1,11 @@
-.PHONY: fmt
+.PHONY: fmt build test
+
 fmt:
-	dotnet csharpier format .
+	pnpm biome format --write .
+	cargo fmt --manifest-path server/Cargo.toml
+
+build:
+	pnpm turbo build
+
+test:
+	pnpm turbo test

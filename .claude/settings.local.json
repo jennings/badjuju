@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bd ready *)",
+      "Bash(bd list *)"
+    ]
+  }
+}

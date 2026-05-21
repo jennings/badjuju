@@ -2,3 +2,51 @@
 
 An LSP-powered, editor-agnostic front-end for
 https://jj-vcs.github.com/jj/[Jujutsu].
+
+== Overview
+
+Bad Juju exposes Jujutsu VCS operations through the
+https://microsoft.github.io/language-server-protocol/[Language Server Protocol],
+so any LSP-capable editor can show jj status, conflict markers, and change
+information inline.
+
+== Repository Structure
+
+----
+server/          Rust LSP server (tower-lsp)
+clients/
+  vscode/        VS Code extension
+docs/            Design documents
+samples/         Example jj repos used for testing
+----
+
+== Prerequisites
+
+* https://www.rust-lang.org/tools/install[Rust toolchain] (edition 2024)
+* https://nexte.st/[cargo-nextest] (`cargo install cargo-nextest`)
+* https://pnpm.io/installation[pnpm] 10+
+* https://facebook.github.io/watchman/[Watchman] (used by the server for file watching)
+
+== Building
+
+[source,shell]
+----
+pnpm install
+make build
+----
+
+== Testing
+
+[source,shell]
+----
+make test
+----
+
+== Development
+
+Run the VS Code extension in a dev host:
+
+[source,shell]
+----
+pnpm turbo dev
+----

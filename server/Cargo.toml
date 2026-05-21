@@ -3,7 +3,22 @@ name = "badjuju"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "badjuju"
+path = "src/main.rs"
+
+[lib]
+name = "badjuju"
+path = "src/lib.rs"
+
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 tokio = { version = "1.46.1", features = ["io-std", "macros", "rt-multi-thread"] }
+serde_json = "1"
 tower-lsp = "0.20.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 watchman_client = { version = "0.9.0" }
+
+[dev-dependencies]
+tempfile = "3"

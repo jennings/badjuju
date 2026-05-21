@@ -1,38 +1,37 @@
-use std::os::unix::process::CommandExt;
-use std::process::{Command, Stdio};
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer, LspService, Server};
-use watchman_client::Connector;
+use clap::{Parser, Subcommand};
+use tower_lsp::{LspService, Server};
+use tracing_subscriber::EnvFilter;
 
-#[derive(Debug)]
-struct Backend {
-    client: Client,
+use badjuju::server::Backend;
+
+#[derive(Parser)]
+#[command(name = "badjuju", version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
 }
 
-#[tower_lsp::async_trait]
-impl LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
-        Ok(InitializeResult::default())
-    }
-
-    async fn initialized(&self, _: InitializedParams) {
-        self.client
-            .log_message(MessageType::INFO, "server initialized!")
-            .await;
-    }
-
-    async fn shutdown(&self) -> Result<()> {
-        Ok(())
-    }
+#[derive(Subcommand)]
+enum Command {
+    /// Run the LSP server over stdio
+    Lsp,
 }
 
-// #[tokio::main]
-fn main() {
-    // let stdin = tokio::io::stdin();
-    // let stdout = tokio::io::stdout();
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .init();
 
-    let status_output = Command::new("jj").args(&["status"]).output().unwrap();
+    let cli = Cli::parse();
 
-    println!("{}", String::from_utf8(status_output.stdout).unwrap());
+    match cli.command {
+        Command::Lsp => {
+            let stdin = tokio::io::stdin();
+            let stdout = tokio::io::stdout();
+            let (service, socket) = LspService::new(Backend::new);
+            Server::new(stdin, stdout, socket).serve(service).await;
+        }
+    }
 }

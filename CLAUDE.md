@@ -53,18 +53,37 @@ bd close <id>         # Complete work
 
 ## Build & Test
 
-_Add your build and test commands here_
-
 ```bash
-# Example:
-# npm install
-# npm test
+# Install JS dependencies
+pnpm install
+
+# Build all packages (turbo orchestrates order)
+make build          # or: pnpm turbo build
+
+# Run all tests
+make test           # or: pnpm turbo test
+                    # Rust tests use cargo-nextest
+
+# Format code
+make fmt            # biome (JS/TS) + cargo fmt (Rust)
+
+# Rust only
+cargo build --manifest-path server/Cargo.toml
+cargo nextest run --manifest-path server/Cargo.toml
 ```
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+Bad Juju is an LSP-powered, editor-agnostic frontend for [Jujutsu](https://jj-vcs.github.com/jj/) VCS.
+
+- **`server/`** — Rust LSP server built on `tower-lsp`. Speaks JSON-RPC over stdio and wraps `jj` subcommands. Uses `watchman_client` for file watching.
+- **`clients/vscode/`** — VS Code extension (`vscode-badjuju-lsp`) that launches the server and connects via `vscode-languageclient`.
+- **`turbo.jsonc`** / **`pnpm-workspace.yaml`** — Turborepo monorepo. Both `clients/*` and `server` are pnpm workspaces; turbo orchestrates the `build` and `dev` pipelines.
+- **`biome.jsonc`** — Shared linter/formatter config for all JS/TS packages.
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- **Formatting**: Biome for JS/TS, `cargo fmt` for Rust. Run `make fmt` before committing.
+- **Monorepo tasks**: Use `pnpm turbo <task>` rather than running package scripts directly so turbo can cache and parallelize correctly.
+- **Server stdio protocol**: The LSP server communicates over stdin/stdout. Do not add logging to stdout; use the LSP `window/logMessage` notification instead.
+- **Rust edition**: 2024. Async runtime is `tokio` with `rt-multi-thread` and `macros` features.
