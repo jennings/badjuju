@@ -78,6 +78,46 @@ pub fn run_describe(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     Ok(file_uri(&path))
 }
 
+/// Strip JJ: comment lines and the separator from describe.jj content.
+/// Returns the trimmed description, or `None` if nothing remains.
+pub fn parse_describe_content(content: &str) -> Option<String> {
+    let stripped: Vec<&str> = content
+        .lines()
+        .take_while(|line| !line.starts_with("JJ:"))
+        .collect();
+    let trimmed = stripped.join("\n").trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+/// Extract the revset from the `REVSET: <revset>` header line of log.jj.
+pub fn parse_log_revset(content: &str) -> Option<String> {
+    content
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("REVSET: "))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// On describe.jj save: apply stripped description via jj describe, then regenerate status.jj.
+pub fn on_describe_save(jj: &Jj, workspace: &Path, content: &str) -> Result<(), CommandError> {
+    if let Some(desc) = parse_describe_content(content) {
+        jj.describe_set(&desc)?;
+        run_status(jj, workspace)?;
+    }
+    Ok(())
+}
+
+/// On log.jj save: re-parse the REVSET: header and regenerate the file.
+pub fn on_log_save(jj: &Jj, workspace: &Path, content: &str) -> Result<String, CommandError> {
+    let revset = parse_log_revset(content).unwrap_or_else(|| "@".to_string());
+    run_log(jj, workspace, &revset)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CommandError {
     #[error("jj error: {0}")]
@@ -163,5 +203,74 @@ mod tests {
         let bd_dir = badjuju_dir(dir.path()).unwrap();
         assert!(bd_dir.exists());
         assert!(bd_dir.ends_with(".jj/badjuju"));
+    }
+
+    #[test]
+    fn parse_describe_strips_jj_lines() {
+        let content = "my feature\n\nJJ: ------------------------ >8 ------------------------\nJJ: Edit above\n";
+        let result = parse_describe_content(content);
+        assert_eq!(result, Some("my feature".to_string()));
+    }
+
+    #[test]
+    fn parse_describe_returns_none_for_empty_content() {
+        let content = "\n\nJJ: ------------------------ >8 ------------------------\n";
+        assert_eq!(parse_describe_content(content), None);
+    }
+
+    #[test]
+    fn parse_describe_returns_none_for_all_jj_lines() {
+        let content = "JJ: some comment\nJJ: another\n";
+        assert_eq!(parse_describe_content(content), None);
+    }
+
+    #[test]
+    fn parse_log_revset_extracts_header() {
+        let content = "REVSET: @ | @-\n\nsome log output";
+        assert_eq!(parse_log_revset(content), Some("@ | @-".to_string()));
+    }
+
+    #[test]
+    fn parse_log_revset_returns_none_for_missing_header() {
+        let content = "no header here";
+        assert_eq!(parse_log_revset(content), None);
+    }
+
+    #[test]
+    fn parse_log_revset_returns_none_for_empty_revset() {
+        let content = "REVSET: \n\nlog output";
+        assert_eq!(parse_log_revset(content), None);
+    }
+
+    #[test]
+    fn on_describe_save_applies_description() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let content = "new description\n\nJJ: separator\n";
+        on_describe_save(&jj, dir.path(), content).expect("on_describe_save failed");
+        let desc = jj.describe_get().unwrap();
+        assert!(desc.contains("new description"));
+    }
+
+    #[test]
+    fn on_describe_save_skips_empty_content() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        jj.describe_set("original description").unwrap();
+        let content = "\n\nJJ: separator\n";
+        on_describe_save(&jj, dir.path(), content).expect("on_describe_save failed");
+        let desc = jj.describe_get().unwrap();
+        assert!(desc.contains("original description"));
+    }
+
+    #[test]
+    fn on_log_save_regenerates_with_new_revset() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let content = "REVSET: @\n\nold log output";
+        let uri = on_log_save(&jj, dir.path(), content).expect("on_log_save failed");
+        let path = uri.strip_prefix("file://").unwrap();
+        let new_content = std::fs::read_to_string(path).unwrap();
+        assert!(new_content.starts_with("REVSET: @"));
     }
 }

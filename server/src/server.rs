@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -21,6 +22,8 @@ pub const COMMANDS: &[&str] = &[
 struct State {
     workspace_root: Option<PathBuf>,
     binary_path: Option<String>,
+    /// Latest text content for open documents, keyed by URI string.
+    documents: HashMap<String, String>,
 }
 
 impl State {
@@ -46,6 +49,12 @@ impl Backend {
             state: Arc::new(RwLock::new(State::default())),
         }
     }
+}
+
+fn lsp_err(msg: impl ToString) -> Error {
+    let mut err = Error::internal_error();
+    err.message = msg.to_string().into();
+    err
 }
 
 #[tower_lsp::async_trait]
@@ -86,8 +95,15 @@ impl LanguageServer for Backend {
 
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                text_document_sync: Some(TextDocumentSyncCapability::Options(
+                    TextDocumentSyncOptions {
+                        open_close: Some(true),
+                        change: Some(TextDocumentSyncKind::FULL),
+                        save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
+                            include_text: Some(true),
+                        })),
+                        ..Default::default()
+                    },
                 )),
                 execute_command_provider: Some(ExecuteCommandOptions {
                     commands: COMMANDS.iter().map(|s| s.to_string()).collect(),
@@ -110,6 +126,81 @@ impl LanguageServer for Backend {
         Ok(())
     }
 
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let uri = params.text_document.uri.to_string();
+        let text = params.text_document.text;
+        self.state.write().await.documents.insert(uri, text);
+    }
+
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let uri = params.text_document.uri.to_string();
+        if let Some(change) = params.content_changes.into_iter().next() {
+            self.state.write().await.documents.insert(uri, change.text);
+        }
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri.to_string();
+        self.state.write().await.documents.remove(&uri);
+    }
+
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        let uri_str = params.text_document.uri.to_string();
+
+        let state = self.state.read().await;
+        let (jj, workspace) = match (state.jj(), state.workspace_root.clone()) {
+            (Some(jj), Some(root)) => (jj, root),
+            _ => {
+                self.client
+                    .log_message(MessageType::WARNING, "did_save: no jj workspace")
+                    .await;
+                return;
+            }
+        };
+
+        // Get content from params (if include_text worked) or fall back to cached doc.
+        let content = params
+            .text
+            .or_else(|| state.documents.get(&uri_str).cloned());
+
+        let Some(text) = content else {
+            self.client
+                .log_message(
+                    MessageType::WARNING,
+                    format!("did_save: no content for {uri_str}"),
+                )
+                .await;
+            return;
+        };
+
+        let filename = params
+            .text_document
+            .uri
+            .to_file_path()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
+
+        drop(state);
+
+        match filename.as_deref() {
+            Some("describe.jj") => {
+                if let Err(e) = commands::on_describe_save(&jj, &workspace, &text) {
+                    self.client
+                        .log_message(MessageType::ERROR, format!("describe save failed: {e}"))
+                        .await;
+                }
+            }
+            Some("log.jj") => {
+                if let Err(e) = commands::on_log_save(&jj, &workspace, &text) {
+                    self.client
+                        .log_message(MessageType::ERROR, format!("log save failed: {e}"))
+                        .await;
+                }
+            }
+            _ => {}
+        }
+    }
+
     async fn execute_command(
         &self,
         params: ExecuteCommandParams,
@@ -117,22 +208,16 @@ impl LanguageServer for Backend {
         info!(command = %params.command, "execute_command");
 
         let state = self.state.read().await;
-        let jj = state.jj().ok_or_else(|| Error::invalid_request())?;
-
+        let jj = state.jj().ok_or_else(Error::invalid_request)?;
         let workspace = state
             .workspace_root
             .clone()
             .ok_or_else(Error::invalid_request)?;
-
-        let map_err = |e: commands::CommandError| {
-            let mut err = Error::internal_error();
-            err.message = e.to_string().into();
-            err
-        };
+        drop(state);
 
         match params.command.as_str() {
             "badjuju.status" => {
-                let uri = commands::run_status(&jj, &workspace).map_err(map_err)?;
+                let uri = commands::run_status(&jj, &workspace).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.log" => {
@@ -141,11 +226,11 @@ impl LanguageServer for Backend {
                     .first()
                     .and_then(|v| v.as_str())
                     .unwrap_or("@");
-                let uri = commands::run_log(&jj, &workspace, revset).map_err(map_err)?;
+                let uri = commands::run_log(&jj, &workspace, revset).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.describe" => {
-                let uri = commands::run_describe(&jj, &workspace).map_err(map_err)?;
+                let uri = commands::run_describe(&jj, &workspace).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.new" => {
