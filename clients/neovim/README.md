@@ -1,6 +1,6 @@
 # Bad Juju — Neovim Client
 
-Neovim LSP configuration for the Bad Juju Jujutsu VCS integration.
+Neovim LSP configuration and plugin for the Bad Juju Jujutsu VCS integration.
 
 ## Requirements
 
@@ -9,34 +9,43 @@ Neovim LSP configuration for the Bad Juju Jujutsu VCS integration.
 
 ## Setup
 
-### 1. Register the filetype
+### 1. Add the plugin to your runtimepath
 
-Copy `ftdetect/jujutsu.vim` into your Neovim runtime path so `.jj` files are recognized:
+This directory (`clients/neovim/`) is a Neovim plugin. Add it to your runtimepath
+however you normally install plugins (lazy.nvim `dir = ...`, packer, symlink into
+`~/.config/nvim/`, etc.). It provides:
 
-```sh
-mkdir -p ~/.config/nvim/ftdetect
-cp ftdetect/jujutsu.vim ~/.config/nvim/ftdetect/
-```
+- `ftdetect/jujutsu.vim` — registers the `jujutsu` filetype for `*.jj`
+- `plugin/badjuju.lua` — registers the `:JJ*` user commands on startup
+- `lsp/jujutsu.lua` — LSP server config consumed by `vim.lsp.enable`
 
-Or add this to your `init.lua` / `init.vim`:
-
-```vim
-autocmd BufRead,BufNewFile *.jj set filetype=jujutsu
-```
-
-### 2. Register the LSP config
-
-Copy `lsp/jujutsu.lua` into your Neovim config:
-
-```sh
-mkdir -p ~/.config/nvim/lsp
-cp lsp/jujutsu.lua ~/.config/nvim/lsp/
-```
-
-Then enable it in your `init.lua`:
+### 2. Enable the LSP
 
 ```lua
 vim.lsp.enable('jujutsu')
 ```
 
-The LSP config uses Neovim 0.11's built-in `vim.lsp.enable` API with `root_markers = { '.jj' }` for automatic workspace detection.
+The LSP config uses Neovim 0.11's built-in `vim.lsp.enable` API with
+`root_markers = { '.jj' }` for automatic workspace detection. The server
+attaches to buffers with filetype `jujutsu`.
+
+## Commands
+
+All commands send a `workspace/executeCommand` request to the running
+`jujutsu` LSP and open the returned file in the current window.
+
+| Command | Description |
+|---|---|
+| `:JJStatus` | Open `.jj/badjuju/status.jj` |
+| `:JJLog [revset]` | Open `.jj/badjuju/log.jj`; defaults to `@` |
+| `:JJDescribe` | Open the describe buffer for the working copy |
+| `:JJNew` | Create a new change and refresh log |
+| `:JJRefresh` | Refresh the badjuju buffer at the cursor |
+| `:JJSquash [file] [revision]` | Squash (file-scoped follow-up to come) |
+| `:JJUnsquash [file] [revision]` | Unsquash (file-scoped follow-up to come) |
+| `:JJToggleStat` | Toggle `--stat` rendering in log |
+| `:JJUndo` | Run `jj undo` and refresh |
+| `:JJAbandon [revision]` | Abandon a revision (defaults to `@`) |
+
+All commands require an active `jujutsu` LSP client. Open any `.jj` file in a
+jj workspace first to start the server.
