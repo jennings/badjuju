@@ -10,7 +10,7 @@ n   new change
 l   open log
 d   describe
 s   squash file at cursor into parent
-u   unsquash file at cursor from parent into child
+u   jj undo (revert last operation)
 =   toggle --stat on the stack log
 g   refresh
 q   close";
@@ -255,6 +255,16 @@ pub fn run_new(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     run_status(jj, workspace)
 }
 
+/// Run `badjuju.undo`: revert the last operation with `jj undo`, then refresh status.
+/// Surfaces failures as a MESSAGE: prelude in the status buffer.
+pub fn run_undo(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
+    let stat = read_current_stat(workspace);
+    match jj.undo() {
+        Ok(()) => run_status(jj, workspace),
+        Err(e) => write_status(jj, workspace, Some(&format!("undo failed: {e}")), stat),
+    }
+}
+
 /// Strip JJ: comment lines and the separator from describe.jj content.
 /// Returns the trimmed description, or `None` if nothing remains.
 pub fn parse_describe_content(content: &str) -> Option<String> {
@@ -343,7 +353,7 @@ mod tests {
             "l   open log",
             "d   describe",
             "s   squash",
-            "u   unsquash",
+            "u   jj undo",
             "g   refresh",
             "q   close",
         ] {
@@ -687,6 +697,36 @@ mod tests {
         let uri = run_unsquash(&jj, dir.path(), "readme.txt").expect("run_unsquash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(content.starts_with("STATUS:"));
+    }
+
+    #[test]
+    fn run_undo_reverts_last_operation_and_refreshes_status() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        jj.describe_set("first").unwrap();
+        jj.describe_set("second").unwrap();
+        let uri = run_undo(&jj, dir.path()).expect("run_undo failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.starts_with("STATUS:"));
+        let desc = jj.describe_get().unwrap();
+        assert!(
+            desc.contains("first"),
+            "expected undo to roll back to first; got: {desc}"
+        );
+    }
+
+    #[test]
+    fn run_undo_preserves_stat_state() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        run_toggle_stat(&jj, dir.path()).unwrap();
+        jj.describe_set("a description").unwrap();
+        let uri = run_undo(&jj, dir.path()).expect("run_undo failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.contains("STATS: on"),
+            "undo should preserve STATS: on:\n{content}"
+        );
     }
 
     #[test]

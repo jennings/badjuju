@@ -82,6 +82,12 @@ impl Jj {
         Ok(())
     }
 
+    /// Run `jj undo` to revert the last operation.
+    pub fn undo(&self) -> Result<(), JjError> {
+        self.run(&["undo"])?;
+        Ok(())
+    }
+
     /// List change IDs matching the given revset, one per line.
     pub fn change_ids(&self, revset: &str) -> Result<Vec<String>, JjError> {
         let out = self.run(&[
@@ -175,6 +181,20 @@ mod tests {
         jj.new_change().expect("new failed");
         let out = jj.log("@-").expect("log failed");
         assert!(!out.is_empty());
+    }
+
+    #[test]
+    fn undo_reverts_last_operation() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        jj.describe_set("first description").unwrap();
+        jj.describe_set("second description").unwrap();
+        jj.undo().expect("undo failed");
+        let desc = jj.describe_get().unwrap();
+        assert!(
+            desc.contains("first description"),
+            "expected undo to revert to first description, got: {desc}"
+        );
     }
 
     #[test]

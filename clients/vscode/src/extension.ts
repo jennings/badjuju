@@ -287,6 +287,13 @@ export async function activate(context: ExtensionContext) {
       });
       await openServerResult(result as string);
     }),
+    commands.registerCommand("badjuju.undo.open", async () => {
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.undo",
+        arguments: [],
+      });
+      await openServerResult(result as string);
+    }),
   );
 
   client = new LanguageClient(

@@ -112,6 +112,11 @@
         "command": "badjuju.toggleStat.open",
         "category": "jj",
         "title": "Toggle --stat on the status window's stack log"
+      },
+      {
+        "command": "badjuju.undo.open",
+        "category": "jj",
+        "title": "Undo last operation (jj undo)"
       }
     ],
     "keybindings": [
@@ -151,7 +156,7 @@
         "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
       },
       {
-        "command": "badjuju.unsquash.file",
+        "command": "badjuju.undo.open",
         "key": "u",
         "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
       },
