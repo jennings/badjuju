@@ -1,0 +1,21 @@
+# Dev-only files that don't belong in the published VSIX.
+# vsce already drops node_modules when packaged with --no-dependencies and
+# strips .git*/.npmignore on its own; everything else has to be listed here.
+
+# TypeScript sources — runtime code lives in out/extension.js.
+src/**
+tsconfig.json
+
+# Editor configuration.
+.vscode/**
+
+# Redo build scripts — only useful at build time.
+*.do
+
+# Don't recursively include previously built VSIX archives.
+*.vsix
+
+# node_modules is omitted by `vsce package --no-dependencies`; keep an
+# explicit guard so accidental `vsce package` runs without the flag still
+# produce a slim archive.
+node_modules/**
