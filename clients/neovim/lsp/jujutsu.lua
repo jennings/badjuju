@@ -1,5 +1,5 @@
 return {
 	cmd = { 'badjuju', 'lsp' },
-	filetypes = { 'jj' },
+	filetypes = { 'jujutsu' },
 	root_markers = { '.jj' }
 }
