@@ -9,14 +9,19 @@
  *
  * Token precedence biases the lexer toward the structured productions when
  * an "any line" catch-all could otherwise win on length:
- *   3  jj_comment              (must beat section_keyword and content_text)
- *   2  section_keyword, file_status   (must beat content_text)
+ *   3  jj_comment, commit_id   (must beat section_keyword / _alnum_run)
+ *   2  section_keyword, file_status,
+ *      change_id, graph_char, _alnum_run   (must beat content_text)
  *   0  content_text catch-all
  *
  * section_keyword embeds the trailing colon so the lexer only fires this
  * rule when the line really is a header; the alternative — a bare
  * [A-Z][A-Z ]* token — would also fire for English words like "Apple" and
  * leave the parser unable to find the required colon.
+ *
+ * change_id (8 lowercase letters) intentionally overlaps with common
+ * English words. The TextMate grammar accepts the same overlap and lets
+ * highlight precedence decide; we mirror that behavior here.
  */
 
 module.exports = grammar({
@@ -70,7 +75,16 @@ module.exports = grammar({
 
     _blank_line: () => "\n",
 
-    _content_atom: ($) => choice($.empty_marker, $.bookmark, $._content_text),
+    _content_atom: ($) =>
+      choice(
+        $.empty_marker,
+        $.bookmark,
+        $.commit_id,
+        $.change_id,
+        $.graph_char,
+        $._alnum_run,
+        $._content_text,
+      ),
 
     // (empty) and (no description set) markers, anywhere within a line.
     empty_marker: () => /\((empty|no description set)\)/,
@@ -80,13 +94,40 @@ module.exports = grammar({
     // sequence not containing ] or newline is treated as a bookmark.
     bookmark: () => /\[[^\]\n]+\]/,
 
-    // Greedy run of "uninteresting" characters, or a lone ( or [ that
-    // failed to start an empty_marker / bookmark. Keeping the lone-char
-    // alternatives last means we only fall to them when the structured
-    // alternatives didn't match.
+    // [0-9][0-9a-f]{7,39} — hex commit id, 8 to 40 chars total. Tree-sitter
+    // tokens cannot contain regex assertions like \b, so word-boundary
+    // behavior is approximated by _alnum_run below, which consumes any
+    // longer lowercase-alphanumeric stretch and prevents change_id from
+    // carving a prefix out of a longer identifier. commit_id has higher
+    // precedence than _alnum_run so a pure hex run still binds as a
+    // commit_id rather than a hidden alphanumeric blob.
+    commit_id: () => token(prec(3, /[0-9][0-9a-f]{7,39}/)),
+
+    // [a-z]{8} — exactly 8 lowercase letters. Overlap with common English
+    // words is intentional; see the file-level comment. _alnum_run prevents
+    // matching an 8-letter prefix of a longer lowercase run.
+    change_id: () => token(prec(2, /[a-z]{8}/)),
+
+    // Single graph drawing or working-copy marker character.
+    graph_char: () => token(prec(2, /[│◆@~…○◉╭╮╯╰├─┤]/)),
+
+    // Hidden helper: lowercase-alphanumeric runs of 9 or more characters.
+    // Because tree-sitter prefers the longest match at equal precedence,
+    // this rule out-competes change_id whenever the surrounding text would
+    // have violated change_id's word-boundary expectation.
+    _alnum_run: () => token(prec(2, /[a-z0-9]{9,}/)),
+
+    // Filler text between recognized atoms. The first alternative
+    // greedily eats characters that cannot start any other atom (uppercase
+    // letters, punctuation, etc.); the second alternative matches any
+    // remaining non-newline char so the lexer can advance one position at
+    // a time through stretches that start with an "atom-leading" char
+    // (lowercase letter, digit, `[`, `(`, graph char) without committing
+    // to the wrong rule.
+    //
     // Use \x5b for `[` inside the negated class because the regex crate
-    // tree-sitter ships rejects an unescaped `[` there, while biome's lint
-    // rejects the conventional `\[` escape as "useless".
-    _content_text: () => /[^\x5b(\n]+|\(|\[/,
+    // tree-sitter ships rejects an unescaped `[` there, while biome's
+    // lint rejects the conventional `\[` escape as "useless".
+    _content_text: () => /[^\x5b(\n0-9a-z│◆@~…○◉╭╮╯╰├─┤]+|[^\n]/,
   },
 });

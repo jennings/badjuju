@@ -12,11 +12,23 @@
           "named": true
         },
         {
+          "type": "change_id",
+          "named": true
+        },
+        {
+          "type": "commit_id",
+          "named": true
+        },
+        {
           "type": "empty_marker",
           "named": true
         },
         {
           "type": "file_status",
+          "named": true
+        },
+        {
+          "type": "graph_char",
           "named": true
         }
       ]
@@ -62,11 +74,23 @@
           "named": true
         },
         {
+          "type": "change_id",
+          "named": true
+        },
+        {
+          "type": "commit_id",
+          "named": true
+        },
+        {
           "type": "empty_marker",
           "named": true
         },
         {
           "type": "file_status_line",
+          "named": true
+        },
+        {
+          "type": "graph_char",
           "named": true
         },
         {
@@ -89,11 +113,23 @@
     "named": true
   },
   {
+    "type": "change_id",
+    "named": true
+  },
+  {
+    "type": "commit_id",
+    "named": true
+  },
+  {
     "type": "empty_marker",
     "named": true
   },
   {
     "type": "file_status",
+    "named": true
+  },
+  {
+    "type": "graph_char",
     "named": true
   },
   {

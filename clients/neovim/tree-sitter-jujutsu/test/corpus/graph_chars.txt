@@ -1,42 +1,45 @@
 ================================================================
-(empty) marker on its own line
+working copy marker at line start
 ================================================================
-(empty)
+@ working copy
 ----------------------------------------------------------------
 
 (source_file
-  (empty_marker))
+  (graph_char))
 
 ================================================================
-(no description set) marker on its own line
+vertical line graph char
 ================================================================
-(no description set)
+│ description
 ----------------------------------------------------------------
 
 (source_file
-  (empty_marker))
+  (graph_char))
 
 ================================================================
-(empty) marker embedded in a line
+diamond graph char
 ================================================================
-abc (empty) def
+◆ description
 ----------------------------------------------------------------
 
 (source_file
-  (empty_marker))
+  (graph_char))
 
 ================================================================
-(other) is not an empty_marker
+multiple graph chars on the same line
 ================================================================
-(other)
+├─┤ stuff
 ----------------------------------------------------------------
 
-(source_file)
+(source_file
+  (graph_char)
+  (graph_char)
+  (graph_char))
 
 ================================================================
-plain (empty without closing paren is not an empty_marker
+plain punctuation is not a graph char
 ================================================================
-(empty
+| pipe is not in the set
 ----------------------------------------------------------------
 
 (source_file)
