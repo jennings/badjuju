@@ -39,6 +39,22 @@ export async function activate(context: ExtensionContext) {
       });
       const doc = await workspace.openTextDocument(Uri.parse(result as string));
       await window.showTextDocument(doc, { preserveFocus: false });
+    }),
+    commands.registerCommand("badjuju.describe.open", async () => {
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.describe",
+        arguments: [],
+      });
+      const doc = await workspace.openTextDocument(Uri.parse(result as string));
+      await window.showTextDocument(doc, { preview: false, preserveFocus: false });
+    }),
+    commands.registerCommand("badjuju.log.open", async () => {
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.log",
+        arguments: [],
+      });
+      const doc = await workspace.openTextDocument(Uri.parse(result as string));
+      await window.showTextDocument(doc, { preserveFocus: false });
     })
   );
 

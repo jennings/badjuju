@@ -59,6 +59,14 @@
       {
         "command": "badjuju.status.open",
         "title": "Bad Juju: Open status window"
+      },
+      {
+        "command": "badjuju.describe.open",
+        "title": "Bad Juju: Describe working copy"
+      },
+      {
+        "command": "badjuju.log.open",
+        "title": "Bad Juju: Open log"
       }
     ]
   }
