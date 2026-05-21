@@ -106,11 +106,13 @@ impl Jj {
     }
 
     /// Squash a single file's changes from `source` into `source`'s parent.
-    /// Uses `--use-destination-message` to avoid opening an editor.
+    /// Uses `--use-destination-message` to avoid opening an editor and
+    /// `--keep-emptied` so the source revision survives even when it becomes empty.
     pub fn squash_file_into_parent(&self, source: &str, file: &str) -> Result<(), JjError> {
         self.run(&[
             "squash",
             "--use-destination-message",
+            "--keep-emptied",
             "--revision",
             source,
             file,
@@ -119,11 +121,13 @@ impl Jj {
     }
 
     /// Squash a single file's changes from `source` into `dest` (typically a child).
-    /// Uses `--use-destination-message` to avoid opening an editor.
+    /// Uses `--use-destination-message` to avoid opening an editor and
+    /// `--keep-emptied` so the source revision survives even when it becomes empty.
     pub fn squash_file_into(&self, source: &str, dest: &str, file: &str) -> Result<(), JjError> {
         self.run(&[
             "squash",
             "--use-destination-message",
+            "--keep-emptied",
             "--from",
             source,
             "--into",
@@ -264,6 +268,28 @@ mod tests {
         assert!(
             !status.contains("readme.txt"),
             "expected readme.txt squashed away; status was:\n{status}"
+        );
+    }
+
+    #[test]
+    fn squash_file_into_parent_keeps_source_when_emptied() {
+        // Set up: parent (empty) → @ (has only readme.txt). Squashing readme.txt away
+        // from @ would normally leave @ empty and abandon it. With --keep-emptied, @ stays.
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        // Parent commit, with no changes of its own.
+        jj.describe_set("parent").unwrap();
+        jj.new_change().unwrap();
+        // @ has only this one file.
+        std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
+        jj.describe_set("middle change").unwrap();
+        let before = jj.change_ids("@").unwrap();
+        jj.squash_file_into_parent("@", "readme.txt")
+            .expect("squash failed");
+        let after = jj.change_ids("@").unwrap();
+        assert_eq!(
+            before, after,
+            "@ should still be the same change after --keep-emptied squash; before: {before:?}, after: {after:?}"
         );
     }
 
