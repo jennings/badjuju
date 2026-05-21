@@ -1,4 +1,4 @@
 #!/bin/sh
 set -e
 exec >&2
-rm -rf out
+rm -rf out *.vsix

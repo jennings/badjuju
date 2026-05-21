@@ -244,6 +244,11 @@
         "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
+        "command": "badjuju.describe.open",
+        "key": "d",
+        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
         "command": "badjuju.diff.cursor",
         "key": "shift+d",
         "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
