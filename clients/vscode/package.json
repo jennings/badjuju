@@ -169,25 +169,21 @@
       {
         "command": "badjuju.next.open",
         "key": "ctrl+n",
-        "mac": "cmd+n",
         "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.prev.open",
         "key": "ctrl+p",
-        "mac": "cmd+p",
         "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.next.edit",
         "key": "ctrl+shift+n",
-        "mac": "cmd+shift+n",
         "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.prev.edit",
         "key": "ctrl+shift+p",
-        "mac": "cmd+shift+p",
         "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
@@ -223,7 +219,6 @@
       {
         "command": "badjuju.unsquash.file",
         "key": "ctrl+k u",
-        "mac": "cmd+k u",
         "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {

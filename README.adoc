@@ -51,7 +51,7 @@ n     new change
 l     open log
 d     describe
 s     squash file at cursor into parent
-U     unsquash file at cursor from parent into child   (or Cmd+K U / Ctrl+K U when vim shadows U)
+U     unsquash file at cursor from parent into child   (or Ctrl+K U when vim shadows U)
 a     abandon commit at cursor (or working copy)
 u     jj undo (revert last operation)
 =     toggle --stat on the stack log

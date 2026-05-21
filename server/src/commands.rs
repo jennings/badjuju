@@ -6,20 +6,20 @@ const STATUS_REVSET: &str = "ancestors(reachable(@, mutable()), 2)";
 
 const STATUS_COMMAND_REFERENCE: &str = "\
 COMMAND REFERENCE:
-n            new change
-l            open log
-d            describe commit at cursor (opens in a split)
-s            squash file at cursor into parent
-U            unsquash file at cursor from parent into child   (or Cmd+K U / Ctrl+K U when vim shadows U)
-a            abandon commit at cursor (or working copy)
-u            jj undo (revert last operation)
-Cmd+n        jj next (move working copy forward)
-Cmd+p        jj prev (move working copy back)
-Cmd+Shift+n  jj next --edit (edit the child in place)
-Cmd+Shift+p  jj prev --edit (edit the parent in place)
-=            toggle --stat on the stack log
-g            refresh
-q            close";
+n             new change
+l             open log
+d             describe commit at cursor (opens in a split)
+s             squash file at cursor into parent
+U             unsquash file at cursor from parent into child   (or Ctrl+K U when vim shadows U)
+a             abandon commit at cursor (or working copy)
+u             jj undo (revert last operation)
+Ctrl+n        jj next (move working copy forward)
+Ctrl+p        jj prev (move working copy back)
+Ctrl+Shift+n  jj next --edit (edit the child in place)
+Ctrl+Shift+p  jj prev --edit (edit the parent in place)
+=             toggle --stat on the stack log
+g             refresh
+q             close";
 
 const LOG_COMMAND_REFERENCE: &str = "\
 COMMAND REFERENCE:
@@ -504,19 +504,19 @@ mod tests {
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         for key in [
-            "n            new",
-            "l            open log",
-            "d            describe",
-            "s            squash",
-            "U            unsquash",
-            "a            abandon",
-            "u            jj undo",
-            "Cmd+n        jj next",
-            "Cmd+p        jj prev",
-            "Cmd+Shift+n  jj next --edit",
-            "Cmd+Shift+p  jj prev --edit",
-            "g            refresh",
-            "q            close",
+            "n             new",
+            "l             open log",
+            "d             describe",
+            "s             squash",
+            "U             unsquash",
+            "a             abandon",
+            "u             jj undo",
+            "Ctrl+n        jj next",
+            "Ctrl+p        jj prev",
+            "Ctrl+Shift+n  jj next --edit",
+            "Ctrl+Shift+p  jj prev --edit",
+            "g             refresh",
+            "q             close",
         ] {
             assert!(
                 content.contains(key),
