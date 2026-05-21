@@ -49,12 +49,16 @@ const statusProvider = new StatusContentProvider();
 
 const LOG_SHORTCUT_LINE_RE = /^JJ:\s+([A-Za-z][\w ]*?):\s+(.+)$/;
 const STATUS_FILE_LINE_RE = /^([MADCR])\s+(.+)$/;
+// Matches a `jj log --stat` per-file line, e.g. "│  src/main.rs | 3 +++".
+// Skips the summary line ("N files changed, ...") because it has no " | <N> <+/->".
+const STAT_LINE_RE =
+  /^[\s│○●◆~*╭╮╯╰─├┤┬┴┼]*\s(\S[\S ]*?)\s+\|\s+\d+\s+[+-]+\s*$/;
 
 /** Parse a status.jj line and return the file path it refers to, or null. */
 export function parseStatusFile(line: string): string | null {
-  const m = line.match(STATUS_FILE_LINE_RE);
+  const m = line.match(STATUS_FILE_LINE_RE) ?? line.match(STAT_LINE_RE);
   if (!m) return null;
-  const rest = m[2].trim();
+  const rest = m[m.length - 1].trim();
   // jj renders renames/copies as "old => new" — squash needs the destination path.
   const arrow = rest.lastIndexOf(" => ");
   return arrow >= 0 ? rest.slice(arrow + 4).trim() : rest;
@@ -275,6 +279,13 @@ export async function activate(context: ExtensionContext) {
     }),
     commands.registerCommand("badjuju.unsquash.file", async () => {
       await runFileScopedStatusCommand("badjuju.unsquash");
+    }),
+    commands.registerCommand("badjuju.toggleStat.open", async () => {
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.toggleStat",
+        arguments: [],
+      });
+      await openServerResult(result as string);
     }),
   );
 

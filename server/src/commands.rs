@@ -11,6 +11,7 @@ l   open log
 d   describe
 s   squash file at cursor into parent
 u   unsquash file at cursor from parent into child
+=   toggle --stat on the stack log
 g   refresh
 q   close";
 
@@ -54,26 +55,68 @@ fn file_uri(path: &Path) -> String {
     format!("file://{}", path.display())
 }
 
-/// Run `badjuju.status`: write status.jj and return its URI.
+/// Run `badjuju.status`: write status.jj (preserving any current STATS toggle) and return its URI.
 pub fn run_status(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
-    write_status(jj, workspace, None)
+    let stat = read_current_stat(workspace);
+    write_status(jj, workspace, None, stat)
+}
+
+/// Toggle the STATS marker in status.jj and re-render.
+pub fn run_toggle_stat(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
+    let next = !read_current_stat(workspace);
+    write_status(jj, workspace, None, next)
+}
+
+/// Read the STATS marker from the current status.jj if it exists, defaulting to `false`.
+fn read_current_stat(workspace: &Path) -> bool {
+    let Ok(dir) = badjuju_dir(workspace) else {
+        return false;
+    };
+    let path = dir.join("status.jj");
+    std::fs::read_to_string(&path)
+        .ok()
+        .as_deref()
+        .and_then(parse_status_stats)
+        .unwrap_or(false)
+}
+
+/// Extract the STATS marker from a status.jj buffer. Returns `Some(true)` for "on",
+/// `Some(false)` for "off", and `None` if the marker is missing or unrecognized.
+pub fn parse_status_stats(content: &str) -> Option<bool> {
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("STATS: ") {
+            return match rest.trim() {
+                "on" => Some(true),
+                "off" => Some(false),
+                _ => None,
+            };
+        }
+    }
+    None
 }
 
 /// Write status.jj, optionally prepending a MESSAGE: block. Returns the URI.
-fn write_status(jj: &Jj, workspace: &Path, message: Option<&str>) -> Result<String, CommandError> {
+fn write_status(
+    jj: &Jj,
+    workspace: &Path,
+    message: Option<&str>,
+    stat: bool,
+) -> Result<String, CommandError> {
     let status = jj.status()?;
-    let stack = jj.log(STATUS_REVSET)?;
+    let stack = jj.log_with_stat(STATUS_REVSET, stat)?;
 
     let prelude = match message {
         Some(m) => format!("MESSAGE: {}\n\n", m.trim()),
         None => String::new(),
     };
+    let stats_marker = if stat { "on" } else { "off" };
 
     let content = format!(
-        "{}STATUS:\n\n{}\n\nSTACK: {}\n\n{}\n\n{}",
+        "{}STATUS:\n\n{}\n\nSTACK: {}\nSTATS: {}\n\n{}\n\n{}",
         prelude,
         status.trim_end(),
         STATUS_REVSET,
+        stats_marker,
         stack.trim_end(),
         STATUS_COMMAND_REFERENCE,
     );
@@ -87,8 +130,9 @@ fn write_status(jj: &Jj, workspace: &Path, message: Option<&str>) -> Result<Stri
 /// Run `badjuju.squash`: move the file's changes from @ into @-, then refresh status.
 /// If @ has multiple parents, no action is taken and the status buffer reports the error.
 pub fn run_squash(jj: &Jj, workspace: &Path, file: &str) -> Result<String, CommandError> {
+    let stat = read_current_stat(workspace);
     if file.is_empty() {
-        return write_status(jj, workspace, Some("squash: no file selected"));
+        return write_status(jj, workspace, Some("squash: no file selected"), stat);
     }
     let parents = jj.change_ids("parents(@)")?;
     if parents.len() != 1 {
@@ -99,19 +143,26 @@ pub fn run_squash(jj: &Jj, workspace: &Path, file: &str) -> Result<String, Comma
                 "squash {file}: working copy has {} parents (need exactly 1)",
                 parents.len()
             )),
+            stat,
         );
     }
     match jj.squash_file_into_parent("@", file) {
         Ok(()) => run_status(jj, workspace),
-        Err(e) => write_status(jj, workspace, Some(&format!("squash {file} failed: {e}"))),
+        Err(e) => write_status(
+            jj,
+            workspace,
+            Some(&format!("squash {file} failed: {e}")),
+            stat,
+        ),
     }
 }
 
 /// Run `badjuju.unsquash`: move the file's changes from @ into its child, then refresh status.
 /// If @ has zero or multiple children, no action is taken and the status buffer reports the error.
 pub fn run_unsquash(jj: &Jj, workspace: &Path, file: &str) -> Result<String, CommandError> {
+    let stat = read_current_stat(workspace);
     if file.is_empty() {
-        return write_status(jj, workspace, Some("unsquash: no file selected"));
+        return write_status(jj, workspace, Some("unsquash: no file selected"), stat);
     }
     let children = jj.change_ids("(@)+")?;
     if children.len() != 1 {
@@ -122,11 +173,17 @@ pub fn run_unsquash(jj: &Jj, workspace: &Path, file: &str) -> Result<String, Com
                 "unsquash {file}: working copy has {} children (need exactly 1)",
                 children.len()
             )),
+            stat,
         );
     }
     match jj.squash_file_into("@", &children[0], file) {
         Ok(()) => run_status(jj, workspace),
-        Err(e) => write_status(jj, workspace, Some(&format!("unsquash {file} failed: {e}"))),
+        Err(e) => write_status(
+            jj,
+            workspace,
+            Some(&format!("unsquash {file} failed: {e}")),
+            stat,
+        ),
     }
 }
 
@@ -630,6 +687,76 @@ mod tests {
         let uri = run_unsquash(&jj, dir.path(), "readme.txt").expect("run_unsquash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(content.starts_with("STATUS:"));
+    }
+
+    #[test]
+    fn run_status_defaults_to_stat_off() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_status(&jj, dir.path()).unwrap();
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.contains("STATS: off"),
+            "expected STATS: off:\n{content}"
+        );
+    }
+
+    #[test]
+    fn toggle_stat_flips_marker() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        run_status(&jj, dir.path()).unwrap();
+        let uri = run_toggle_stat(&jj, dir.path()).unwrap();
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.contains("STATS: on"),
+            "expected STATS: on after toggle:\n{content}"
+        );
+        let uri = run_toggle_stat(&jj, dir.path()).unwrap();
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.contains("STATS: off"),
+            "expected STATS: off after second toggle:\n{content}"
+        );
+    }
+
+    #[test]
+    fn run_status_preserves_stat_across_calls() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        run_toggle_stat(&jj, dir.path()).unwrap(); // stat on
+        let uri = run_status(&jj, dir.path()).unwrap();
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.contains("STATS: on"),
+            "stat should be preserved:\n{content}"
+        );
+    }
+
+    #[test]
+    fn parse_status_stats_recognizes_on_and_off() {
+        assert_eq!(parse_status_stats("STATS: on\n"), Some(true));
+        assert_eq!(parse_status_stats("STATS: off\n"), Some(false));
+        assert_eq!(parse_status_stats("STATUS:\nSTATS: on\n"), Some(true));
+        assert_eq!(parse_status_stats("no marker here"), None);
+        assert_eq!(parse_status_stats("STATS: weird\n"), None);
+    }
+
+    #[test]
+    fn squash_preserves_stat_state() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
+        jj.describe_set("parent").unwrap();
+        jj.new_change().unwrap();
+        std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
+        run_toggle_stat(&jj, dir.path()).unwrap(); // stat on
+        let uri = run_squash(&jj, dir.path(), "readme.txt").unwrap();
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.contains("STATS: on"),
+            "squash should preserve STATS: on:\n{content}"
+        );
     }
 
     #[test]

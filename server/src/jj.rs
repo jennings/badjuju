@@ -53,6 +53,14 @@ impl Jj {
         self.run(&["log", "--revisions", revset])
     }
 
+    pub fn log_with_stat(&self, revset: &str, stat: bool) -> Result<String, JjError> {
+        if stat {
+            self.run(&["log", "--revisions", revset, "--stat"])
+        } else {
+            self.run(&["log", "--revisions", revset])
+        }
+    }
+
     pub fn describe_get(&self) -> Result<String, JjError> {
         self.run(&[
             "log",

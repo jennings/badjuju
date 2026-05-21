@@ -107,6 +107,11 @@
         "command": "badjuju.unsquash.file",
         "category": "jj",
         "title": "Unsquash file at cursor from parent into child"
+      },
+      {
+        "command": "badjuju.toggleStat.open",
+        "category": "jj",
+        "title": "Toggle --stat on the status window's stack log"
       }
     ],
     "keybindings": [
@@ -148,6 +153,11 @@
       {
         "command": "badjuju.unsquash.file",
         "key": "u",
+        "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.toggleStat.open",
+        "key": "=",
         "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
       },
       {
