@@ -226,6 +226,60 @@ require('nvim-treesitter.configs').setup({
 Then run `:TSInstall jujutsu` once to compile and install the parser shared
 library into `nvim-treesitter`'s `parser/` directory.
 
+If you load `nvim-treesitter` via a plugin manager, move the
+`parser_config.jujutsu = { ... }` patch into the same `config` function so
+it runs before `setup`:
+
+```lua
+-- lazy.nvim
+{
+  'nvim-treesitter/nvim-treesitter',
+  build = ':TSUpdate',
+  config = function()
+    local parser_config = require('nvim-treesitter.parsers').get_parser_configs()
+    parser_config.jujutsu = {
+      install_info = {
+        url = '/absolute/path/to/bad-juju/clients/neovim/tree-sitter-jujutsu',
+        files = { 'src/parser.c' },
+        branch = 'main',
+        generate_requires_npm = false,
+        requires_generate_from_grammar = false,
+      },
+      filetype = 'jujutsu',
+    }
+    require('nvim-treesitter.configs').setup({
+      ensure_installed = { 'jujutsu' },
+      highlight = { enable = true },
+    })
+  end,
+}
+```
+
+```lua
+-- packer.nvim
+use {
+  'nvim-treesitter/nvim-treesitter',
+  run = ':TSUpdate',
+  config = function()
+    local parser_config = require('nvim-treesitter.parsers').get_parser_configs()
+    parser_config.jujutsu = {
+      install_info = {
+        url = '/absolute/path/to/bad-juju/clients/neovim/tree-sitter-jujutsu',
+        files = { 'src/parser.c' },
+        branch = 'main',
+        generate_requires_npm = false,
+        requires_generate_from_grammar = false,
+      },
+      filetype = 'jujutsu',
+    }
+    require('nvim-treesitter.configs').setup({
+      ensure_installed = { 'jujutsu' },
+      highlight = { enable = true },
+    })
+  end,
+}
+```
+
 ### Verifying the install
 
 Open a `.jujutsu` buffer (for example via `:JJStatus`) and run
