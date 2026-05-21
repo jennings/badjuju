@@ -1,7 +1,13 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
-use tracing::info;
+use tracing::{info, warn};
+
+use crate::jj::Jj;
+use crate::workspace::find_workspace_root;
 
 pub const COMMANDS: &[&str] = &[
     "badjuju.status",
@@ -10,20 +16,73 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.new",
 ];
 
+#[derive(Debug, Default)]
+struct State {
+    workspace_root: Option<PathBuf>,
+    binary_path: Option<String>,
+}
+
+impl State {
+    fn jj(&self) -> Option<Jj> {
+        let root = self.workspace_root.as_ref()?;
+        Some(Jj::with_binary_or_default(
+            self.binary_path.as_deref(),
+            root,
+        ))
+    }
+}
+
 #[derive(Debug)]
 pub struct Backend {
     client: Client,
+    state: Arc<RwLock<State>>,
 }
 
 impl Backend {
     pub fn new(client: Client) -> Self {
-        Self { client }
+        Self {
+            client,
+            state: Arc::new(RwLock::new(State::default())),
+        }
     }
 }
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, _params: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        let binary_path = params
+            .initialization_options
+            .as_ref()
+            .and_then(|o| o.get("binaryPath"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let search_start = params
+            .root_uri
+            .as_ref()
+            .and_then(|u| u.to_file_path().ok())
+            .or_else(|| {
+                params
+                    .workspace_folders
+                    .as_deref()
+                    .and_then(|f| f.first())
+                    .and_then(|f| f.uri.to_file_path().ok())
+            });
+
+        let workspace_root = search_start.as_deref().and_then(find_workspace_root);
+
+        {
+            let mut state = self.state.write().await;
+            state.binary_path = binary_path;
+            state.workspace_root = workspace_root.clone();
+        }
+
+        if let Some(ref root) = workspace_root {
+            info!(root = %root.display(), "found jj workspace");
+        } else {
+            warn!("no jj workspace found; commands will return errors until a workspace is opened");
+        }
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
@@ -55,8 +114,33 @@ impl LanguageServer for Backend {
         params: ExecuteCommandParams,
     ) -> Result<Option<serde_json::Value>> {
         info!(command = %params.command, "execute_command");
+
+        let state = self.state.read().await;
+        let jj = state.jj().ok_or_else(|| Error::invalid_request())?;
+
         match params.command.as_str() {
-            "badjuju.status" | "badjuju.log" | "badjuju.describe" | "badjuju.new" => {
+            "badjuju.status" => {
+                let output = jj.status().map_err(|e| {
+                    let mut err = Error::internal_error();
+                    err.message = e.to_string().into();
+                    err
+                })?;
+                Ok(Some(serde_json::Value::String(output)))
+            }
+            "badjuju.log" => {
+                let revset = params
+                    .arguments
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("@");
+                let output = jj.log(revset).map_err(|e| {
+                    let mut err = Error::internal_error();
+                    err.message = e.to_string().into();
+                    err
+                })?;
+                Ok(Some(serde_json::Value::String(output)))
+            }
+            "badjuju.describe" | "badjuju.new" => {
                 self.client
                     .log_message(MessageType::INFO, format!("command: {}", params.command))
                     .await;
