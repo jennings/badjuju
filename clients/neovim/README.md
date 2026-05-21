@@ -179,3 +179,69 @@ in the COMMAND REFERENCE block at the bottom of each buffer.
 |---|---|
 | `g`, `r` | refresh (re-runs `jj diff` for the same revision) |
 | `q` | close the window |
+
+## Syntax highlighting (tree-sitter)
+
+Bad Juju ships a tree-sitter grammar (`clients/neovim/tree-sitter-jujutsu/`)
+and a highlight query (`clients/neovim/queries/jujutsu/highlights.scm`). The
+highlight query is on the plugin's runtimepath as soon as you install the
+plugin — you do **not** need to copy or symlink `highlights.scm` anywhere.
+What you do need to install separately is the **parser**, because Neovim
+loads parsers as shared libraries from `parser/` directories on the
+runtimepath rather than building them on demand.
+
+### Option A — `:TSInstall jujutsu` (future)
+
+The parser is not yet published as a standalone repository, so
+`:TSInstall jujutsu` will not work out of the box. Track beads issue
+`bad-juju-9bp` (`bd show bad-juju-9bp`) for publication progress. Once the
+sibling repository ships, the install will reduce to one command.
+
+### Option B — install directly from this checkout
+
+Until the parser is published, point `nvim-treesitter` at the in-repo
+grammar directory. Add this to your `init.lua` *before*
+`require('nvim-treesitter.configs').setup`:
+
+```lua
+local parser_config = require('nvim-treesitter.parsers').get_parser_configs()
+parser_config.jujutsu = {
+  install_info = {
+    -- Replace with the absolute path to your bad-juju checkout.
+    url = '/absolute/path/to/bad-juju/clients/neovim/tree-sitter-jujutsu',
+    files = { 'src/parser.c' },
+    branch = 'main',
+    generate_requires_npm = false,
+    requires_generate_from_grammar = false,
+  },
+  filetype = 'jujutsu',
+}
+
+require('nvim-treesitter.configs').setup({
+  ensure_installed = { 'jujutsu' },
+  highlight = { enable = true },
+})
+```
+
+Then run `:TSInstall jujutsu` once to compile and install the parser shared
+library into `nvim-treesitter`'s `parser/` directory.
+
+### Verifying the install
+
+Open a `.jujutsu` buffer (for example via `:JJStatus`) and run
+`:Inspect` at any line. You should see one of the bad-juju captures —
+`@comment`, `@keyword`, `@string`, `@type`, `@comment.note`, `@tag`,
+`@number`, or `@punctuation.special` — depending on what the cursor is on.
+If `:Inspect` reports no tree-sitter captures, double-check that the
+parser is installed (`:TSInstallInfo jujutsu` should show `installed`).
+
+### Regenerating the parser (contributors only)
+
+`src/parser.c` is committed so end-users do not need the tree-sitter CLI.
+If you edit `grammar.js`, regenerate it with:
+
+```sh
+redo clients/neovim/tree-sitter-jujutsu/src/parser.c
+```
+
+This requires the `tree-sitter` CLI on `PATH`.
