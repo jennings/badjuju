@@ -43,6 +43,38 @@ jobs:
       - name: Check (fmt + clippy + test)
         run: redo server/check
 
+  neovim:
+    name: Neovim
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Neovim
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: stable
+
+      - name: Verify Neovim is installed
+        # Guard against silent skips: clients/neovim/scripts/test.sh exits 0
+        # when nvim is missing on local machines. In CI we want a hard
+        # failure if the setup step above didn't actually install nvim.
+        run: nvim --version
+
+      - name: Install redo
+        run: |
+          git clone --depth 1 https://github.com/apenwarr/redo /tmp/redo
+          cd /tmp/redo && sudo DESTDIR= ./do install
+
+      - name: Cache plenary.nvim
+        uses: actions/cache@v4
+        with:
+          path: clients/neovim/.test-deps/plenary.nvim
+          key: plenary-nvim-stable
+
+      - name: Run Neovim plugin tests
+        run: redo clients/neovim/test
+
   typescript:
     name: TypeScript
     runs-on: ubuntu-latest
