@@ -57,7 +57,29 @@ use {
 }
 ```
 
-#### Option C — manual / no plugin manager
+#### Option C — vim-plug
+
+vim-plug can install from a remote repo. Use the `rtp` option so only
+`clients/neovim/` is added to the runtimepath, then call `setup` and
+`vim.lsp.enable` from your `init.lua`:
+
+```vim
+" In init.vim (or wrapped in lua << EOF ... EOF inside init.lua):
+call plug#begin()
+Plug 'jennings/bad-juju', { 'rtp': 'clients/neovim' }
+call plug#end()
+```
+
+```lua
+-- After plug#end() has run, e.g. in init.lua:
+require('badjuju').setup({})
+vim.lsp.enable('jujutsu')
+```
+
+You still need the `badjuju` server binary on your `PATH` (see the
+`redo server/install` step above).
+
+#### Option D — manual / no plugin manager
 
 Add the directory to `runtimepath` and call `setup` + `vim.lsp.enable`
 yourself:
