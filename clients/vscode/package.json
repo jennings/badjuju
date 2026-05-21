@@ -161,6 +161,11 @@
         "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
       },
       {
+        "command": "badjuju.unsquash.file",
+        "key": "shift+u",
+        "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
         "command": "badjuju.toggleStat.open",
         "key": "=",
         "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"

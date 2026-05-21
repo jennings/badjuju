@@ -10,7 +10,7 @@ n   new change
 l   open log
 d   describe
 s   squash file at cursor into parent
-    unsquash file at cursor from parent into child (command palette only)
+U   unsquash file at cursor from parent into child
 u   jj undo (revert last operation)
 =   toggle --stat on the stack log
 g   refresh
@@ -354,7 +354,7 @@ mod tests {
             "l   open log",
             "d   describe",
             "s   squash",
-            "    unsquash",
+            "U   unsquash",
             "u   jj undo",
             "g   refresh",
             "q   close",
