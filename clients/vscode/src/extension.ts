@@ -57,7 +57,7 @@ const STAT_LINE_RE =
 // Graph node chars: @ (current), ○ ● (other), ◆ (immutable), * (rare). NOT ~ (elided continuation).
 const COMMIT_HEADER_RE = /^[@○●◆*]\s+([a-z]+)\b/;
 
-/** Parse a status.jj line and return the file path it refers to, or null. */
+/** Parse a status.jujutsu line and return the file path it refers to, or null. */
 export function parseStatusFile(line: string): string | null {
   const m = line.match(STATUS_FILE_LINE_RE) ?? line.match(STAT_LINE_RE);
   if (!m) return null;
@@ -92,7 +92,7 @@ export function findRevisionForLine(
 }
 
 /**
- * Return the change_id of the commit at or above the cursor in a log.jj buffer.
+ * Return the change_id of the commit at or above the cursor in a log.jujutsu buffer.
  *
  * Walks up from `cursorLine` (inclusive) looking for a commit header line. Returns
  * null if none is found (e.g. cursor is inside the REVSET header section).
@@ -109,11 +109,11 @@ export function findLogRevision(
 }
 
 function isStatusFile(uri: Uri): boolean {
-  return uri.path.endsWith("/status.jj");
+  return uri.path.endsWith("/status.jujutsu");
 }
 
 function isLogFile(uri: Uri): boolean {
-  return uri.path.endsWith("/log.jj");
+  return uri.path.endsWith("/log.jujutsu");
 }
 
 function waitForDocumentChange(
@@ -202,7 +202,7 @@ async function runFileScopedStatusCommand(
 }
 
 /**
- * Move the cursor of the active status.jj editor onto the line that owns `file`.
+ * Move the cursor of the active status.jujutsu editor onto the line that owns `file`.
  *
  * A file can appear twice when its destination is the working copy: once as
  * `M file` in the STATUS section and again as a stat line under @ in the STACK

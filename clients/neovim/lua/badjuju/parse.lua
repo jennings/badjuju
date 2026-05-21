@@ -68,7 +68,7 @@ local function strip_rename_arrow(path)
   return path
 end
 
---- Parse a `status.jj` line and return the file path it refers to, or nil.
+--- Parse a `status.jujutsu` line and return the file path it refers to, or nil.
 ---
 --- Handles two line shapes:
 ---   1. Status header lines like `M src/main.rs` (one of M/A/D/C/R + path).

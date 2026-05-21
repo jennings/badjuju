@@ -109,7 +109,7 @@ server/src/
   lib.rs         re-exports all modules
   server.rs      tower-lsp Backend: initialize, did_open/change/close/save, execute_command
   jj.rs          Jj struct — spawns `jj --no-pager --color=never <args>`, structured JjError
-  commands.rs    file-writing logic for status.jj, log.jj, describe.jj; save handlers
+  commands.rs    file-writing logic for status.jujutsu, log.jujutsu, describe.jujutsu; save handlers
   workspace.rs   find_workspace_root: walks up from a path looking for .jj/
 
 clients/vscode/
@@ -120,8 +120,8 @@ clients/vscode/
 ```
 
 Key data flows:
-- **Command execution**: VS Code calls `workspace/executeCommand badjuju.status` → `server.rs::execute_command` → `commands::run_status` → writes `.jj/badjuju/status.jj` → returns `file://` URI → VS Code opens the file.
-- **Save handling**: user edits `describe.jj` → VS Code sends `textDocument/didSave` with full text → `server.rs::did_save` → `commands::on_describe_save` → strips `JJ:` lines → calls `jj describe -m`.
+- **Command execution**: VS Code calls `workspace/executeCommand badjuju.status` → `server.rs::execute_command` → `commands::run_status` → writes `.jj/badjuju/status.jujutsu` → returns `file://` URI → VS Code opens the file.
+- **Save handling**: user edits `describe.jujutsu` → VS Code sends `textDocument/didSave` with full text → `server.rs::did_save` → `commands::on_describe_save` → strips `JJ:` lines → calls `jj describe -m`.
 - **State**: `Backend` holds `Arc<RwLock<State>>` containing `workspace_root`, `binary_path`, and open document text. Workspace root is discovered on `initialize` by walking up from `rootUri`.
 
 The server binary path defaults to `jj` on PATH but can be overridden via `initializationOptions.binaryPath` (matching the `badjuju.binaryPath` VS Code setting).

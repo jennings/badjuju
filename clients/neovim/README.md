@@ -15,7 +15,7 @@ This directory (`clients/neovim/`) is a Neovim plugin. Add it to your runtimepat
 however you normally install plugins (lazy.nvim `dir = ...`, packer, symlink into
 `~/.config/nvim/`, etc.). It provides:
 
-- `ftdetect/jujutsu.vim` — registers the `jujutsu` filetype for `*.jj`
+- `ftdetect/jujutsu.lua` — registers the `jujutsu` filetype for `*.jujutsu`
 - `plugin/badjuju.lua` — registers the `:JJ*` user commands on startup
 - `lsp/jujutsu.lua` — LSP server config consumed by `vim.lsp.enable`
 
@@ -47,8 +47,8 @@ All commands send a `workspace/executeCommand` request to the running
 
 | Command | Description |
 |---|---|
-| `:JJStatus` | Open `.jj/badjuju/status.jj` |
-| `:JJLog [revset]` | Open `.jj/badjuju/log.jj`; defaults to `@` |
+| `:JJStatus` | Open `.jj/badjuju/status.jujutsu` |
+| `:JJLog [revset]` | Open `.jj/badjuju/log.jujutsu`; defaults to `@` |
 | `:JJDescribe` | Open the describe buffer for the working copy |
 | `:JJNew` | Create a new change and refresh log |
 | `:JJRefresh` | Refresh the badjuju buffer at the cursor |
@@ -60,5 +60,5 @@ All commands send a `workspace/executeCommand` request to the running
 
 Commands auto-start the `jujutsu` LSP for the current workspace if it isn't
 already running, so `:JJStatus` works from any buffer inside a jj workspace
-(no need to open a `.jj` file first). Outside a jj workspace, the command
+(no need to open a `.jujutsu` file first). Outside a jj workspace, the command
 reports an error.

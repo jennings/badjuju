@@ -23,7 +23,7 @@ samples/         Example jj repos used for testing
 == Example Output
 
 When the user runs `Bad Juju: Open status window`, the server regenerates
-`.jj/badjuju/status.jj` and opens it in the editor. The buffer combines `jj
+`.jj/badjuju/status.jujutsu` and opens it in the editor. The buffer combines `jj
 status`, the working-copy stack, and a one-screen command reference:
 
 [source]
@@ -59,7 +59,7 @@ g     refresh
 q     close
 ----
 
-`Bad Juju: Open log window` writes `.jj/badjuju/log.jj`. The first line is an
+`Bad Juju: Open log window` writes `.jj/badjuju/log.jujutsu`. The first line is an
 editable `REVSET:` header — change it and save to re-run the query. The
 `JJ:`-prefixed lines are shortcut revsets you can apply by placing the cursor
 on the line and pressing Enter:

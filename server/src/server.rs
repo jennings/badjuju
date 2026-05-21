@@ -189,14 +189,14 @@ impl LanguageServer for Backend {
         drop(state);
 
         match filename.as_deref() {
-            Some("describe.jj") => {
+            Some("describe.jujutsu") => {
                 if let Err(e) = commands::on_describe_save(&jj, &workspace, &text) {
                     self.client
                         .log_message(MessageType::ERROR, format!("describe save failed: {e}"))
                         .await;
                 }
             }
-            Some("log.jj") => {
+            Some("log.jujutsu") => {
                 if let Err(e) = commands::on_log_save(&jj, &workspace, &text) {
                     self.client
                         .log_message(MessageType::ERROR, format!("log save failed: {e}"))

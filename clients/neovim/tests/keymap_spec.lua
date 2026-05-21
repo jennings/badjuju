@@ -23,32 +23,32 @@ local function has_buffer_map(bufnr, key)
 end
 
 describe('keymap.setup_for_buffer', function()
-  it('installs status.jj maps including g/r/n/l/d/q/u/= and a', function()
-    local buf = open_named('.jj/badjuju/status.jj')
+  it('installs status.jujutsu maps including g/r/n/l/d/q/u/= and a', function()
+    local buf = open_named('.jj/badjuju/status.jujutsu')
     for _, key in ipairs({ 'g', 'r', 'n', 'l', 'd', 'q', 'u', '=', 'a' }) do
       local found = has_buffer_map(buf, key)
-      assert.is_true(found, 'expected status.jj map for ' .. key)
+      assert.is_true(found, 'expected status.jujutsu map for ' .. key)
     end
   end)
 
-  it('installs log.jj maps for refresh and abandon', function()
-    local buf = open_named('.jj/badjuju/log.jj')
+  it('installs log.jujutsu maps for refresh and abandon', function()
+    local buf = open_named('.jj/badjuju/log.jujutsu')
     for _, key in ipairs({ 'g', 'r', 'a' }) do
       local found = has_buffer_map(buf, key)
-      assert.is_true(found, 'expected log.jj map for ' .. key)
+      assert.is_true(found, 'expected log.jujutsu map for ' .. key)
     end
   end)
 
-  it('does NOT install status-only maps on log.jj', function()
-    local buf = open_named('.jj/badjuju/log.jj')
+  it('does NOT install status-only maps on log.jujutsu', function()
+    local buf = open_named('.jj/badjuju/log.jujutsu')
     for _, key in ipairs({ 'n', 'l', 'd', 'q', '=', 'u' }) do
       local found = has_buffer_map(buf, key)
-      assert.is_false(found, 'log.jj should not bind ' .. key)
+      assert.is_false(found, 'log.jujutsu should not bind ' .. key)
     end
   end)
 
   it('does nothing for unrelated jujutsu buffers', function()
-    local buf = open_named('describe.jj')
+    local buf = open_named('describe.jujutsu')
     for _, key in ipairs({ 'g', 'r', 'n', 'l', 'd', 'q', 'u', '=', 'a' }) do
       local found = has_buffer_map(buf, key)
       assert.is_false(found, 'unrelated buffer should not bind ' .. key)

@@ -23,14 +23,14 @@ Edit REVSET above and save to re-run the query.
 Place the cursor on a shortcut line and press Enter to apply it.
 a     abandon commit at cursor";
 
-/// Pre-defined revset shortcuts shown in the log.jj header.
+/// Pre-defined revset shortcuts shown in the log.jujutsu header.
 /// Each entry is (label, revset). The label is also used to align columns.
 const LOG_SHORTCUTS: &[(&str, &str)] = &[
     ("Mutable", "ancestors(reachable(@, mutable()))"),
     ("Stack", "(immutable_heads()..@)::"),
 ];
 
-/// Render the shortcut list as `JJ:` comment lines for the log.jj header.
+/// Render the shortcut list as `JJ:` comment lines for the log.jujutsu header.
 fn render_log_shortcuts() -> String {
     let label_width = LOG_SHORTCUTS
         .iter()
@@ -58,7 +58,7 @@ fn file_uri(path: &Path) -> String {
     format!("file://{}", path.display())
 }
 
-/// Run `badjuju.status`: write status.jj (preserving any current STATS toggle) and return its URI.
+/// Run `badjuju.status`: write status.jujutsu (preserving any current STATS toggle) and return its URI.
 pub fn run_status(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     let stat = read_current_stat(workspace);
     write_status(jj, workspace, None, stat)
@@ -86,7 +86,7 @@ fn write_stat_state(workspace: &Path, stat: bool) -> std::io::Result<()> {
     std::fs::write(dir.join("stats"), if stat { "on\n" } else { "off\n" })
 }
 
-/// Write status.jj, optionally prepending a MESSAGE: block. Returns the URI.
+/// Write status.jujutsu, optionally prepending a MESSAGE: block. Returns the URI.
 fn write_status(
     jj: &Jj,
     workspace: &Path,
@@ -111,7 +111,7 @@ fn write_status(
     );
 
     let dir = badjuju_dir(workspace)?;
-    let path = dir.join("status.jj");
+    let path = dir.join("status.jujutsu");
     std::fs::write(&path, content)?;
     write_stat_state(workspace, stat)?;
     Ok(file_uri(&path))
@@ -195,7 +195,7 @@ pub fn run_unsquash(
     }
 }
 
-/// Run `badjuju.log`: write log.jj and return its URI.
+/// Run `badjuju.log`: write log.jujutsu and return its URI.
 pub fn run_log(jj: &Jj, workspace: &Path, revset: &str) -> Result<String, CommandError> {
     let output = jj.log(revset)?;
 
@@ -208,12 +208,12 @@ pub fn run_log(jj: &Jj, workspace: &Path, revset: &str) -> Result<String, Comman
     );
 
     let dir = badjuju_dir(workspace)?;
-    let path = dir.join("log.jj");
+    let path = dir.join("log.jujutsu");
     std::fs::write(&path, content)?;
     Ok(file_uri(&path))
 }
 
-/// Run `badjuju.describe`: write describe.jj with current description and return its URI.
+/// Run `badjuju.describe`: write describe.jujutsu with current description and return its URI.
 pub fn run_describe(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     let current_desc = jj.describe_get()?;
     let desc = if current_desc.trim().is_empty() {
@@ -233,13 +233,13 @@ pub fn run_describe(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     );
 
     let dir = badjuju_dir(workspace)?;
-    let path = dir.join("describe.jj");
+    let path = dir.join("describe.jujutsu");
     std::fs::write(&path, content)?;
     Ok(file_uri(&path))
 }
 
 /// Run `badjuju.refresh`: regenerate the file identified by `uri`.
-/// For status.jj → regenerate status. For log.jj → re-run log with current REVSET header.
+/// For status.jujutsu → regenerate status. For log.jujutsu → re-run log with current REVSET header.
 pub fn run_refresh(jj: &Jj, workspace: &Path, uri: &str) -> Result<String, CommandError> {
     let path = uri.strip_prefix("file://").unwrap_or(uri);
     let filename = std::path::Path::new(path)
@@ -248,7 +248,7 @@ pub fn run_refresh(jj: &Jj, workspace: &Path, uri: &str) -> Result<String, Comma
         .unwrap_or("");
 
     match filename {
-        "log.jj" => {
+        "log.jujutsu" => {
             let content = std::fs::read_to_string(path)?;
             let revset = parse_log_revset(&content).unwrap_or_else(|| "@".to_string());
             run_log(jj, workspace, &revset)
@@ -257,7 +257,7 @@ pub fn run_refresh(jj: &Jj, workspace: &Path, uri: &str) -> Result<String, Comma
     }
 }
 
-/// Run `badjuju.new`: create a new change and regenerate status.jj. Returns the status URI.
+/// Run `badjuju.new`: create a new change and regenerate status.jujutsu. Returns the status URI.
 pub fn run_new(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     jj.new_change()?;
     run_status(jj, workspace)
@@ -289,7 +289,7 @@ pub fn run_abandon(jj: &Jj, workspace: &Path, revision: &str) -> Result<String, 
     }
 }
 
-/// Strip JJ: comment lines and the separator from describe.jj content.
+/// Strip JJ: comment lines and the separator from describe.jujutsu content.
 /// Returns the trimmed description, or `None` if nothing remains.
 pub fn parse_describe_content(content: &str) -> Option<String> {
     let stripped: Vec<&str> = content
@@ -304,7 +304,7 @@ pub fn parse_describe_content(content: &str) -> Option<String> {
     }
 }
 
-/// Extract the revset from the `REVSET:` header block of log.jj.
+/// Extract the revset from the `REVSET:` header block of log.jujutsu.
 ///
 /// The block begins on the line starting with `REVSET: ` and continues across
 /// subsequent lines until a blank line or an `OUTPUT:` section header is
@@ -340,7 +340,7 @@ pub fn parse_log_revset(content: &str) -> Option<String> {
     }
 }
 
-/// On describe.jj save: apply stripped description via jj describe, then regenerate status.jj.
+/// On describe.jujutsu save: apply stripped description via jj describe, then regenerate status.jujutsu.
 pub fn on_describe_save(jj: &Jj, workspace: &Path, content: &str) -> Result<(), CommandError> {
     if let Some(desc) = parse_describe_content(content) {
         jj.describe_set(&desc)?;
@@ -349,7 +349,7 @@ pub fn on_describe_save(jj: &Jj, workspace: &Path, content: &str) -> Result<(), 
     Ok(())
 }
 
-/// On log.jj save: re-parse the REVSET: header and regenerate the file.
+/// On log.jujutsu save: re-parse the REVSET: header and regenerate the file.
 pub fn on_log_save(jj: &Jj, workspace: &Path, content: &str) -> Result<String, CommandError> {
     let revset = parse_log_revset(content).unwrap_or_else(|| "@".to_string());
     run_log(jj, workspace, &revset)
@@ -520,7 +520,7 @@ mod tests {
     fn on_log_save_ignores_shortcut_comment_lines() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
-        // Simulate a saved log.jj that still contains the shortcut comment lines.
+        // Simulate a saved log.jujutsu that still contains the shortcut comment lines.
         let content = format!(
             "REVSET: @\n{}\n\nOUTPUT:\n\nstale output",
             render_log_shortcuts()

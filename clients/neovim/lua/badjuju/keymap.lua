@@ -32,18 +32,18 @@ local LOG_MAPS = {
 }
 
 --- Install buffer-local keymaps for the given buffer if its name matches a
---- badjuju status.jj or log.jj path. No-op for any other buffer.
+--- badjuju status.jujutsu or log.jujutsu path. No-op for any other buffer.
 ---@param bufnr integer?  defaults to current buffer (0)
 function M.setup_for_buffer(bufnr)
   bufnr = bufnr or 0
   local name = vim.api.nvim_buf_get_name(bufnr)
 
-  if name:match('/%.jj/badjuju/status%.jj$') then
+  if name:match('/%.jj/badjuju/status%.jujutsu$') then
     for _, m in ipairs(STATUS_MAPS) do
       map_cmd(bufnr, m[1], m[2], m[3])
     end
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
-  elseif name:match('/%.jj/badjuju/log%.jj$') then
+  elseif name:match('/%.jj/badjuju/log%.jujutsu$') then
     for _, m in ipairs(LOG_MAPS) do
       map_cmd(bufnr, m[1], m[2], m[3])
     end

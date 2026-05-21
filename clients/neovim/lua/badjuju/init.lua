@@ -84,7 +84,7 @@ end
 
 --- Send workspace/executeCommand to the jujutsu LSP and open the returned file URI.
 --- Starts the LSP client on demand if none is attached, so :JJ* commands work
---- from any buffer inside a jj workspace (not only after opening a .jj file).
+--- from any buffer inside a jj workspace (not only after opening a .jujutsu file).
 ---@param command string  badjuju.* server command name
 ---@param arguments any[]?  optional arguments forwarded to the server
 function M.execute(command, arguments)
@@ -115,11 +115,11 @@ function M.execute(command, arguments)
         { focus = true }
       )
       -- The server just wrote this file; force the focused buffer to reload
-      -- so a previously-open status.jj/log.jj reflects the new content
-      -- instead of showing stale text. Skip describe.jj so an in-progress
-      -- commit message isn't discarded.
+      -- so a previously-open status.jujutsu/log.jujutsu reflects the new
+      -- content instead of showing stale text. Skip describe.jujutsu so an
+      -- in-progress commit message isn't discarded.
       local fname = vim.uri_to_fname(result)
-      if not fname:match('/describe%.jj$') then
+      if not fname:match('/describe%.jujutsu$') then
         pcall(vim.cmd, 'silent! edit!')
       end
     end)
