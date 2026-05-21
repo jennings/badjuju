@@ -1,11 +1,37 @@
 local M = {}
 
+--- Plugin configuration. Mutate via setup(); fields are nil until populated.
+---@class badjuju.Config
+---@field binary_path string?       Path to the jj binary (forwarded to the server).
+---@field default_log_revset string?  Default revset used by :JJLog with no argument.
 M.config = {
-  default_log_revset = nil,
   binary_path = nil,
+  default_log_revset = nil,
 }
 
 local CLIENT_NAME = 'jujutsu'
+
+--- Populate the plugin config. Safe to call before vim.lsp.enable('jujutsu')
+--- because lsp/jujutsu.lua reads M.config when the LSP starts.
+---
+--- Accepts both the camelCase keys exposed in the VS Code settings
+--- (binaryPath, defaultLogRevset) and the snake_case internal keys.
+---@param opts table?
+function M.setup(opts)
+  opts = opts or {}
+  if opts.binaryPath ~= nil then
+    M.config.binary_path = opts.binaryPath
+  end
+  if opts.binary_path ~= nil then
+    M.config.binary_path = opts.binary_path
+  end
+  if opts.defaultLogRevset ~= nil then
+    M.config.default_log_revset = opts.defaultLogRevset
+  end
+  if opts.default_log_revset ~= nil then
+    M.config.default_log_revset = opts.default_log_revset
+  end
+end
 
 function M.get_client()
   local clients = vim.lsp.get_clients({ name = CLIENT_NAME })

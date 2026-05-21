@@ -11,3 +11,4 @@ vim.opt.runtimepath:prepend(plenary_dir)
 vim.opt.runtimepath:prepend(vim.fn.getcwd())
 
 vim.cmd('runtime plugin/plenary.vim')
+vim.cmd('runtime plugin/badjuju.lua')

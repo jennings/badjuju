@@ -19,11 +19,22 @@ however you normally install plugins (lazy.nvim `dir = ...`, packer, symlink int
 - `plugin/badjuju.lua` — registers the `:JJ*` user commands on startup
 - `lsp/jujutsu.lua` — LSP server config consumed by `vim.lsp.enable`
 
-### 2. Enable the LSP
+### 2. Configure (optional) and enable the LSP
 
 ```lua
+require('badjuju').setup({
+  -- Path to the jj binary; forwarded to the server as init_options.binaryPath.
+  -- Leave nil to use jj from PATH.
+  binaryPath = nil,
+  -- Default revset used by :JJLog when called with no argument.
+  defaultLogRevset = nil,
+})
 vim.lsp.enable('jujutsu')
 ```
+
+`setup()` is optional — without it, the plugin behaves as if both values are
+unset. It must be called *before* `vim.lsp.enable('jujutsu')` because the LSP
+config table reads `require('badjuju').config` at enable time.
 
 The LSP config uses Neovim 0.11's built-in `vim.lsp.enable` API with
 `root_markers = { '.jj' }` for automatic workspace detection. The server
