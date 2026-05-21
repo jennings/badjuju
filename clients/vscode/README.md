@@ -25,3 +25,22 @@ This is passed to the LSP server at startup via `initializationOptions`.
 Revset expression used when opening the log with `badjuju.log.open`. Leave blank to use jj's default (typically `@ | ancestors(@, 2)`).
 
 Example: `"ancestors(reachable(@, mutable()), 5)"` to show the 5 most recent mutable ancestors.
+
+## Building
+
+`redo clients/vscode/all` builds the extension with the server binary for the host platform.
+
+To produce a non-host VSIX with `redo clients/vscode/all`, set the `TARGET` env var to a Rust target triple (e.g. `TARGET=x86_64-unknown-linux-gnu`); install it with `rustup target add <triple>` first.
+
+### Packaging for all platforms
+
+`redo clients/vscode/pack` cross-compiles the server and produces one VSIX per platform: `linux-x64`, `linux-arm64`, `linux-armhf`, `darwin-arm64`, `win32-x64`, `win32-arm64`. The output VSIXs land in `clients/vscode/`.
+
+Required toolchain (one-time setup):
+
+```sh
+brew install zig                  # or your distro's zig package
+cargo install cargo-zigbuild
+```
+
+Rust targets are added automatically by the script via `rustup target add`.
