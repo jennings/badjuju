@@ -97,6 +97,16 @@
         "command": "badjuju.log.applyShortcut",
         "category": "jj",
         "title": "Apply revset shortcut under cursor"
+      },
+      {
+        "command": "badjuju.squash.file",
+        "category": "jj",
+        "title": "Squash file at cursor into parent"
+      },
+      {
+        "command": "badjuju.unsquash.file",
+        "category": "jj",
+        "title": "Unsquash file at cursor from parent into child"
       }
     ],
     "keybindings": [
@@ -128,6 +138,16 @@
       {
         "command": "workbench.action.closeActiveEditor",
         "key": "q",
+        "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.squash.file",
+        "key": "s",
+        "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.unsquash.file",
+        "key": "u",
         "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
       },
       {

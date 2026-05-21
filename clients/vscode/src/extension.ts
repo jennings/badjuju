@@ -48,6 +48,17 @@ class StatusContentProvider implements TextDocumentContentProvider {
 const statusProvider = new StatusContentProvider();
 
 const LOG_SHORTCUT_LINE_RE = /^JJ:\s+([A-Za-z][\w ]*?):\s+(.+)$/;
+const STATUS_FILE_LINE_RE = /^([MADCR])\s+(.+)$/;
+
+/** Parse a status.jj line and return the file path it refers to, or null. */
+export function parseStatusFile(line: string): string | null {
+  const m = line.match(STATUS_FILE_LINE_RE);
+  if (!m) return null;
+  const rest = m[2].trim();
+  // jj renders renames/copies as "old => new" — squash needs the destination path.
+  const arrow = rest.lastIndexOf(" => ");
+  return arrow >= 0 ? rest.slice(arrow + 4).trim() : rest;
+}
 
 function isStatusFile(uri: Uri): boolean {
   return uri.path.endsWith("/status.jj");
@@ -110,6 +121,27 @@ async function openServerResult(resultUri: string): Promise<void> {
   }
   const doc = await workspace.openTextDocument(parsed);
   await window.showTextDocument(doc, { preserveFocus: false });
+}
+
+async function runFileScopedStatusCommand(
+  serverCommand: string,
+): Promise<void> {
+  const editor = window.activeTextEditor;
+  if (!editor) return;
+  if (!isStatusFile(editor.document.uri)) return;
+  const lineText = editor.document.lineAt(editor.selection.active.line).text;
+  const file = parseStatusFile(lineText);
+  if (!file) {
+    window.showInformationMessage(
+      `${serverCommand}: place cursor on a changed file line`,
+    );
+    return;
+  }
+  const result = await client.sendRequest("workspace/executeCommand", {
+    command: serverCommand,
+    arguments: [file],
+  });
+  await openServerResult(result as string);
 }
 
 function resolveServerCommand(context: ExtensionContext): string {
@@ -237,6 +269,12 @@ export async function activate(context: ExtensionContext) {
         arguments: [serverUri],
       });
       await openServerResult(result as string);
+    }),
+    commands.registerCommand("badjuju.squash.file", async () => {
+      await runFileScopedStatusCommand("badjuju.squash");
+    }),
+    commands.registerCommand("badjuju.unsquash.file", async () => {
+      await runFileScopedStatusCommand("badjuju.unsquash");
     }),
   );
 

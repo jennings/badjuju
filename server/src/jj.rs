@@ -73,6 +73,51 @@ impl Jj {
         self.run(&["new"])?;
         Ok(())
     }
+
+    /// List change IDs matching the given revset, one per line.
+    pub fn change_ids(&self, revset: &str) -> Result<Vec<String>, JjError> {
+        let out = self.run(&[
+            "log",
+            "--revisions",
+            revset,
+            "--no-graph",
+            "--template",
+            "change_id ++ \"\\n\"",
+        ])?;
+        Ok(out
+            .lines()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect())
+    }
+
+    /// Squash a single file's changes from `source` into `source`'s parent.
+    /// Uses `--use-destination-message` to avoid opening an editor.
+    pub fn squash_file_into_parent(&self, source: &str, file: &str) -> Result<(), JjError> {
+        self.run(&[
+            "squash",
+            "--use-destination-message",
+            "--revision",
+            source,
+            file,
+        ])?;
+        Ok(())
+    }
+
+    /// Squash a single file's changes from `source` into `dest` (typically a child).
+    /// Uses `--use-destination-message` to avoid opening an editor.
+    pub fn squash_file_into(&self, source: &str, dest: &str, file: &str) -> Result<(), JjError> {
+        self.run(&[
+            "squash",
+            "--use-destination-message",
+            "--from",
+            source,
+            "--into",
+            dest,
+            file,
+        ])?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -144,5 +189,81 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let jj = Jj::with_binary_or_default(Some("/usr/local/bin/jj"), dir.path());
         assert_eq!(jj.binary, PathBuf::from("/usr/local/bin/jj"));
+    }
+
+    #[test]
+    fn change_ids_returns_root_for_empty_repo_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        // The @- of a fresh repo is the root commit.
+        let parents = jj.change_ids("parents(@)").expect("change_ids failed");
+        assert_eq!(parents.len(), 1, "expected one parent, got {parents:?}");
+    }
+
+    #[test]
+    fn change_ids_returns_empty_for_no_children() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let children = jj.change_ids("(@)+").expect("change_ids failed");
+        assert!(
+            children.is_empty(),
+            "expected no children, got {children:?}"
+        );
+    }
+
+    #[test]
+    fn change_ids_returns_error_for_invalid_revset() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let result = jj.change_ids("not-a-valid-revset!!!");
+        assert!(matches!(result, Err(JjError::JjFailed { .. })));
+    }
+
+    #[test]
+    fn squash_file_into_parent_moves_file_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        // Set up parent commit with a placeholder file.
+        std::fs::write(dir.path().join("readme.txt"), "hello\n").unwrap();
+        jj.describe_set("parent commit").unwrap();
+        jj.new_change().unwrap();
+        // Working copy modifies the file.
+        std::fs::write(dir.path().join("readme.txt"), "hello world\n").unwrap();
+        jj.squash_file_into_parent("@", "readme.txt")
+            .expect("squash failed");
+        // After squashing, working copy should have no changes to readme.txt.
+        let status = jj.status().unwrap();
+        assert!(
+            !status.contains("readme.txt"),
+            "expected readme.txt squashed away; status was:\n{status}"
+        );
+    }
+
+    #[test]
+    fn squash_file_into_moves_change_to_dest() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        // Layout: parent (@-) describes "first"; @ has a file; child gets added later.
+        std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
+        jj.describe_set("source change").unwrap();
+        // Create a child commit on top.
+        jj.new_change().unwrap();
+        jj.describe_set("dest change").unwrap();
+        let dest = jj
+            .change_ids("@")
+            .expect("change_ids failed")
+            .first()
+            .cloned()
+            .expect("expected dest change_id");
+        // Move back to the source commit to put readme.txt back on the working copy.
+        let source = jj
+            .change_ids("@-")
+            .expect("change_ids failed")
+            .first()
+            .cloned()
+            .expect("expected source change_id");
+        // Squash the file from source into dest.
+        jj.squash_file_into(&source, &dest, "readme.txt")
+            .expect("squash_file_into failed");
     }
 }

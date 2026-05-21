@@ -17,6 +17,8 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.describe",
     "badjuju.new",
     "badjuju.refresh",
+    "badjuju.squash",
+    "badjuju.unsquash",
 ];
 
 #[derive(Debug, Default)]
@@ -247,6 +249,24 @@ impl LanguageServer for Backend {
                 let uri = commands::run_refresh(&jj, &workspace, doc_uri).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
+            "badjuju.squash" => {
+                let file = params
+                    .arguments
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let uri = commands::run_squash(&jj, &workspace, file).map_err(lsp_err)?;
+                Ok(Some(serde_json::Value::String(uri)))
+            }
+            "badjuju.unsquash" => {
+                let file = params
+                    .arguments
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let uri = commands::run_unsquash(&jj, &workspace, file).map_err(lsp_err)?;
+                Ok(Some(serde_json::Value::String(uri)))
+            }
             _ => Err(Error::method_not_found()),
         }
     }
@@ -268,5 +288,7 @@ mod tests {
         assert!(COMMANDS.contains(&"badjuju.describe"));
         assert!(COMMANDS.contains(&"badjuju.new"));
         assert!(COMMANDS.contains(&"badjuju.refresh"));
+        assert!(COMMANDS.contains(&"badjuju.squash"));
+        assert!(COMMANDS.contains(&"badjuju.unsquash"));
     }
 }
