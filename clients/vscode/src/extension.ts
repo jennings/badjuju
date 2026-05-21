@@ -1,15 +1,23 @@
-import { workspace, window, commands, Uri, ExtensionContext } from "vscode";
 import {
-  Executable,
+  commands,
+  type ExtensionContext,
+  Uri,
+  window,
+  workspace,
+} from "vscode";
+import {
+  type Executable,
   LanguageClient,
-  LanguageClientOptions,
-  ServerOptions,
+  type LanguageClientOptions,
+  type ServerOptions,
 } from "vscode-languageclient/node";
 
 let client: LanguageClient;
 
 export async function activate(context: ExtensionContext) {
-  const traceOutputChannel = window.createOutputChannel("Bad Juju - Jujutsu VCS");
+  const traceOutputChannel = window.createOutputChannel(
+    "Bad Juju - Jujutsu VCS",
+  );
   const command = process.env.SERVER_PATH || "badjuju";
   const run: Executable = {
     command,
@@ -51,7 +59,10 @@ export async function activate(context: ExtensionContext) {
         arguments: [],
       });
       const doc = await workspace.openTextDocument(Uri.parse(result as string));
-      await window.showTextDocument(doc, { preview: false, preserveFocus: false });
+      await window.showTextDocument(doc, {
+        preview: false,
+        preserveFocus: false,
+      });
     }),
     commands.registerCommand("badjuju.log.open", async () => {
       const defaultRevset: string =
@@ -79,10 +90,15 @@ export async function activate(context: ExtensionContext) {
       });
       const doc = await workspace.openTextDocument(Uri.parse(result as string));
       await window.showTextDocument(doc, { preserveFocus: false });
-    })
+    }),
   );
 
-  client = new LanguageClient("badjuju", "Bad Juju", serverOptions, clientOptions);
+  client = new LanguageClient(
+    "badjuju",
+    "Bad Juju",
+    serverOptions,
+    clientOptions,
+  );
   client.start();
 }
 

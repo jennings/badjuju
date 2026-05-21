@@ -35,8 +35,13 @@
     "languages": [
       {
         "id": "jujutsu",
-        "aliases": ["Jujutsu VCS", "jujutsu"],
-        "extensions": [".jj"],
+        "aliases": [
+          "Jujutsu VCS",
+          "jujutsu"
+        ],
+        "extensions": [
+          ".jj"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
