@@ -95,8 +95,15 @@ impl Jj {
         self.run(&["diff", "--revisions", revision])
     }
 
-    pub fn new_change(&self) -> Result<(), JjError> {
-        self.run(&["new"])?;
+    /// Create a new change. When `parent` is empty, behaves like `jj new`
+    /// (child of `@`). When non-empty, behaves like `jj new <REV>` so the new
+    /// change becomes a child of the given commit and @ moves to it.
+    pub fn new_change(&self, parent: &str) -> Result<(), JjError> {
+        if parent.is_empty() {
+            self.run(&["new"])?;
+        } else {
+            self.run(&["new", parent])?;
+        }
         Ok(())
     }
 
@@ -265,7 +272,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
         jj.describe_set("@", "first").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         jj.describe_set("@", "second").unwrap();
         // Update the parent commit directly. Without the --revision flag this
         // would describe @ instead.
@@ -308,7 +315,7 @@ mod tests {
     fn new_change_succeeds() {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
-        jj.new_change().expect("new failed");
+        jj.new_change("").expect("new failed");
         let out = jj.log("@-").expect("log failed");
         assert!(!out.is_empty());
     }
@@ -319,9 +326,9 @@ mod tests {
         let jj = init_jj_repo(dir.path());
         // Create a stack: parent → middle (abandon target) → @.
         jj.describe_set("@", "parent").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         jj.describe_set("@", "middle to abandon").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         let middle_id = jj
             .change_ids("@-")
             .expect("change_ids failed")
@@ -416,7 +423,7 @@ mod tests {
         // Set up parent commit with a placeholder file.
         std::fs::write(dir.path().join("readme.txt"), "hello\n").unwrap();
         jj.describe_set("@", "parent commit").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         // Working copy modifies the file.
         std::fs::write(dir.path().join("readme.txt"), "hello world\n").unwrap();
         jj.squash_file_into_parent("@", "readme.txt")
@@ -437,7 +444,7 @@ mod tests {
         let jj = init_jj_repo(dir.path());
         // Parent commit, with no changes of its own.
         jj.describe_set("@", "parent").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         // @ has only this one file.
         std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
         jj.describe_set("@", "middle change").unwrap();
@@ -458,7 +465,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
         jj.describe_set("@", "root commit").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         jj.describe_set("@", "leaf").unwrap();
         // Back up one step; the new @ is an empty change above "root commit".
         jj.prev_change(false).expect("prev failed");
@@ -476,7 +483,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
         jj.describe_set("@", "parent description").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         jj.describe_set("@", "child description").unwrap();
         jj.prev_change(true).expect("prev --edit failed");
         let desc = jj.describe_get("@").unwrap();
@@ -503,7 +510,7 @@ mod tests {
         std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
         jj.describe_set("@", "source change").unwrap();
         // Create a child commit on top.
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         jj.describe_set("@", "dest change").unwrap();
         let dest = jj
             .change_ids("@")

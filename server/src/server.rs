@@ -257,7 +257,12 @@ impl LanguageServer for Backend {
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.new" => {
-                let uri = commands::run_new(&jj, &workspace).map_err(lsp_err)?;
+                let parent = params
+                    .arguments
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let uri = commands::run_new(&jj, &workspace, parent).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.next" => {

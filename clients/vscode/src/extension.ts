@@ -357,9 +357,28 @@ export async function activate(context: ExtensionContext) {
       updateLogShortcutContext(editor);
     }),
     commands.registerCommand("badjuju.new.open", async () => {
+      // When invoked from a status or log buffer, use the commit under the
+      // cursor as the new change's parent. Outside those buffers (or with the
+      // cursor not on a commit line in a log buffer), fall back to the server
+      // default of creating a child of @.
+      const editor = window.activeTextEditor;
+      let parent = "";
+      if (editor) {
+        const uri = editor.document.uri;
+        const lines: string[] = [];
+        for (let i = 0; i < editor.document.lineCount; i++) {
+          lines.push(editor.document.lineAt(i).text);
+        }
+        const cursorLine = editor.selection.active.line;
+        if (isStatusFile(uri)) {
+          parent = findRevisionForLine(lines, cursorLine);
+        } else if (isLogFile(uri)) {
+          parent = findLogRevision(lines, cursorLine) ?? "";
+        }
+      }
       const result = await client.sendRequest("workspace/executeCommand", {
         command: "badjuju.new",
-        arguments: [],
+        arguments: parent ? [parent] : [],
       });
       await openServerResult(result as string);
     }),

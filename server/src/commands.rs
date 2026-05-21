@@ -310,9 +310,14 @@ pub fn run_refresh(jj: &Jj, workspace: &Path, uri: &str) -> Result<String, Comma
     }
 }
 
-/// Run `badjuju.new`: create a new change and regenerate status.jujutsu. Returns the status URI.
-pub fn run_new(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
-    jj.new_change()?;
+/// Run `badjuju.new`: create a new change and regenerate status.jujutsu.
+///
+/// When `parent` is empty, the new change is a child of `@` (default `jj new`).
+/// When non-empty, the new change is created as a child of that revision
+/// (`jj new <REV>`), so e.g. the commit under the user's cursor becomes the
+/// parent. Returns the status URI.
+pub fn run_new(jj: &Jj, workspace: &Path, parent: &str) -> Result<String, CommandError> {
+    jj.new_change(parent)?;
     run_status(jj, workspace)
 }
 
@@ -773,7 +778,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         jj.describe_set("@", "parent description").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         jj.describe_set("@", "child description").unwrap();
         let uri = run_describe(&jj, dir.path(), "@-").expect("run_describe failed");
         let path = uri.strip_prefix("file://").unwrap();
@@ -793,7 +798,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         jj.describe_set("@", "parent v1").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         jj.describe_set("@", "child v1").unwrap();
         // Save content with an explicit revision header pointing at @-.
         let content = "parent v2\n\nJJ: separator\nJJ: revision: @-\n";
@@ -942,7 +947,7 @@ mod tests {
     fn run_new_writes_status_and_returns_uri() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
-        let uri = run_new(&jj, dir.path()).expect("run_new failed");
+        let uri = run_new(&jj, dir.path(), "").expect("run_new failed");
         assert!(uri.starts_with("file://"));
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(content.contains("STATUS:"));
@@ -953,9 +958,31 @@ mod tests {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         let log_before = jj.log("@").unwrap();
-        run_new(&jj, dir.path()).expect("run_new failed");
+        run_new(&jj, dir.path(), "").expect("run_new failed");
         let log_after = jj.log("@").unwrap();
         assert_ne!(log_before, log_after);
+    }
+
+    /// When a parent revision is provided, the new change should be a child
+    /// of that commit (and @ should move to the new change) rather than being
+    /// a child of the previous @.
+    #[test]
+    fn run_new_with_explicit_parent_places_change_under_that_commit() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        jj.describe_set("@", "parent").unwrap();
+        jj.new_change("").unwrap();
+        jj.describe_set("@", "child").unwrap();
+        let parent_id = jj.change_ids("@-").unwrap().first().cloned().unwrap();
+        let uri = run_new(&jj, dir.path(), &parent_id).expect("run_new failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.starts_with("STATUS:"));
+        let new_parent_ids = jj.change_ids("@-").unwrap();
+        assert_eq!(
+            new_parent_ids.first(),
+            Some(&parent_id),
+            "expected new @ to be a child of the explicit parent"
+        );
     }
 
     #[test]
@@ -974,7 +1001,7 @@ mod tests {
         // Parent commit has the file with one content.
         std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
         jj.describe_set("@", "parent").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         // Working copy modifies the file.
         std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
         let uri = run_squash(&jj, dir.path(), "readme.txt", "").expect("run_squash failed");
@@ -1030,7 +1057,7 @@ mod tests {
         std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
         jj.describe_set("@", "source").unwrap();
         // Create a child commit so @ has exactly one child after we edit back.
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         jj.describe_set("@", "child").unwrap();
         // Move back to source so @ has the child we just created.
         Command::new("jj")
@@ -1052,7 +1079,7 @@ mod tests {
         let jj = init_repo(dir.path());
         std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
         jj.describe_set("@", "parent with the file").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         // @ is now a fresh child of parent. Parent has the only copy of readme.txt.
         let uri = run_unsquash(&jj, dir.path(), "readme.txt", "@-").expect("run_unsquash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
@@ -1077,11 +1104,11 @@ mod tests {
         let jj = init_repo(dir.path());
         // Parent: empty.
         jj.describe_set("@", "parent").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         // Middle (@): add readme.txt.
         std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
         jj.describe_set("@", "middle").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         // @: now child of middle.
         let uri = run_squash(&jj, dir.path(), "readme.txt", "@-").expect("run_squash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
@@ -1126,9 +1153,9 @@ mod tests {
         let jj = init_repo(dir.path());
         // Create stack: parent → middle → @. Abandon middle.
         jj.describe_set("@", "parent").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         jj.describe_set("@", "middle to abandon").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         let middle_id = jj.change_ids("@-").unwrap().first().cloned().unwrap();
         let uri = run_abandon(&jj, dir.path(), &middle_id).expect("run_abandon failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
@@ -1251,7 +1278,7 @@ mod tests {
         let jj = init_repo(dir.path());
         std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
         jj.describe_set("@", "parent").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
         run_toggle_stat(&jj, dir.path()).unwrap(); // stat on
         run_squash(&jj, dir.path(), "readme.txt", "").unwrap();
@@ -1280,7 +1307,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         jj.describe_set("@", "parent").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         jj.describe_set("@", "child").unwrap();
         let uri = run_prev(&jj, dir.path(), false).expect("run_prev failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
@@ -1295,7 +1322,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         jj.describe_set("@", "parent").unwrap();
-        jj.new_change().unwrap();
+        jj.new_change("").unwrap();
         jj.describe_set("@", "child").unwrap();
         run_prev(&jj, dir.path(), true).expect("run_prev edit failed");
         let desc = jj.describe_get("@").unwrap();
