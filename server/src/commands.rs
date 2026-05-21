@@ -31,7 +31,7 @@ a     abandon commit at cursor";
 /// Pre-defined revset shortcuts shown in the log.jujutsu header.
 /// Each entry is (label, revset). The label is also used to align columns.
 const LOG_SHORTCUTS: &[(&str, &str)] = &[
-    ("Mutable", "ancestors(reachable(@, mutable()))"),
+    ("Mutable", "ancestors(reachable(@, mutable()), 2)"),
     ("Stack", "(immutable_heads()..@)::"),
 ];
 
@@ -584,7 +584,7 @@ mod tests {
             "missing Mutable shortcut:\n{content}"
         );
         assert!(
-            content.contains("ancestors(reachable(@, mutable()))"),
+            content.contains("ancestors(reachable(@, mutable()), 2)"),
             "missing Mutable revset:\n{content}"
         );
         assert!(
@@ -718,7 +718,7 @@ mod tests {
 
     #[test]
     fn parse_log_revset_skips_jj_comments_inside_block() {
-        let content = "REVSET: @\nJJ: Mutable:  ancestors(reachable(@, mutable()))\nJJ: Stack:    (immutable_heads()..@)::\n\nOUTPUT:\n\nlog output";
+        let content = "REVSET: @\nJJ: Mutable:  ancestors(reachable(@, mutable()), 2)\nJJ: Stack:    (immutable_heads()..@)::\n\nOUTPUT:\n\nlog output";
         assert_eq!(parse_log_revset(content), Some("@".to_string()));
     }
 

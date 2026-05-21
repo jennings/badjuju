@@ -2,6 +2,7 @@
   "name": "vscode-badjuju-lsp",
   "displayName": "Bad Juju",
   "description": "Bad Juju Jujutsu VCS",
+  "repository": "https://github.com/jennings/badjuju",
   "license": "MIT",
   "version": "0.1.0",
   "engines": {

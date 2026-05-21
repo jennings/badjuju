@@ -67,7 +67,7 @@ on the line and pressing Enter:
 [source]
 ----
 REVSET: @
-JJ: Mutable:  ancestors(reachable(@, mutable()))
+JJ: Mutable:  ancestors(reachable(@, mutable()), 2)
 JJ: Stack:    (immutable_heads()..@)::
 
 OUTPUT:
