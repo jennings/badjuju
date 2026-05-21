@@ -234,7 +234,7 @@ impl LanguageServer for Backend {
                     .arguments
                     .first()
                     .and_then(|v| v.as_str())
-                    .unwrap_or("@");
+                    .unwrap_or("");
                 let uri = commands::run_log(&jj, &workspace, revset).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }

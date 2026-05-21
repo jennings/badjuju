@@ -65,7 +65,7 @@
         "badjuju.defaultLogRevset": {
           "type": "string",
           "default": "",
-          "description": "Default revset for badjuju.log.open. Leave blank to use jj's default."
+          "description": "Default revset for badjuju.log.open. Leave blank to match the status window's stack: ancestors(reachable(@, mutable()), 2)."
         }
       }
     },

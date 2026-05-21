@@ -4,6 +4,11 @@ use crate::jj::{Jj, JjError};
 
 const STATUS_REVSET: &str = "ancestors(reachable(@, mutable()), 2)";
 
+/// Default revset for the log window when the client passes no explicit
+/// revset. Matches STATUS_REVSET so an unconfigured log open mirrors the
+/// stack view shown in status.jujutsu.
+const DEFAULT_LOG_REVSET: &str = STATUS_REVSET;
+
 const STATUS_COMMAND_REFERENCE: &str = "\
 COMMAND REFERENCE:
 n             new change
@@ -202,6 +207,11 @@ pub fn run_unsquash(
 
 /// Run `badjuju.log`: write log.jujutsu and return its URI.
 pub fn run_log(jj: &Jj, workspace: &Path, revset: &str) -> Result<String, CommandError> {
+    let revset = if revset.is_empty() {
+        DEFAULT_LOG_REVSET
+    } else {
+        revset
+    };
     let output = jj.log(revset)?;
 
     let content = format!(
@@ -569,6 +579,19 @@ mod tests {
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         assert!(content.starts_with(&format!("REVSET: {revset}")));
+    }
+
+    #[test]
+    fn run_log_empty_revset_defaults_to_status_stack() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_log(&jj, dir.path(), "").expect("run_log failed");
+        let path = uri.strip_prefix("file://").unwrap();
+        let content = std::fs::read_to_string(path).unwrap();
+        assert!(
+            content.starts_with("REVSET: ancestors(reachable(@, mutable()), 2)"),
+            "empty revset should default to the depth-2 mutable revset:\n{content}"
+        );
     }
 
     #[test]

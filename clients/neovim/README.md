@@ -102,6 +102,8 @@ require('badjuju').setup({
   -- Leave nil to use jj from PATH.
   binaryPath = nil,
   -- Default revset used by :JJLog when called with no argument.
+  -- Leave nil to match the status window's stack:
+  -- ancestors(reachable(@, mutable()), 2).
   defaultLogRevset = nil,
 })
 vim.lsp.enable('jujutsu')
