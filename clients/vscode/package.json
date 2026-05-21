@@ -1,8 +1,9 @@
 {
-  "name": "vscode-badjuju-lsp",
-  "displayName": "Bad Juju",
-  "description": "Bad Juju Jujutsu VCS",
+  "name": "badjuju-vcs",
+  "displayName": "Bad Juju - Jujutsu VCS",
+  "description": "Text-based version control client for Jujutsu (jj). Like Magit, but for jj.",
   "repository": "https://github.com/jennings/badjuju",
+  "publisher": "turbocharged",
   "license": "MIT",
   "version": "0.1.0",
   "engines": {

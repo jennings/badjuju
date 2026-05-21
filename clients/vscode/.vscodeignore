@@ -15,6 +15,9 @@ tsconfig.json
 # Don't recursively include previously built VSIX archives.
 *.vsix
 
+# Rust
+target/**
+
 # node_modules is omitted by `vsce package --no-dependencies`; keep an
 # explicit guard so accidental `vsce package` runs without the flag still
 # produce a slim archive.
