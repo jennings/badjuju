@@ -11,3 +11,5 @@ end
 
 -- Reflect on-disk changes (the server rewrites these files behind our back).
 vim.bo.autoread = true
+
+require('badjuju.keymap').setup_for_buffer(0)
