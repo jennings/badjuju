@@ -93,12 +93,12 @@
       {
         "command": "badjuju.refresh.open",
         "key": "g",
-        "when": "resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.refresh.open",
         "key": "r",
-        "when": "resourceLangId == jujutsu && editorTextFocus"
+        "when": "resourceFilename == status.jj && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.new.open",

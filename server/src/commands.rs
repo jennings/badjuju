@@ -4,12 +4,17 @@ use crate::jj::{Jj, JjError};
 
 const STATUS_REVSET: &str = "ancestors(reachable(@, mutable()), 2)";
 
-const COMMAND_REFERENCE: &str = "\
+const STATUS_COMMAND_REFERENCE: &str = "\
 COMMAND REFERENCE:
-n   new
-c   commit
-l   log
-r   rebase";
+n   new change
+l   open log
+d   describe
+g   refresh
+q   close";
+
+const LOG_COMMAND_REFERENCE: &str = "\
+COMMAND REFERENCE:
+Edit REVSET above and save to re-run the query.";
 
 /// Returns the `<workspace>/.jj/badjuju/` directory, creating it if needed.
 fn badjuju_dir(workspace: &Path) -> std::io::Result<PathBuf> {
@@ -32,7 +37,7 @@ pub fn run_status(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
         status.trim_end(),
         STATUS_REVSET,
         stack.trim_end(),
-        COMMAND_REFERENCE,
+        STATUS_COMMAND_REFERENCE,
     );
 
     let dir = badjuju_dir(workspace)?;
@@ -45,7 +50,12 @@ pub fn run_status(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
 pub fn run_log(jj: &Jj, workspace: &Path, revset: &str) -> Result<String, CommandError> {
     let output = jj.log(revset)?;
 
-    let content = format!("REVSET: {}\n\n{}", revset, output.trim_end());
+    let content = format!(
+        "REVSET: {}\n\nOUTPUT:\n\n{}\n\n{}",
+        revset,
+        output.trim_end(),
+        LOG_COMMAND_REFERENCE,
+    );
 
     let dir = badjuju_dir(workspace)?;
     let path = dir.join("log.jj");
@@ -180,6 +190,27 @@ mod tests {
     }
 
     #[test]
+    fn run_status_command_reference_matches_keybindings() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_status(&jj, dir.path()).expect("run_status failed");
+        let path = uri.strip_prefix("file://").unwrap();
+        let content = std::fs::read_to_string(path).unwrap();
+        for key in [
+            "n   new",
+            "l   open log",
+            "d   describe",
+            "g   refresh",
+            "q   close",
+        ] {
+            assert!(
+                content.contains(key),
+                "missing `{key}` in status command reference:\n{content}"
+            );
+        }
+    }
+
+    #[test]
     fn run_log_writes_file_with_revset_header() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
@@ -187,6 +218,27 @@ mod tests {
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         assert!(content.starts_with("REVSET: @"));
+    }
+
+    #[test]
+    fn run_log_includes_output_heading_and_command_reference() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_log(&jj, dir.path(), "@").expect("run_log failed");
+        let path = uri.strip_prefix("file://").unwrap();
+        let content = std::fs::read_to_string(path).unwrap();
+        assert!(
+            content.contains("OUTPUT:"),
+            "missing OUTPUT heading:\n{content}"
+        );
+        assert!(
+            content.contains("COMMAND REFERENCE:"),
+            "missing command reference:\n{content}"
+        );
+        assert!(
+            content.contains("Edit REVSET above"),
+            "missing revset edit hint:\n{content}"
+        );
     }
 
     #[test]
