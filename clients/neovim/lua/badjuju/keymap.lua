@@ -123,6 +123,71 @@ local function apply_log_shortcut()
   })
 end
 
+--- Show a floating help popup listing active bindings for window_type.
+--- Fetches entries from the server's badjuju.help command.
+---@param window_type string  'status' | 'log' | 'diff'
+local function show_help(window_type)
+  require('badjuju').request('badjuju.help', { window_type }, function(entries)
+      if type(entries) ~= 'table' or #entries == 0 then
+        vim.notify('badjuju: no keymap entries for ' .. window_type, vim.log.levels.INFO)
+        return
+      end
+
+      -- Build lines: "key   description"
+      local max_key = 0
+      for _, e in ipairs(entries) do
+        if type(e.key) == 'string' and #e.key > max_key then
+          max_key = #e.key
+        end
+      end
+      local lines = { ' Bad Juju — ' .. window_type .. ' bindings', '' }
+      for _, e in ipairs(entries) do
+        if type(e.key) == 'string' and e.key ~= '' then
+          local pad = string.rep(' ', max_key - #e.key + 3)
+          lines[#lines + 1] = ' ' .. e.key .. pad .. (e.description or '')
+        end
+      end
+      lines[#lines + 1] = ''
+
+      local width = 0
+      for _, l in ipairs(lines) do
+        if #l > width then width = #l end
+      end
+      width = math.max(width, 30)
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+      vim.bo[buf].modifiable = false
+
+      local win_height = vim.api.nvim_list_uis()[1] and vim.api.nvim_list_uis()[1].height or 24
+      local win_width  = vim.api.nvim_list_uis()[1] and vim.api.nvim_list_uis()[1].width  or 80
+      local row = math.floor((win_height - #lines) / 2)
+      local col = math.floor((win_width  - width)  / 2)
+
+      local win = vim.api.nvim_open_win(buf, true, {
+        relative = 'editor',
+        row      = row,
+        col      = col,
+        width    = width,
+        height   = #lines,
+        style    = 'minimal',
+        border   = 'rounded',
+        title    = ' ? Help ',
+        title_pos = 'center',
+      })
+      vim.wo[win].cursorline = false
+
+      -- Close on q, Escape, or ?
+      for _, key in ipairs({ 'q', '<Esc>', '?' }) do
+        vim.keymap.set('n', key, function()
+          if vim.api.nvim_win_is_valid(win) then
+            vim.api.nvim_win_close(win, true)
+          end
+        end, { buffer = buf, silent = true, nowait = true })
+      end
+  end)
+end
+
 --- Install buffer-local keymaps for the given buffer if its name matches a
 --- badjuju status.jujutsu or log.jujutsu path. No-op for any other buffer.
 ---@param bufnr integer?  defaults to current buffer (0)
@@ -143,6 +208,7 @@ function M.setup_for_buffer(bufnr)
       'badjuju: squash file at cursor into parent')
     nmap(bufnr, 'U', function() run_file_scoped('badjuju.unsquash') end,
       'badjuju: unsquash file at cursor from parent into child')
+    nmap(bufnr, '?', function() show_help('status') end, 'badjuju: show help')
   elseif name:match('/%.jj/badjuju/log%.jujutsu$') then
     for _, m in ipairs(LOG_MAPS) do
       map_cmd(bufnr, m[1], m[2], m[3])
@@ -152,10 +218,12 @@ function M.setup_for_buffer(bufnr)
     nmap(bufnr, 'D', function() run_at_cursor_split('log', 'badjuju.diff', 'diff') end,
       'badjuju: diff commit at cursor in a split')
     nmap(bufnr, '<CR>', apply_log_shortcut, 'badjuju: apply revset shortcut under cursor')
+    nmap(bufnr, '?', function() show_help('log') end, 'badjuju: show help')
   elseif name:match('/%.jj/badjuju/diff%.jujutsu$') then
     nmap(bufnr, 'g', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
     nmap(bufnr, 'r', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
+    nmap(bufnr, '?', function() show_help('diff') end, 'badjuju: show help')
   end
 end
 

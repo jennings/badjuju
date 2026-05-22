@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use tower_lsp::lsp_types::Url;
 
 use crate::jj::{Jj, JjError};
+use crate::keymap::{self, KeymapProfile};
 
 const STATUS_REVSET: &str = "ancestors(reachable(@, mutable()), 2)";
 
@@ -11,57 +12,67 @@ const STATUS_REVSET: &str = "ancestors(reachable(@, mutable()), 2)";
 /// stack view shown in status.jujutsu.
 const DEFAULT_LOG_REVSET: &str = STATUS_REVSET;
 
-const STATUS_COMMAND_REFERENCE: &str = "\
-COMMAND REFERENCE:
-n             new change
-l             open log
-d             describe commit at cursor (opens in a split)
-D             diff commit at cursor (opens in a split)
-s             squash file at cursor into parent
-U             unsquash file at cursor from parent into child   (or Ctrl+K U when vim shadows U)
-a             abandon commit at cursor (or working copy)
-u             jj undo (revert last operation)
-Ctrl+n        jj next (move working copy forward)
-Ctrl+p        jj prev (move working copy back)
-Ctrl+Shift+n  jj next --edit (edit the child in place)
-Ctrl+Shift+p  jj prev --edit (edit the parent in place)
-=             toggle --stat on the stack log
-g             refresh (or r)
-q             close";
-
-const LOG_COMMAND_REFERENCE: &str = "\
-COMMAND REFERENCE:
-Edit REVSET above and save to re-run the query.
-Place the cursor on a shortcut line and press Enter to apply it.
-d     describe commit at cursor (opens in a split)
-a     abandon commit at cursor";
-
-/// Client-supplied overrides for the in-buffer COMMAND REFERENCE blocks.
-/// Each field defaults to `None`, in which case the built-in VS Code-flavored
-/// constant above is used. The neovim client (and any future client whose
-/// keymap differs) supplies its own text via `initializationOptions`.
-#[derive(Debug, Default, Clone)]
+/// In-buffer COMMAND REFERENCE text for each generated buffer type.
+///
+/// Defaults are rendered from the active `KeymapProfile`. Clients may supply
+/// override text via `initializationOptions.commandReference` as an escape
+/// hatch when their actual keybindings differ from the profile's defaults.
+#[derive(Debug, Clone)]
 pub struct CommandReference {
-    status: Option<String>,
-    log: Option<String>,
-    diff: Option<String>,
+    status: String,
+    log: String,
+    diff: String,
+}
+
+impl Default for CommandReference {
+    fn default() -> Self {
+        Self::from_profile(&KeymapProfile::Magit)
+    }
 }
 
 impl CommandReference {
+    /// Render all three buffers' reference text from the given profile.
+    pub fn from_profile(profile: &KeymapProfile) -> Self {
+        Self {
+            status: keymap::render_command_reference(profile, "status"),
+            log: keymap::render_command_reference(profile, "log"),
+            diff: keymap::render_command_reference(profile, "diff"),
+        }
+    }
+
+    /// Build from a profile with optional per-buffer client overrides.
+    ///
+    /// `None` for a field means "use the profile default"; a `Some` value
+    /// replaces the rendered text entirely (the escape-hatch path used by
+    /// clients whose keybindings differ from any built-in profile).
     pub fn new(status: Option<String>, log: Option<String>, diff: Option<String>) -> Self {
-        Self { status, log, diff }
+        Self::with_profile(&KeymapProfile::Magit, status, log, diff)
+    }
+
+    pub fn with_profile(
+        profile: &KeymapProfile,
+        status: Option<String>,
+        log: Option<String>,
+        diff: Option<String>,
+    ) -> Self {
+        let base = Self::from_profile(profile);
+        Self {
+            status: status.unwrap_or(base.status),
+            log: log.unwrap_or(base.log),
+            diff: diff.unwrap_or(base.diff),
+        }
     }
 
     pub fn status(&self) -> &str {
-        self.status.as_deref().unwrap_or(STATUS_COMMAND_REFERENCE)
+        &self.status
     }
 
     pub fn log(&self) -> &str {
-        self.log.as_deref().unwrap_or(LOG_COMMAND_REFERENCE)
+        &self.log
     }
 
     pub fn diff(&self) -> &str {
-        self.diff.as_deref().unwrap_or(DIFF_COMMAND_REFERENCE)
+        &self.diff
     }
 }
 
@@ -278,10 +289,6 @@ pub fn run_log(jj: &Jj, workspace: &Path, revset: &str) -> Result<String, Comman
     Ok(file_uri(&path))
 }
 
-const DIFF_COMMAND_REFERENCE: &str = "\
-COMMAND REFERENCE:
-g     refresh
-q     close";
 
 /// Run `badjuju.diff`: write diff.jujutsu showing `jj diff -r REV` for the
 /// given revision (defaults to `@` when empty). Embeds a `REVISION:` header
@@ -582,35 +589,31 @@ mod tests {
         let uri = run_status(&jj, dir.path()).expect("run_status failed");
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
-        for key in [
-            "n             new",
-            "l             open log",
-            "d             describe",
-            "D             diff",
-            "s             squash",
-            "U             unsquash",
-            "a             abandon",
-            "u             jj undo",
-            "Ctrl+n        jj next",
-            "Ctrl+p        jj prev",
-            "Ctrl+Shift+n  jj next --edit",
-            "Ctrl+Shift+p  jj prev --edit",
-            "g             refresh",
-            "q             close",
-        ] {
+        // Every key in the magit status profile must appear at the start of a line.
+        for key in ["n", "l", "d", "D", "s", "U", "a", "u", "=", "g", "q"] {
             assert!(
-                content.contains(key),
-                "missing `{key}` in status command reference:\n{content}"
+                content.lines().any(|l| l.starts_with(key)),
+                "missing key `{key}` in status command reference:\n{content}"
             );
         }
     }
 
     #[test]
-    fn command_reference_defaults_match_built_in_constants() {
+    fn command_reference_defaults_render_from_magit_profile() {
+        use crate::keymap::{KeymapProfile, render_command_reference};
         let default = CommandReference::default();
-        assert_eq!(default.status(), STATUS_COMMAND_REFERENCE);
-        assert_eq!(default.log(), LOG_COMMAND_REFERENCE);
-        assert_eq!(default.diff(), DIFF_COMMAND_REFERENCE);
+        assert_eq!(
+            default.status(),
+            render_command_reference(&KeymapProfile::Magit, "status")
+        );
+        assert_eq!(
+            default.log(),
+            render_command_reference(&KeymapProfile::Magit, "log")
+        );
+        assert_eq!(
+            default.diff(),
+            render_command_reference(&KeymapProfile::Magit, "diff")
+        );
     }
 
     #[test]
@@ -636,7 +639,7 @@ mod tests {
             "expected status override in:\n{status_content}"
         );
         assert!(
-            !status_content.contains("Ctrl+n"),
+            !status_content.lines().any(|l| l.starts_with("n") && l.contains("new change")),
             "default reference text should not leak through when overridden:\n{status_content}"
         );
 
@@ -677,8 +680,8 @@ mod tests {
         )
         .unwrap();
         assert!(
-            status_content.contains("Ctrl+n"),
-            "status reference should still be the default; got:\n{status_content}"
+            status_content.lines().any(|l| l.starts_with("n")),
+            "status reference should still be the default (n = new change); got:\n{status_content}"
         );
 
         let log_content = std::fs::read_to_string(
@@ -724,7 +727,7 @@ mod tests {
             "missing revset edit hint:\n{content}"
         );
         assert!(
-            content.contains("a     abandon"),
+            content.lines().any(|l| l.starts_with("a") && l.contains("abandon")),
             "missing abandon hint:\n{content}"
         );
     }

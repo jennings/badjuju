@@ -512,6 +512,32 @@ export async function activate(context: ExtensionContext) {
       });
       await openServerResult(result as string, { aside: true });
     }),
+    commands.registerCommand("badjuju.help.open", async () => {
+      const editor = window.activeTextEditor;
+      let windowType = "status";
+      if (editor) {
+        const uri = editor.document.uri;
+        if (isLogFile(uri)) windowType = "log";
+        else if (isDiffFile(uri)) windowType = "diff";
+      }
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.help",
+        arguments: [windowType],
+      });
+      const entries = result as Array<{
+        key: string;
+        action: string;
+        description: string;
+      }>;
+      if (!entries?.length) return;
+      const items = entries
+        .filter((e) => e.key)
+        .map((e) => ({ label: e.key, description: e.description }));
+      await window.showQuickPick(items, {
+        title: `Bad Juju — ${windowType} bindings`,
+        placeHolder: "Press Escape to close",
+      });
+    }),
     commands.registerCommand("badjuju.abandon.cursor", async () => {
       const editor = window.activeTextEditor;
       let revision = "@";

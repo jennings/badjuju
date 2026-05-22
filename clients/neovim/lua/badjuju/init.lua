@@ -166,4 +166,31 @@ function M.execute(command, arguments, opts)
   end)
 end
 
+--- Send workspace/executeCommand and pass the raw result to cb.
+--- Unlike execute(), no file-opening is done — use this for commands that
+--- return structured data (e.g. badjuju.help, badjuju.keymap).
+---@param command string
+---@param arguments any[]?
+---@param cb fun(result: any)
+function M.request(command, arguments, cb)
+  local client = M.ensure_client()
+  if not client then
+    vim.notify(
+      'badjuju: not in a jj workspace (no .jj directory found).',
+      vim.log.levels.ERROR
+    )
+    return
+  end
+  client:request('workspace/executeCommand', {
+    command = command,
+    arguments = arguments or {},
+  }, function(err, result)
+    if err then
+      vim.notify('badjuju: ' .. (err.message or vim.inspect(err)), vim.log.levels.ERROR)
+      return
+    end
+    vim.schedule(function() cb(result) end)
+  end)
+end
+
 return M

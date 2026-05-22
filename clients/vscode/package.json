@@ -150,6 +150,11 @@
         "command": "badjuju.diff.cursor",
         "category": "jj",
         "title": "Show diff for commit at cursor"
+      },
+      {
+        "command": "badjuju.help.open",
+        "category": "jj",
+        "title": "Show hotkey help"
       }
     ],
     "keybindings": [
@@ -271,6 +276,21 @@
       {
         "command": "workbench.action.closeActiveEditor",
         "key": "q",
+        "when": "resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.help.open",
+        "key": "shift+/",
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.help.open",
+        "key": "shift+/",
+        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.help.open",
+        "key": "shift+/",
         "when": "resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       }
     ]

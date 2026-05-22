@@ -9,6 +9,7 @@ use tracing::{info, warn};
 
 use crate::commands::{self, CommandReference};
 use crate::jj::Jj;
+use crate::keymap::{self, KeymapProfile};
 use crate::workspace::find_workspace_root;
 
 pub const COMMANDS: &[&str] = &[
@@ -25,18 +26,34 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.toggleStat",
     "badjuju.undo",
     "badjuju.abandon",
+    "badjuju.keymap",
+    "badjuju.help",
 ];
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct State {
     workspace_root: Option<PathBuf>,
     binary_path: Option<String>,
-    /// Client-supplied COMMAND REFERENCE overrides (one entry per generated
-    /// buffer). Captured at `initialize` time and attached to every `Jj`
-    /// instance the server creates.
+    /// Active keymap profile — drives COMMAND REFERENCE rendering and the
+    /// `badjuju.keymap` / `badjuju.help` responses.
+    keymap_profile: KeymapProfile,
+    /// Per-buffer COMMAND REFERENCE overrides from the client (escape hatch).
+    /// Overrides replace the profile-rendered defaults for individual buffers.
     command_reference: CommandReference,
     /// Latest text content for open documents, keyed by URI string.
     documents: HashMap<String, String>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            workspace_root: None,
+            binary_path: None,
+            keymap_profile: KeymapProfile::Magit,
+            command_reference: CommandReference::default(),
+            documents: HashMap::new(),
+        }
+    }
 }
 
 impl State {
@@ -71,16 +88,16 @@ fn lsp_err(msg: impl ToString) -> Error {
 }
 
 /// Parse the optional `commandReference` object passed in `initializationOptions`.
-/// Each of `status`, `log`, and `diff` is an optional string. Missing or
-/// non-string values fall back to the server's built-in defaults.
-fn parse_command_reference(value: &serde_json::Value) -> CommandReference {
+/// Each of `status`, `log`, and `diff` is an optional string override. Missing
+/// or non-string values fall back to the profile-rendered defaults.
+fn parse_command_reference(value: &serde_json::Value, profile: &KeymapProfile) -> CommandReference {
     let pick = |key: &str| -> Option<String> {
         value
             .get(key)
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     };
-    CommandReference::new(pick("status"), pick("log"), pick("diff"))
+    CommandReference::with_profile(profile, pick("status"), pick("log"), pick("diff"))
 }
 
 #[tower_lsp::async_trait]
@@ -93,12 +110,26 @@ impl LanguageServer for Backend {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
+        let keymap_profile = params
+            .initialization_options
+            .as_ref()
+            .and_then(|o| o.get("keymapProfile"))
+            .and_then(|v| v.as_str())
+            .and_then(|s| {
+                let p = s.parse::<KeymapProfile>().ok();
+                if p.is_none() {
+                    warn!(profile = s, "unknown keymapProfile; falling back to magit");
+                }
+                p
+            })
+            .unwrap_or_default();
+
         let command_reference = params
             .initialization_options
             .as_ref()
             .and_then(|o| o.get("commandReference"))
-            .map(parse_command_reference)
-            .unwrap_or_default();
+            .map(|v| parse_command_reference(v, &keymap_profile))
+            .unwrap_or_else(|| CommandReference::from_profile(&keymap_profile));
 
         let search_start = params
             .root_uri
@@ -117,6 +148,7 @@ impl LanguageServer for Backend {
         {
             let mut state = self.state.write().await;
             state.binary_path = binary_path;
+            state.keymap_profile = keymap_profile;
             state.command_reference = command_reference;
             state.workspace_root = workspace_root.clone();
         }
@@ -240,6 +272,30 @@ impl LanguageServer for Backend {
         params: ExecuteCommandParams,
     ) -> Result<Option<serde_json::Value>> {
         info!(command = %params.command, "execute_command");
+
+        // Keymap commands don't require a workspace root.
+        if params.command == "badjuju.keymap" {
+            let profile = self.state.read().await.keymap_profile.clone();
+            let windows = serde_json::json!({
+                "profile": profile.as_str(),
+                "windows": {
+                    "status": keymap::entries_for_window(&profile, "status"),
+                    "log": keymap::entries_for_window(&profile, "log"),
+                    "diff": keymap::entries_for_window(&profile, "diff"),
+                }
+            });
+            return Ok(Some(windows));
+        }
+        if params.command == "badjuju.help" {
+            let profile = self.state.read().await.keymap_profile.clone();
+            let window = params
+                .arguments
+                .first()
+                .and_then(|v| v.as_str())
+                .unwrap_or("status");
+            let entries = keymap::entries_for_window(&profile, window);
+            return Ok(Some(serde_json::to_value(entries).unwrap_or_default()));
+        }
 
         let state = self.state.read().await;
         let jj = state.jj().ok_or_else(Error::invalid_request)?;
@@ -392,5 +448,7 @@ mod tests {
         assert!(COMMANDS.contains(&"badjuju.toggleStat"));
         assert!(COMMANDS.contains(&"badjuju.undo"));
         assert!(COMMANDS.contains(&"badjuju.abandon"));
+        assert!(COMMANDS.contains(&"badjuju.keymap"));
+        assert!(COMMANDS.contains(&"badjuju.help"));
     }
 }
