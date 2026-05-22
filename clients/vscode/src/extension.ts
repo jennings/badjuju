@@ -520,6 +520,9 @@ export async function activate(context: ExtensionContext) {
       await commands.executeCommand("workbench.action.files.save");
       await commands.executeCommand("workbench.action.closeActiveEditor");
     }),
+    commands.registerCommand("badjuju.restartLanguageServer", async () => {
+      await client.restart();
+    }),
     commands.registerCommand("badjuju.help.open", async () => {
       const editor = window.activeTextEditor;
       let windowType = "status";

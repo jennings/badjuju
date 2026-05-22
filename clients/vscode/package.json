@@ -160,6 +160,11 @@
         "command": "badjuju.describe.finalize",
         "category": "jj",
         "title": "Finalize commit description (save and close)"
+      },
+      {
+        "command": "badjuju.restartLanguageServer",
+        "category": "jj",
+        "title": "Restart Language Server"
       }
     ],
     "keybindings": [
