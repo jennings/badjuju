@@ -195,6 +195,14 @@ pub fn render_command_reference(profile: &KeymapProfile, window: &str) -> String
     let entries = entries_for_window(profile, window);
     let mut lines = vec!["COMMAND REFERENCE:".to_string()];
 
+    if matches!(profile, KeymapProfile::None) {
+        lines.push(
+            "No default bindings active. Configure your own hotkeys via editor keybinding settings."
+                .to_string(),
+        );
+        return lines.join("\n");
+    }
+
     if window == "log" {
         lines.push("Edit REVSET above and save to re-run the query.".to_string());
         lines.push(
@@ -269,9 +277,13 @@ mod tests {
     }
 
     #[test]
-    fn none_profile_renders_header_only() {
+    fn none_profile_renders_no_bindings_note() {
         let text = render_command_reference(&KeymapProfile::None, "status");
-        assert_eq!(text, "COMMAND REFERENCE:");
+        assert!(text.starts_with("COMMAND REFERENCE:"), "missing header");
+        assert!(
+            text.contains("No default bindings active"),
+            "missing none-profile note in:\n{text}"
+        );
     }
 
     #[test]

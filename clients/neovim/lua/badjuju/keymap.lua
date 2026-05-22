@@ -192,9 +192,14 @@ end
 
 --- Install buffer-local keymaps for the given buffer if its name matches a
 --- badjuju status.jujutsu or log.jujutsu path. No-op for any other buffer.
+--- When keymapProfile is 'none', skips all hotkey registrations (users bind their own).
 ---@param bufnr integer?  defaults to current buffer (0)
 function M.setup_for_buffer(bufnr)
   bufnr = bufnr or 0
+  local profile = require('badjuju').config.keymap_profile
+  if profile == 'none' then
+    return
+  end
   local name = vim.api.nvim_buf_get_name(bufnr)
 
   if name:match('/%.jj/badjuju/status%.jujutsu$') then

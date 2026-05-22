@@ -67,6 +67,12 @@
           "type": "string",
           "default": "",
           "description": "Default revset for badjuju.log.open. Leave blank to match the status window's stack: ancestors(reachable(@, mutable()), 2)."
+        },
+        "badjuju.keymapProfile": {
+          "type": "string",
+          "enum": ["magit", "none"],
+          "default": "magit",
+          "description": "Hotkey profile. 'magit' enables Magit-consensus bindings; 'none' disables all default hotkeys so you can define your own."
         }
       }
     },
@@ -206,212 +212,212 @@
       {
         "command": "badjuju.refresh.open",
         "key": "g",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.refresh.open",
         "key": "shift+r",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.new.open",
         "key": "n",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.next.open",
         "key": "ctrl+n",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.prev.open",
         "key": "ctrl+p",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.next.edit",
         "key": "ctrl+shift+n",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.prev.edit",
         "key": "ctrl+shift+p",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.log.open",
         "key": "l",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.fetch.run",
         "key": "f",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.push.normal",
         "key": "p",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.push.forceWithLease",
         "key": "shift+p",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.edit.cursor",
         "key": "e",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.bookmark.prompt",
         "key": "b",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.rebase.prompt",
         "key": "r",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.describe.open",
         "key": "d",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "workbench.action.closeActiveEditor",
         "key": "q",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.squash.file",
         "key": "s",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.undo.open",
         "key": "u",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.unsquash.file",
         "key": "shift+u",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !vim.active"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !vim.active"
       },
       {
         "command": "badjuju.unsquash.file",
         "key": "ctrl+k u",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.toggleStat.open",
         "key": "=",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.log.applyShortcut",
         "key": "enter",
-        "when": "badjuju.onLogShortcutLine && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
+        "when": "badjuju.keymapsActive && badjuju.onLogShortcutLine && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
       },
       {
         "command": "badjuju.abandon.cursor",
         "key": "a",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.abandon.cursor",
         "key": "a",
-        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.edit.cursor",
         "key": "e",
-        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.bookmark.prompt",
         "key": "b",
-        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.rebase.prompt",
         "key": "r",
-        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.describe.open",
         "key": "d",
-        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.diff.cursor",
         "key": "shift+d",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.diff.cursor",
         "key": "shift+d",
-        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.refresh.open",
         "key": "g",
-        "when": "resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.refresh.open",
         "key": "shift+r",
-        "when": "resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "workbench.action.closeActiveEditor",
         "key": "q",
-        "when": "resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.help.open",
         "key": "shift+/",
-        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.help.open",
         "key": "shift+/",
-        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.help.open",
         "key": "shift+/",
-        "when": "resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.refresh.open",
         "key": "g",
-        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.refresh.open",
         "key": "shift+r",
-        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "workbench.action.closeActiveEditor",
         "key": "q",
-        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.describe.finalize",
         "key": "ctrl+enter",
-        "when": "resourceFilename == 'describe.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'describe.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "workbench.action.revertAndCloseActiveEditor",
         "key": "escape escape",
-        "when": "resourceFilename == 'describe.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'describe.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.help.open",
         "key": "shift+/",
-        "when": "resourceFilename == 'describe.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+        "when": "badjuju.keymapsActive && resourceFilename == 'describe.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       }
     ]
   }

@@ -282,7 +282,17 @@ export async function activate(context: ExtensionContext) {
 
   const config = workspace.getConfiguration("badjuju");
   const binaryPath: string | undefined = config.get("binaryPath");
-  const initializationOptions = binaryPath ? { binaryPath } : undefined;
+  const keymapProfile: string = config.get("keymapProfile") ?? "magit";
+  const initializationOptions: Record<string, unknown> = { keymapProfile };
+  if (binaryPath) initializationOptions.binaryPath = binaryPath;
+
+  // Gate all package.json keybindings on this context key so the 'none'
+  // profile produces zero hotkey registrations without modifying every when-clause.
+  commands.executeCommand(
+    "setContext",
+    "badjuju.keymapsActive",
+    keymapProfile !== "none",
+  );
 
   const clientOptions: LanguageClientOptions = {
     documentSelector: [

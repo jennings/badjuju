@@ -2,11 +2,13 @@ local M = {}
 
 --- Plugin configuration. Mutate via setup(); fields are nil until populated.
 ---@class badjuju.Config
----@field binary_path string?       Path to the jj binary (forwarded to the server).
----@field default_log_revset string?  Default revset used by :JJLog with no argument.
+---@field binary_path string?        Path to the jj binary (forwarded to the server).
+---@field default_log_revset string? Default revset used by :JJLog with no argument.
+---@field keymap_profile string?     Keymap profile: "magit" (default) or "none" (no bindings).
 M.config = {
   binary_path = nil,
   default_log_revset = nil,
+  keymap_profile = nil,
 }
 
 local CLIENT_NAME = 'jujutsu'
@@ -30,6 +32,12 @@ function M.setup(opts)
   end
   if opts.default_log_revset ~= nil then
     M.config.default_log_revset = opts.default_log_revset
+  end
+  if opts.keymapProfile ~= nil then
+    M.config.keymap_profile = opts.keymapProfile
+  end
+  if opts.keymap_profile ~= nil then
+    M.config.keymap_profile = opts.keymap_profile
   end
 end
 
