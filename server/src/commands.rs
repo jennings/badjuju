@@ -16,6 +16,7 @@ COMMAND REFERENCE:
 n             new change
 l             open log
 d             describe commit at cursor (opens in a split)
+D             diff commit at cursor (opens in a split)
 s             squash file at cursor into parent
 U             unsquash file at cursor from parent into child   (or Ctrl+K U when vim shadows U)
 a             abandon commit at cursor (or working copy)
@@ -25,7 +26,7 @@ Ctrl+p        jj prev (move working copy back)
 Ctrl+Shift+n  jj next --edit (edit the child in place)
 Ctrl+Shift+p  jj prev --edit (edit the parent in place)
 =             toggle --stat on the stack log
-g             refresh
+g             refresh (or r)
 q             close";
 
 const LOG_COMMAND_REFERENCE: &str = "\
@@ -585,6 +586,7 @@ mod tests {
             "n             new",
             "l             open log",
             "d             describe",
+            "D             diff",
             "s             squash",
             "U             unsquash",
             "a             abandon",

@@ -5,6 +5,9 @@
       "label": "build",
       "type": "shell",
       "command": "pnpm",
+      "options": {
+        "cwd": "${workspaceFolder}/clients/vscode"
+      },
       "args": ["run", "build"],
       "group": {
         "kind": "build",
