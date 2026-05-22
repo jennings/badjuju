@@ -105,3 +105,8 @@ case "$3" in
   *)  abs_out="$PWD/$3" ;;
 esac
 (cd "$stage" && pnpm exec vsce package --no-dependencies --target "$platform" --out "$abs_out")
+
+# Remove the staged binary and any dev binary in out/bin so that running the
+# extension locally falls back to the system badjuju binary rather than a
+# stale build artifact.
+rm -rf "$stage" out/bin
