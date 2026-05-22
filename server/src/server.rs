@@ -33,6 +33,7 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.fetch",
     "badjuju.push",
     "badjuju.rebase",
+    "badjuju.bookmark",
 ];
 
 #[derive(Debug)]
@@ -467,6 +468,26 @@ impl LanguageServer for Backend {
                     .unwrap_or("");
                 let uri =
                     commands::run_rebase(&jj, &workspace, source, dest).map_err(lsp_err)?;
+                Ok(Some(serde_json::Value::String(uri)))
+            }
+            "badjuju.bookmark" => {
+                let sub_action = params
+                    .arguments
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let name = params
+                    .arguments
+                    .get(1)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let revision = params
+                    .arguments
+                    .get(2)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let uri = commands::run_bookmark(&jj, &workspace, sub_action, name, revision)
+                    .map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             _ => Err(Error::method_not_found()),

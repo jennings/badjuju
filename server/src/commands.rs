@@ -514,6 +514,51 @@ pub fn run_abandon(jj: &Jj, workspace: &Path, revision: &str) -> Result<String, 
     }
 }
 
+/// Dispatch a bookmark sub-action, then refresh status + log.
+/// `sub_action` must be one of "create", "move", "delete", "track", "forget".
+/// `name` is required for all sub-actions.
+/// `revision` is used by create and move (defaults to @); ignored by others.
+/// Surfaces failures as a MESSAGE prelude.
+pub fn run_bookmark(
+    jj: &Jj,
+    workspace: &Path,
+    sub_action: &str,
+    name: &str,
+    revision: &str,
+) -> Result<String, CommandError> {
+    let stat = read_current_stat(workspace);
+    if name.is_empty() {
+        return write_status(jj, workspace, Some("bookmark: name is required"), stat);
+    }
+    let result = match sub_action {
+        "create" => jj.bookmark_create(name, revision),
+        "move" => jj.bookmark_move(name, revision),
+        "delete" => jj.bookmark_delete(name),
+        "track" => jj.bookmark_track(name),
+        "forget" => jj.bookmark_forget(name),
+        other => {
+            return write_status(
+                jj,
+                workspace,
+                Some(&format!("bookmark: unknown sub-action '{other}'")),
+                stat,
+            );
+        }
+    };
+    match result {
+        Ok(()) => {
+            regenerate_log_if_present(jj, workspace)?;
+            run_status(jj, workspace)
+        }
+        Err(e) => write_status(
+            jj,
+            workspace,
+            Some(&format!("bookmark {sub_action} failed: {e}")),
+            stat,
+        ),
+    }
+}
+
 /// Strip JJ: comment lines and the separator from describe.jujutsu content.
 /// Returns the trimmed description, or `None` if nothing remains.
 pub fn parse_describe_content(content: &str) -> Option<String> {
@@ -1797,5 +1842,64 @@ mod tests {
             content.starts_with("MESSAGE: rebase @ to not-a-real-rev failed:"),
             "expected error MESSAGE prelude, got:\n{content}"
         );
+    }
+
+    #[test]
+    fn run_bookmark_create_returns_status_uri() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_bookmark(&jj, dir.path(), "create", "mymark", "@")
+            .expect("run_bookmark create failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.starts_with("STATUS:"), "expected STATUS: header, got:\n{content}");
+    }
+
+    #[test]
+    fn run_bookmark_with_empty_name_reports_error() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_bookmark(&jj, dir.path(), "create", "", "@")
+            .expect("run_bookmark with empty name should return a URI");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.starts_with("MESSAGE: bookmark: name is required"),
+            "expected error MESSAGE, got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn run_bookmark_unknown_sub_action_reports_error() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_bookmark(&jj, dir.path(), "nope", "mymark", "@")
+            .expect("run_bookmark with bad sub-action should return a URI");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.starts_with("MESSAGE: bookmark: unknown sub-action 'nope'"),
+            "expected error MESSAGE, got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn run_bookmark_delete_removes_bookmark_and_refreshes_status() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        jj.bookmark_create("toremove", "@").unwrap();
+        let uri = run_bookmark(&jj, dir.path(), "delete", "toremove", "")
+            .expect("run_bookmark delete failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.starts_with("STATUS:"), "expected STATUS: header, got:\n{content}");
+    }
+
+    #[test]
+    fn run_bookmark_move_updates_target_and_refreshes_status() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        jj.bookmark_create("moving", "@").unwrap();
+        jj.new_change("").unwrap();
+        let uri = run_bookmark(&jj, dir.path(), "move", "moving", "@")
+            .expect("run_bookmark move failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.starts_with("STATUS:"), "expected STATUS: header, got:\n{content}");
     }
 }

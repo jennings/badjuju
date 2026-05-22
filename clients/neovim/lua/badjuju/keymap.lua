@@ -205,6 +205,19 @@ function M.setup_for_buffer(bufnr)
     nmap(bufnr, 'P', '<Cmd>JJPush!<CR>', 'badjuju: git push --force-with-lease')
     nmap(bufnr, 'e', function() run_at_cursor_split('status', 'badjuju.edit', 'edit') end,
       'badjuju: edit commit at cursor (move @)')
+    nmap(bufnr, 'b', function()
+      local revision = revision_at_cursor('status') or '@'
+      local ACTIONS = { 'create', 'move', 'delete', 'track', 'forget' }
+      vim.ui.select(ACTIONS, { prompt = 'jj bookmark: ' }, function(sub_action)
+        if not sub_action then return end
+        local prompt = sub_action == 'track' and 'Bookmark (e.g. main@origin): ' or 'Bookmark name: '
+        vim.ui.input({ prompt = prompt }, function(name)
+          if not name or name == '' then return end
+          local rev = (sub_action == 'create' or sub_action == 'move') and revision or ''
+          require('badjuju').execute('badjuju.bookmark', { sub_action, name, rev })
+        end)
+      end)
+    end, 'badjuju: bookmark (create / move / delete / track / forget)')
     nmap(bufnr, 'r', function()
       local revision = revision_at_cursor('status')
       local dest = vim.fn.input('Rebase to: ')
@@ -227,6 +240,23 @@ function M.setup_for_buffer(bufnr)
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
     nmap(bufnr, 'e', function() run_at_cursor_split('log', 'badjuju.edit', 'edit') end,
       'badjuju: edit commit at cursor (move @)')
+    nmap(bufnr, 'b', function()
+      local revision = revision_at_cursor('log')
+      local ACTIONS = { 'create', 'move', 'delete', 'track', 'forget' }
+      vim.ui.select(ACTIONS, { prompt = 'jj bookmark: ' }, function(sub_action)
+        if not sub_action then return end
+        if not revision and (sub_action == 'create' or sub_action == 'move') then
+          vim.notify('bookmark ' .. sub_action .. ': place cursor on a commit line', vim.log.levels.INFO)
+          return
+        end
+        local prompt = sub_action == 'track' and 'Bookmark (e.g. main@origin): ' or 'Bookmark name: '
+        vim.ui.input({ prompt = prompt }, function(name)
+          if not name or name == '' then return end
+          local rev = (sub_action == 'create' or sub_action == 'move') and (revision or '@') or ''
+          require('badjuju').execute('badjuju.bookmark', { sub_action, name, rev })
+        end)
+      end)
+    end, 'badjuju: bookmark (create / move / delete / track / forget)')
     nmap(bufnr, 'r', function()
       local revision = revision_at_cursor('log')
       if not revision then

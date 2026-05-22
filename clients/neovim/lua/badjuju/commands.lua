@@ -102,6 +102,15 @@ function M.register_all()
     badjuju.execute('badjuju.push', { { forceWithLease = force_with_lease } })
   end)
 
+  cmd('JJBookmark', { nargs = '+' }, function(args)
+    -- :JJBookmark <sub_action> <name> [revision]
+    -- sub_action: create | move | delete | track | forget
+    local sub_action = args.fargs[1] or ''
+    local name = args.fargs[2] or ''
+    local revision = args.fargs[3] or ''
+    badjuju.execute('badjuju.bookmark', { sub_action, name, revision })
+  end)
+
   cmd('JJRebase', { nargs = '+' }, function(args)
     local source, dest
     if #args.fargs == 1 then

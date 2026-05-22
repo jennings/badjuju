@@ -208,6 +208,38 @@ impl Jj {
         Ok(())
     }
 
+    /// Create a bookmark at `revision` (`jj bookmark create <name> -r <rev>`).
+    pub fn bookmark_create(&self, name: &str, revision: &str) -> Result<(), JjError> {
+        let revision = if revision.is_empty() { "@" } else { revision };
+        self.run(&["bookmark", "create", name, "-r", revision])?;
+        Ok(())
+    }
+
+    /// Move (set) a bookmark to `revision` (`jj bookmark set <name> -r <rev> --allow-backwards`).
+    pub fn bookmark_move(&self, name: &str, revision: &str) -> Result<(), JjError> {
+        let revision = if revision.is_empty() { "@" } else { revision };
+        self.run(&["bookmark", "set", name, "-r", revision, "--allow-backwards"])?;
+        Ok(())
+    }
+
+    /// Delete a bookmark (`jj bookmark delete <name>`).
+    pub fn bookmark_delete(&self, name: &str) -> Result<(), JjError> {
+        self.run(&["bookmark", "delete", name])?;
+        Ok(())
+    }
+
+    /// Track a remote bookmark (`jj bookmark track <name>@<remote>`).
+    pub fn bookmark_track(&self, name_at_remote: &str) -> Result<(), JjError> {
+        self.run(&["bookmark", "track", name_at_remote])?;
+        Ok(())
+    }
+
+    /// Forget a bookmark without recording a deletion (`jj bookmark forget <name>`).
+    pub fn bookmark_forget(&self, name: &str) -> Result<(), JjError> {
+        self.run(&["bookmark", "forget", name])?;
+        Ok(())
+    }
+
     /// Squash a single file's changes from `source` into `source`'s parent.
     /// Uses `--use-destination-message` to avoid opening an editor and
     /// `--keep-emptied` so the source revision survives even when it becomes empty.
@@ -540,6 +572,47 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
         let result = jj.rebase("@", "not-a-real-rev");
+        assert!(matches!(result, Err(JjError::JjFailed { .. })));
+    }
+
+    #[test]
+    fn bookmark_create_and_delete_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        jj.bookmark_create("mybookmark", "@").expect("create failed");
+        // After creation, the bookmark should resolve to @.
+        let at_ids = jj.change_ids("@").unwrap();
+        let bk_ids = jj.change_ids("mybookmark").unwrap();
+        assert_eq!(at_ids, bk_ids, "bookmark should point to @");
+        // Deleting the newly-created bookmark should succeed.
+        jj.bookmark_delete("mybookmark").expect("delete failed");
+    }
+
+    #[test]
+    fn bookmark_move_updates_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        jj.bookmark_create("bk", "@").expect("create failed");
+        // Create a new child commit.
+        jj.new_change("").unwrap();
+        // Move bookmark to new @.
+        jj.bookmark_move("bk", "@").expect("move failed");
+        // Verify: the bookmark should now point to @, not the parent.
+        // We do this by checking that a log restricted to the bookmark rev
+        // matches the current @.
+        let at_ids = jj.change_ids("@").unwrap();
+        let bk_ids = jj.change_ids("bk").unwrap();
+        assert_eq!(at_ids, bk_ids, "bookmark should point to @");
+    }
+
+    #[test]
+    fn bookmark_forget_removes_without_deletion() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        jj.bookmark_create("forgotten", "@").expect("create failed");
+        jj.bookmark_forget("forgotten").expect("forget failed");
+        // Referencing the forgotten bookmark should fail.
+        let result = jj.change_ids("forgotten");
         assert!(matches!(result, Err(JjError::JjFailed { .. })));
     }
 

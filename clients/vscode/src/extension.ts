@@ -687,6 +687,58 @@ export async function activate(context: ExtensionContext) {
       }
       await openServerResult(result as string);
     }),
+    commands.registerCommand("badjuju.bookmark.prompt", async () => {
+      const SUB_ACTIONS = [
+        { label: "create", description: "Create a new bookmark at cursor revision" },
+        { label: "move", description: "Move an existing bookmark to cursor revision" },
+        { label: "delete", description: "Delete a bookmark" },
+        { label: "track", description: "Track a remote bookmark (e.g. main@origin)" },
+        { label: "forget", description: "Forget a bookmark without recording deletion" },
+      ];
+      const picked = await window.showQuickPick(SUB_ACTIONS, {
+        title: "jj bookmark — choose action",
+        placeHolder: "Select a bookmark action",
+      });
+      if (!picked) return;
+
+      // Determine the revision at cursor (used by create and move).
+      const editor = window.activeTextEditor;
+      let revision = "@";
+      if (editor) {
+        const uri = editor.document.uri;
+        const lines: string[] = [];
+        for (let i = 0; i < editor.document.lineCount; i++) {
+          lines.push(editor.document.lineAt(i).text);
+        }
+        const cursorLine = editor.selection.active.line;
+        if (isStatusFile(uri)) {
+          revision = findRevisionForLine(lines, cursorLine);
+        } else if (isLogFile(uri)) {
+          const found = findLogRevision(lines, cursorLine);
+          if (!found && (picked.label === "create" || picked.label === "move")) {
+            window.showInformationMessage(
+              `bookmark ${picked.label}: place cursor on a commit line`,
+            );
+            return;
+          }
+          revision = found ?? "@";
+        }
+      }
+
+      const needsRev = picked.label === "create" || picked.label === "move";
+      const namePrompt =
+        picked.label === "track"
+          ? "Bookmark name (e.g. main@origin):"
+          : "Bookmark name:";
+      const name = await window.showInputBox({ prompt: namePrompt });
+      if (!name) return;
+
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.bookmark",
+        arguments: [picked.label, name, needsRev ? revision : ""],
+      });
+      await openServerResult(result as string);
+    }),
   );
 
   client = new LanguageClient(

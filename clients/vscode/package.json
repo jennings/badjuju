@@ -195,6 +195,11 @@
         "command": "badjuju.rebase.prompt",
         "category": "jj",
         "title": "Rebase to destination"
+      },
+      {
+        "command": "badjuju.bookmark.prompt",
+        "category": "jj",
+        "title": "Bookmark (create / move / delete / track / forget)"
       }
     ],
     "keybindings": [
@@ -259,6 +264,11 @@
         "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
+        "command": "badjuju.bookmark.prompt",
+        "key": "b",
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
         "command": "badjuju.rebase.prompt",
         "key": "r",
         "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
@@ -316,6 +326,11 @@
       {
         "command": "badjuju.edit.cursor",
         "key": "e",
+        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.bookmark.prompt",
+        "key": "b",
         "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
