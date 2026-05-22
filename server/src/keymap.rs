@@ -80,6 +80,12 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
     },
     // Status + log
     KeymapEntry {
+        key: "e",
+        action: "badjuju.edit",
+        description: "edit commit at cursor (move @)",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
         key: "d",
         action: "badjuju.describe",
         description: "describe commit at cursor",
@@ -183,7 +189,7 @@ mod tests {
     fn render_status_contains_all_expected_keys() {
         let text = render_command_reference(&KeymapProfile::Magit, "status");
         assert!(text.starts_with("COMMAND REFERENCE:"));
-        for key in ["n", "l", "d", "D", "s", "U", "a", "u", "=", "g", "R", "q", "?"] {
+        for key in ["n", "l", "e", "d", "D", "s", "U", "a", "u", "=", "g", "R", "q", "?"] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in:\n{text}"
@@ -203,7 +209,7 @@ mod tests {
             "missing log intro in:\n{text}"
         );
         assert!(text.contains("shortcut line"), "missing shortcut hint in:\n{text}");
-        for key in ["d", "D", "a", "g", "R", "q", "?"] {
+        for key in ["e", "d", "D", "a", "g", "R", "q", "?"] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in log:\n{text}"

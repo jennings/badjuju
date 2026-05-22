@@ -87,6 +87,11 @@ function M.register_all()
     local revision = args.args ~= '' and args.args or '@'
     badjuju.execute('badjuju.abandon', { revision })
   end)
+
+  cmd('JJEdit', { nargs = '?' }, function(args)
+    local revision = args.args ~= '' and args.args or '@'
+    badjuju.execute('badjuju.edit', { revision })
+  end)
 end
 
 return M

@@ -429,6 +429,25 @@ pub fn run_undo(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     }
 }
 
+/// Run `badjuju.edit`: move @ to `revision` (`jj edit REV`), then refresh status
+/// and log (if log file exists). Surfaces failures as a MESSAGE prelude.
+pub fn run_edit(jj: &Jj, workspace: &Path, revision: &str) -> Result<String, CommandError> {
+    let stat = read_current_stat(workspace);
+    let rev = revision_or_at(revision);
+    match jj.edit(rev) {
+        Ok(()) => {
+            regenerate_log_if_present(jj, workspace)?;
+            run_status(jj, workspace)
+        }
+        Err(e) => write_status(
+            jj,
+            workspace,
+            Some(&format!("edit {rev} failed: {e}")),
+            stat,
+        ),
+    }
+}
+
 /// Run `badjuju.abandon`: abandon `revision` (defaults to `@`) and refresh status.
 /// Surfaces failures as a MESSAGE: prelude in the status buffer.
 pub fn run_abandon(jj: &Jj, workspace: &Path, revision: &str) -> Result<String, CommandError> {
@@ -590,7 +609,7 @@ mod tests {
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         // Every key in the magit status profile must appear at the start of a line.
-        for key in ["n", "l", "d", "D", "s", "U", "a", "u", "=", "g", "R", "q", "?"] {
+        for key in ["n", "l", "e", "d", "D", "s", "U", "a", "u", "=", "g", "R", "q", "?"] {
             assert!(
                 content.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in status command reference:\n{content}"
@@ -1395,6 +1414,37 @@ mod tests {
         assert!(
             content.starts_with("MESSAGE: squash readme.txt from root(): revision has 0 parents"),
             "got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn run_edit_moves_at_to_revision_and_refreshes_status() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        jj.describe_set("@", "parent").unwrap();
+        jj.new_change("").unwrap();
+        jj.describe_set("@", "child").unwrap();
+        let parent_id = jj.change_ids("@-").unwrap().first().cloned().unwrap();
+        let uri = run_edit(&jj, dir.path(), &parent_id).expect("run_edit failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.starts_with("STATUS:"));
+        let desc = jj.describe_get("@").unwrap();
+        assert!(
+            desc.contains("parent"),
+            "expected @ to be on parent after edit; got: {desc}"
+        );
+    }
+
+    #[test]
+    fn run_edit_with_invalid_revision_reports_error() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_edit(&jj, dir.path(), "not-a-real-change")
+            .expect("run_edit should still produce a status URI on error");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.starts_with("MESSAGE: edit not-a-real-change failed:"),
+            "expected error MESSAGE prelude, got:\n{content}"
         );
     }
 

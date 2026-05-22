@@ -200,6 +200,8 @@ function M.setup_for_buffer(bufnr)
       map_cmd(bufnr, m[1], m[2], m[3])
     end
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
+    nmap(bufnr, 'e', function() run_at_cursor_split('status', 'badjuju.edit', 'edit') end,
+      'badjuju: edit commit at cursor (move @)')
     nmap(bufnr, 'd', function() run_at_cursor_split('status', 'badjuju.describe', 'describe') end,
       'badjuju: describe commit at cursor in a split')
     nmap(bufnr, 'D', function() run_at_cursor_split('status', 'badjuju.diff', 'diff') end,
@@ -214,6 +216,8 @@ function M.setup_for_buffer(bufnr)
       map_cmd(bufnr, m[1], m[2], m[3])
     end
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
+    nmap(bufnr, 'e', function() run_at_cursor_split('log', 'badjuju.edit', 'edit') end,
+      'badjuju: edit commit at cursor (move @)')
     nmap(bufnr, 'd', function() run_at_cursor_split('log', 'badjuju.describe', 'describe') end,
       'badjuju: describe commit at cursor in a split')
     nmap(bufnr, 'D', function() run_at_cursor_split('log', 'badjuju.diff', 'diff') end,

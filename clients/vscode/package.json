@@ -142,6 +142,11 @@
         "title": "Undo last operation (jj undo)"
       },
       {
+        "command": "badjuju.edit.cursor",
+        "category": "jj",
+        "title": "Edit commit at cursor (move @)"
+      },
+      {
         "command": "badjuju.abandon.cursor",
         "category": "jj",
         "title": "Abandon commit at cursor (or working copy)"
@@ -214,6 +219,11 @@
         "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
+        "command": "badjuju.edit.cursor",
+        "key": "e",
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
         "command": "badjuju.describe.open",
         "key": "d",
         "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
@@ -261,6 +271,11 @@
       {
         "command": "badjuju.abandon.cursor",
         "key": "a",
+        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.edit.cursor",
+        "key": "e",
         "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {

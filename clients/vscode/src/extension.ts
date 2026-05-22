@@ -563,6 +563,35 @@ export async function activate(context: ExtensionContext) {
         placeHolder: "Press Escape to close",
       });
     }),
+    commands.registerCommand("badjuju.edit.cursor", async () => {
+      const editor = window.activeTextEditor;
+      let revision = "@";
+      if (editor) {
+        const uri = editor.document.uri;
+        const lines: string[] = [];
+        for (let i = 0; i < editor.document.lineCount; i++) {
+          lines.push(editor.document.lineAt(i).text);
+        }
+        const cursorLine = editor.selection.active.line;
+        if (isStatusFile(uri)) {
+          revision = findRevisionForLine(lines, cursorLine);
+        } else if (isLogFile(uri)) {
+          const found = findLogRevision(lines, cursorLine);
+          if (!found) {
+            window.showInformationMessage(
+              "edit: place cursor on a commit line",
+            );
+            return;
+          }
+          revision = found;
+        }
+      }
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.edit",
+        arguments: [revision],
+      });
+      await openServerResult(result as string);
+    }),
     commands.registerCommand("badjuju.abandon.cursor", async () => {
       const editor = window.activeTextEditor;
       let revision = "@";

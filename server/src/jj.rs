@@ -182,6 +182,12 @@ impl Jj {
             .collect())
     }
 
+    /// Move the working copy to the given revision (`jj edit REV`).
+    pub fn edit(&self, revision: &str) -> Result<(), JjError> {
+        self.run(&["edit", revision])?;
+        Ok(())
+    }
+
     /// Squash a single file's changes from `source` into `source`'s parent.
     /// Uses `--use-destination-message` to avoid opening an editor and
     /// `--keep-emptied` so the source revision survives even when it becomes empty.
@@ -432,6 +438,35 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
         let result = jj.change_ids("not-a-valid-revset!!!");
+        assert!(matches!(result, Err(JjError::JjFailed { .. })));
+    }
+
+    #[test]
+    fn edit_moves_working_copy_to_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        jj.describe_set("@", "parent").unwrap();
+        jj.new_change("").unwrap();
+        jj.describe_set("@", "child").unwrap();
+        let parent_id = jj
+            .change_ids("@-")
+            .unwrap()
+            .first()
+            .cloned()
+            .expect("expected parent id");
+        jj.edit(&parent_id).expect("edit failed");
+        let desc = jj.describe_get("@").unwrap();
+        assert!(
+            desc.contains("parent"),
+            "expected @ on parent after edit; got: {desc}"
+        );
+    }
+
+    #[test]
+    fn edit_invalid_revision_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let result = jj.edit("not-a-real-rev");
         assert!(matches!(result, Err(JjError::JjFailed { .. })));
     }
 
