@@ -429,6 +429,18 @@ pub fn run_undo(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     }
 }
 
+/// Run `badjuju.push`: run `jj git push`, then refresh status.
+/// jj push already has force-with-lease semantics by default; the
+/// `force_with_lease` parameter is accepted for API consistency but has no
+/// effect on the underlying command.
+pub fn run_push(jj: &Jj, workspace: &Path, _force_with_lease: bool) -> Result<String, CommandError> {
+    let stat = read_current_stat(workspace);
+    match jj.git_push() {
+        Ok(_) => run_status(jj, workspace),
+        Err(e) => write_status(jj, workspace, Some(&format!("push failed: {e}")), stat),
+    }
+}
+
 /// Run `badjuju.fetch`: run `jj git fetch`, then refresh status.
 /// Surfaces failures as a MESSAGE prelude.
 pub fn run_fetch(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
@@ -619,7 +631,7 @@ mod tests {
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         // Every key in the magit status profile must appear at the start of a line.
-        for key in ["n", "l", "e", "d", "D", "s", "U", "a", "f", "u", "=", "g", "R", "q", "?"] {
+        for key in ["n", "l", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "=", "g", "R", "q", "?"] {
             assert!(
                 content.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in status command reference:\n{content}"
@@ -1424,6 +1436,32 @@ mod tests {
         assert!(
             content.starts_with("MESSAGE: squash readme.txt from root(): revision has 0 parents"),
             "got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn run_push_with_no_remote_returns_status_uri() {
+        // jj git push with no remote is a no-op (exits 0); run_push should return status URI.
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_push(&jj, dir.path(), false).expect("run_push failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.starts_with("STATUS:"),
+            "expected STATUS on successful no-op push, got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn run_push_with_force_flag_also_returns_status_uri() {
+        // force_with_lease=true still calls jj git push (jj has no --force-with-lease flag).
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_push(&jj, dir.path(), true).expect("run_push with force_flag failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.starts_with("STATUS:"),
+            "expected STATUS on push with force flag, got:\n{content}"
         );
     }
 

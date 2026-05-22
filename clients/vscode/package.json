@@ -147,6 +147,16 @@
         "title": "Git fetch"
       },
       {
+        "command": "badjuju.push.normal",
+        "category": "jj",
+        "title": "Git push"
+      },
+      {
+        "command": "badjuju.push.forceWithLease",
+        "category": "jj",
+        "title": "Git push --force-with-lease"
+      },
+      {
         "command": "badjuju.edit.cursor",
         "category": "jj",
         "title": "Edit commit at cursor (move @)"
@@ -226,6 +236,16 @@
       {
         "command": "badjuju.fetch.run",
         "key": "f",
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.push.normal",
+        "key": "p",
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.push.forceWithLease",
+        "key": "shift+p",
         "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {

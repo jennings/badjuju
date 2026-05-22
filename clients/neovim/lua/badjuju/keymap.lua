@@ -19,6 +19,7 @@ local STATUS_MAPS = {
   { 'n', 'JJNew',        'badjuju: new change' },
   { 'l', 'JJLog',        'badjuju: open log' },
   { 'f', 'JJFetch',      'badjuju: git fetch' },
+  { 'p', 'JJPush',       'badjuju: git push' },
   { 'u', 'JJUndo',       'badjuju: undo' },
   { '=', 'JJToggleStat', 'badjuju: toggle --stat' },
   { 'a', 'JJAbandon',    'badjuju: abandon revision' },
@@ -201,6 +202,7 @@ function M.setup_for_buffer(bufnr)
       map_cmd(bufnr, m[1], m[2], m[3])
     end
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
+    nmap(bufnr, 'P', '<Cmd>JJPush!<CR>', 'badjuju: git push --force-with-lease')
     nmap(bufnr, 'e', function() run_at_cursor_split('status', 'badjuju.edit', 'edit') end,
       'badjuju: edit commit at cursor (move @)')
     nmap(bufnr, 'd', function() run_at_cursor_split('status', 'badjuju.describe', 'describe') end,

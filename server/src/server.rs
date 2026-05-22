@@ -31,6 +31,7 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.version",
     "badjuju.edit",
     "badjuju.fetch",
+    "badjuju.push",
 ];
 
 #[derive(Debug)]
@@ -441,6 +442,17 @@ impl LanguageServer for Backend {
                 let uri = commands::run_fetch(&jj, &workspace).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
+            "badjuju.push" => {
+                let force_with_lease = params
+                    .arguments
+                    .first()
+                    .and_then(|v| v.get("forceWithLease"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let uri =
+                    commands::run_push(&jj, &workspace, force_with_lease).map_err(lsp_err)?;
+                Ok(Some(serde_json::Value::String(uri)))
+            }
             _ => Err(Error::method_not_found()),
         }
     }
@@ -475,5 +487,6 @@ mod tests {
         assert!(COMMANDS.contains(&"badjuju.version"));
         assert!(COMMANDS.contains(&"badjuju.edit"));
         assert!(COMMANDS.contains(&"badjuju.fetch"));
+        assert!(COMMANDS.contains(&"badjuju.push"));
     }
 }

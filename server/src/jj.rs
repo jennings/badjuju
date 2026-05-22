@@ -187,6 +187,13 @@ impl Jj {
         self.run(&["git", "fetch"])
     }
 
+    /// Push to the default remote (`jj git push`). Returns stdout.
+    /// jj push already uses force-with-lease semantics by default so there is
+    /// no separate force flag.
+    pub fn git_push(&self) -> Result<String, JjError> {
+        self.run(&["git", "push"])
+    }
+
     /// Move the working copy to the given revision (`jj edit REV`).
     pub fn edit(&self, revision: &str) -> Result<(), JjError> {
         self.run(&["edit", revision])?;
@@ -444,6 +451,15 @@ mod tests {
         let jj = init_jj_repo(dir.path());
         let result = jj.change_ids("not-a-valid-revset!!!");
         assert!(matches!(result, Err(JjError::JjFailed { .. })));
+    }
+
+    #[test]
+    fn git_push_with_no_remote_is_no_op() {
+        // jj git push with no remote configured exits 0 with "Nothing changed."
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let result = jj.git_push();
+        assert!(result.is_ok(), "expected no error for push with no remote: {result:?}");
     }
 
     #[test]

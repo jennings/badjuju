@@ -96,6 +96,11 @@ function M.register_all()
   cmd('JJFetch', {}, function()
     badjuju.execute('badjuju.fetch')
   end)
+
+  cmd('JJPush', { bang = true }, function(args)
+    local force_with_lease = args.bang
+    badjuju.execute('badjuju.push', { { forceWithLease = force_with_lease } })
+  end)
 end
 
 return M

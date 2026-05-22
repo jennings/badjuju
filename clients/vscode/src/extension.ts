@@ -570,6 +570,20 @@ export async function activate(context: ExtensionContext) {
       });
       await openServerResult(result as string);
     }),
+    commands.registerCommand("badjuju.push.normal", async () => {
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.push",
+        arguments: [{ forceWithLease: false }],
+      });
+      await openServerResult(result as string);
+    }),
+    commands.registerCommand("badjuju.push.forceWithLease", async () => {
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.push",
+        arguments: [{ forceWithLease: true }],
+      });
+      await openServerResult(result as string);
+    }),
     commands.registerCommand("badjuju.edit.cursor", async () => {
       const editor = window.activeTextEditor;
       let revision = "@";
