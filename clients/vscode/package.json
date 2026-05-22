@@ -246,7 +246,7 @@
       },
       {
         "command": "badjuju.log.open",
-        "key": "l",
+        "key": "L",
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {

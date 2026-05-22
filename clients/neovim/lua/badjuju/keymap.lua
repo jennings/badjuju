@@ -17,7 +17,7 @@ local STATUS_MAPS = {
   { 'g', 'JJRefresh',    'badjuju: refresh' },
   { 'R', 'JJRefresh',    'badjuju: refresh' },
   { 'n', 'JJNew',        'badjuju: new change' },
-  { 'l', 'JJLog',        'badjuju: open log' },
+  { 'L', 'JJLog',        'badjuju: open log' },
   { 'f', 'JJFetch',      'badjuju: git fetch' },
   { 'p', 'JJPush',       'badjuju: git push' },
   { 'u', 'JJUndo',       'badjuju: undo' },
