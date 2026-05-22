@@ -101,6 +101,18 @@ function M.register_all()
     local force_with_lease = args.bang
     badjuju.execute('badjuju.push', { { forceWithLease = force_with_lease } })
   end)
+
+  cmd('JJRebase', { nargs = '+' }, function(args)
+    local source, dest
+    if #args.fargs == 1 then
+      source = '@'
+      dest = args.fargs[1]
+    else
+      source = args.fargs[1]
+      dest = args.fargs[2]
+    end
+    badjuju.execute('badjuju.rebase', { source, dest })
+  end)
 end
 
 return M

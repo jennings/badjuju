@@ -429,6 +429,34 @@ pub fn run_undo(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     }
 }
 
+/// Run `badjuju.rebase`: rebase `source` onto `dest` (`jj rebase -s SRC -d DEST`),
+/// then refresh status and log. Surfaces failures as a MESSAGE prelude.
+/// `source` defaults to `@` when empty; `dest` must be non-empty.
+pub fn run_rebase(
+    jj: &Jj,
+    workspace: &Path,
+    source: &str,
+    dest: &str,
+) -> Result<String, CommandError> {
+    let stat = read_current_stat(workspace);
+    if dest.is_empty() {
+        return write_status(jj, workspace, Some("rebase: destination revision required"), stat);
+    }
+    let src = revision_or_at(source);
+    match jj.rebase(src, dest) {
+        Ok(()) => {
+            regenerate_log_if_present(jj, workspace)?;
+            run_status(jj, workspace)
+        }
+        Err(e) => write_status(
+            jj,
+            workspace,
+            Some(&format!("rebase {src} to {dest} failed: {e}")),
+            stat,
+        ),
+    }
+}
+
 /// Run `badjuju.push`: run `jj git push`, then refresh status.
 /// jj push already has force-with-lease semantics by default; the
 /// `force_with_lease` parameter is accepted for API consistency but has no
@@ -631,17 +659,13 @@ mod tests {
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         // Every key in the magit status profile must appear at the start of a line.
-        for key in ["n", "l", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "=", "g", "R", "q", "?"] {
+        for key in ["n", "l", "r", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "=", "g", "R", "q", "?"] {
             assert!(
                 content.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in status command reference:\n{content}"
             );
         }
-        // 'r' must NOT appear — reserved for jj rebase.
-        assert!(
-            !content.lines().any(|l| l.starts_with("r\t") || l == "r"),
-            "'r' must not be in status COMMAND REFERENCE"
-        );
+        // 'r' IS now in status — bound to badjuju.rebase.
     }
 
     #[test]
@@ -1732,5 +1756,46 @@ mod tests {
         let path = uri.strip_prefix("file://").unwrap();
         let new_content = std::fs::read_to_string(path).unwrap();
         assert!(new_content.starts_with("REVSET: @"));
+    }
+
+    #[test]
+    fn run_rebase_moves_commit_and_refreshes_status() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        // root → A (@) → B. We rebase B onto root.
+        jj.describe_set("@", "commit A").unwrap();
+        jj.new_change("").unwrap();
+        jj.describe_set("@", "commit B").unwrap();
+        let b_id = jj.change_ids("@").unwrap().first().cloned().unwrap();
+        let root_id = jj.change_ids("root()").unwrap().first().cloned().unwrap();
+        let uri = run_rebase(&jj, dir.path(), &b_id, &root_id).expect("run_rebase failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(content.starts_with("STATUS:"), "expected STATUS: header, got:\n{content}");
+    }
+
+    #[test]
+    fn run_rebase_with_empty_dest_reports_error() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_rebase(&jj, dir.path(), "@", "")
+            .expect("run_rebase with empty dest should return a URI");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.starts_with("MESSAGE: rebase: destination revision required"),
+            "expected error MESSAGE, got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn run_rebase_with_invalid_dest_reports_error() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_rebase(&jj, dir.path(), "@", "not-a-real-rev")
+            .expect("run_rebase should still produce a URI on error");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.starts_with("MESSAGE: rebase @ to not-a-real-rev failed:"),
+            "expected error MESSAGE prelude, got:\n{content}"
+        );
     }
 }

@@ -205,6 +205,12 @@ function M.setup_for_buffer(bufnr)
     nmap(bufnr, 'P', '<Cmd>JJPush!<CR>', 'badjuju: git push --force-with-lease')
     nmap(bufnr, 'e', function() run_at_cursor_split('status', 'badjuju.edit', 'edit') end,
       'badjuju: edit commit at cursor (move @)')
+    nmap(bufnr, 'r', function()
+      local revision = revision_at_cursor('status')
+      local dest = vim.fn.input('Rebase to: ')
+      if dest == '' then return end
+      require('badjuju').execute('badjuju.rebase', { revision or '@', dest })
+    end, 'badjuju: rebase commit at cursor to destination')
     nmap(bufnr, 'd', function() run_at_cursor_split('status', 'badjuju.describe', 'describe') end,
       'badjuju: describe commit at cursor in a split')
     nmap(bufnr, 'D', function() run_at_cursor_split('status', 'badjuju.diff', 'diff') end,
@@ -221,6 +227,16 @@ function M.setup_for_buffer(bufnr)
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
     nmap(bufnr, 'e', function() run_at_cursor_split('log', 'badjuju.edit', 'edit') end,
       'badjuju: edit commit at cursor (move @)')
+    nmap(bufnr, 'r', function()
+      local revision = revision_at_cursor('log')
+      if not revision then
+        vim.notify('rebase: place cursor on a commit line', vim.log.levels.INFO)
+        return
+      end
+      local dest = vim.fn.input('Rebase to: ')
+      if dest == '' then return end
+      require('badjuju').execute('badjuju.rebase', { revision, dest })
+    end, 'badjuju: rebase commit at cursor to destination')
     nmap(bufnr, 'd', function() run_at_cursor_split('log', 'badjuju.describe', 'describe') end,
       'badjuju: describe commit at cursor in a split')
     nmap(bufnr, 'D', function() run_at_cursor_split('log', 'badjuju.diff', 'diff') end,

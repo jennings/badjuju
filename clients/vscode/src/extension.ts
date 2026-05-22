@@ -584,6 +584,40 @@ export async function activate(context: ExtensionContext) {
       });
       await openServerResult(result as string);
     }),
+    commands.registerCommand("badjuju.rebase.prompt", async () => {
+      const editor = window.activeTextEditor;
+      let source = "@";
+      if (editor) {
+        const uri = editor.document.uri;
+        const lines: string[] = [];
+        for (let i = 0; i < editor.document.lineCount; i++) {
+          lines.push(editor.document.lineAt(i).text);
+        }
+        const cursorLine = editor.selection.active.line;
+        if (isStatusFile(uri)) {
+          source = findRevisionForLine(lines, cursorLine);
+        } else if (isLogFile(uri)) {
+          const found = findLogRevision(lines, cursorLine);
+          if (!found) {
+            window.showInformationMessage(
+              "rebase: place cursor on a commit line",
+            );
+            return;
+          }
+          source = found;
+        }
+      }
+      const dest = await window.showInputBox({
+        prompt: "Rebase to (destination revision):",
+        placeHolder: "e.g. main, @-, abc1234",
+      });
+      if (!dest) return;
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.rebase",
+        arguments: [source, dest],
+      });
+      await openServerResult(result as string);
+    }),
     commands.registerCommand("badjuju.edit.cursor", async () => {
       const editor = window.activeTextEditor;
       let revision = "@";

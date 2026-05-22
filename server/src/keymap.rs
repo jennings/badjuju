@@ -98,6 +98,12 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
     },
     // Status + log
     KeymapEntry {
+        key: "r",
+        action: "badjuju.rebase",
+        description: "rebase to destination",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
         key: "e",
         action: "badjuju.edit",
         description: "edit commit at cursor (move @)",
@@ -207,16 +213,12 @@ mod tests {
     fn render_status_contains_all_expected_keys() {
         let text = render_command_reference(&KeymapProfile::Magit, "status");
         assert!(text.starts_with("COMMAND REFERENCE:"));
-        for key in ["n", "l", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "=", "g", "R", "q", "?"] {
+        for key in ["n", "l", "r", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "=", "g", "R", "q", "?"] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in:\n{text}"
             );
         }
-        assert!(
-            !text.lines().any(|l| l.starts_with("r\t") || l == "r"),
-            "status must not have 'r' binding — reserved for rebase"
-        );
     }
 
     #[test]
@@ -227,16 +229,12 @@ mod tests {
             "missing log intro in:\n{text}"
         );
         assert!(text.contains("shortcut line"), "missing shortcut hint in:\n{text}");
-        for key in ["e", "d", "D", "a", "g", "R", "q", "?"] {
+        for key in ["r", "e", "d", "D", "a", "g", "R", "q", "?"] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in log:\n{text}"
             );
         }
-        assert!(
-            !text.lines().any(|l| l.starts_with("r\t") || l == "r"),
-            "log must not have 'r' binding — reserved for rebase"
-        );
     }
 
     #[test]
@@ -248,10 +246,6 @@ mod tests {
                 "missing key `{key}` in diff:\n{text}"
             );
         }
-        assert!(
-            !text.lines().any(|l| l.starts_with("r\t") || l == "r"),
-            "diff must not have 'r' binding — reserved for rebase"
-        );
     }
 
     #[test]

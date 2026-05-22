@@ -187,6 +187,14 @@ impl Jj {
         self.run(&["git", "fetch"])
     }
 
+    /// Rebase `source` onto `dest` (`jj rebase -s <source> -d <dest>`).
+    /// When `source` is empty, defaults to `@`.
+    pub fn rebase(&self, source: &str, dest: &str) -> Result<(), JjError> {
+        let source = if source.is_empty() { "@" } else { source };
+        self.run(&["rebase", "-s", source, "-d", dest])?;
+        Ok(())
+    }
+
     /// Push to the default remote (`jj git push`). Returns stdout.
     /// jj push already uses force-with-lease semantics by default so there is
     /// no separate force flag.
@@ -499,6 +507,39 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
         let result = jj.edit("not-a-real-rev");
+        assert!(matches!(result, Err(JjError::JjFailed { .. })));
+    }
+
+    #[test]
+    fn rebase_moves_commit_to_dest() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        // Create a two-commit chain: root → A → B (@).
+        jj.describe_set("@", "commit A").unwrap();
+        jj.new_change("").unwrap();
+        jj.describe_set("@", "commit B").unwrap();
+        // Get the root commit id (parent of A).
+        let root_id = jj
+            .change_ids("root()")
+            .unwrap()
+            .first()
+            .cloned()
+            .expect("root commit");
+        // Rebase B directly onto root (detach from A).
+        jj.rebase("@", &root_id).expect("rebase failed");
+        // After rebase, @ parent should be root, not A.
+        let parents = jj.change_ids("@-").unwrap();
+        assert!(
+            parents.contains(&root_id),
+            "expected @ parent to be root after rebase; parents={parents:?}"
+        );
+    }
+
+    #[test]
+    fn rebase_invalid_dest_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let result = jj.rebase("@", "not-a-real-rev");
         assert!(matches!(result, Err(JjError::JjFailed { .. })));
     }
 
