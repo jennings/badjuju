@@ -90,13 +90,15 @@ cp "../../server/target/$triple/release/$binary" "$stage/out/bin/$binary"
 chmod +x "$stage/out/bin/$binary" 2>/dev/null || true
 
 # Stripping `scripts` skips the prepublish minify step, so minify here.
+git_commit=$(git -C ../.. rev-parse --short HEAD 2>/dev/null || echo unknown)
 pnpm exec esbuild src/extension.ts \
   --bundle \
   --outfile="$stage/out/extension.js" \
   --external:vscode \
   --format=cjs \
   --platform=node \
-  --minify
+  --minify \
+  "--define:__BADJUJU_COMMIT__=\"$git_commit\""
 
 # vsce reads package.json from cwd; run it inside the per-platform stage.
 # $3 may be relative to our cwd, so resolve it before changing directory.

@@ -165,6 +165,11 @@
         "command": "badjuju.restartLanguageServer",
         "category": "jj",
         "title": "Restart Language Server"
+      },
+      {
+        "command": "badjuju.version.open",
+        "category": "jj",
+        "title": "Show version"
       }
     ],
     "keybindings": [

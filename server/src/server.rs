@@ -28,6 +28,7 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.abandon",
     "badjuju.keymap",
     "badjuju.help",
+    "badjuju.version",
 ];
 
 #[derive(Debug)]
@@ -296,6 +297,12 @@ impl LanguageServer for Backend {
             let entries = keymap::entries_for_window(&profile, window);
             return Ok(Some(serde_json::to_value(entries).unwrap_or_default()));
         }
+        if params.command == "badjuju.version" {
+            return Ok(Some(serde_json::json!({
+                "version": env!("CARGO_PKG_VERSION"),
+                "commit": env!("BADJUJU_COMMIT"),
+            })));
+        }
 
         let state = self.state.read().await;
         let jj = state.jj().ok_or_else(Error::invalid_request)?;
@@ -450,5 +457,6 @@ mod tests {
         assert!(COMMANDS.contains(&"badjuju.abandon"));
         assert!(COMMANDS.contains(&"badjuju.keymap"));
         assert!(COMMANDS.contains(&"badjuju.help"));
+        assert!(COMMANDS.contains(&"badjuju.version"));
     }
 }

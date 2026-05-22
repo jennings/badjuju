@@ -20,9 +20,11 @@ fi
 cp "$src" "out/bin/$binary_name"
 chmod +x "out/bin/$binary_name"
 
+git_commit=$(git -C ../.. rev-parse --short HEAD 2>/dev/null || echo unknown)
 pnpm exec esbuild src/extension.ts \
   --bundle \
   --outfile=out/extension.js \
   --external:vscode \
   --format=cjs \
-  --platform=node
+  --platform=node \
+  "--define:__BADJUJU_COMMIT__=\"$git_commit\""

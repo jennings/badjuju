@@ -24,6 +24,8 @@ import {
   type ServerOptions,
 } from "vscode-languageclient/node";
 
+declare const __BADJUJU_COMMIT__: string;
+
 let client: LanguageClient;
 
 const READONLY_SCHEME = "badjuju-status";
@@ -522,6 +524,17 @@ export async function activate(context: ExtensionContext) {
     }),
     commands.registerCommand("badjuju.restartLanguageServer", async () => {
       await client.restart();
+    }),
+    commands.registerCommand("badjuju.version.open", async () => {
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.version",
+        arguments: [],
+      });
+      const server = result as { version: string; commit: string };
+      const clientVersion = context.extension.packageJSON.version as string;
+      window.showInformationMessage(
+        `Bad Juju  |  Client: v${clientVersion} (${__BADJUJU_COMMIT__})  |  Server: v${server.version} (${server.commit})`,
+      );
     }),
     commands.registerCommand("badjuju.help.open", async () => {
       const editor = window.activeTextEditor;
