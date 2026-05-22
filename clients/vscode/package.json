@@ -155,6 +155,11 @@
         "command": "badjuju.help.open",
         "category": "jj",
         "title": "Show hotkey help"
+      },
+      {
+        "command": "badjuju.describe.finalize",
+        "category": "jj",
+        "title": "Finalize commit description (save and close)"
       }
     ],
     "keybindings": [
@@ -165,7 +170,7 @@
       },
       {
         "command": "badjuju.refresh.open",
-        "key": "r",
+        "key": "shift+r",
         "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
@@ -270,7 +275,7 @@
       },
       {
         "command": "badjuju.refresh.open",
-        "key": "r",
+        "key": "shift+r",
         "when": "resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
@@ -292,6 +297,36 @@
         "command": "badjuju.help.open",
         "key": "shift+/",
         "when": "resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.refresh.open",
+        "key": "g",
+        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.refresh.open",
+        "key": "shift+r",
+        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "workbench.action.closeActiveEditor",
+        "key": "q",
+        "when": "resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.describe.finalize",
+        "key": "ctrl+enter",
+        "when": "resourceFilename == 'describe.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "workbench.action.revertAndCloseActiveEditor",
+        "key": "escape escape",
+        "when": "resourceFilename == 'describe.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.help.open",
+        "key": "shift+/",
+        "when": "resourceFilename == 'describe.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       }
     ]
   }

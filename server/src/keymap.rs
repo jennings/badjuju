@@ -97,19 +97,45 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         description: "abandon commit at cursor",
         windows: &["status", "log"],
     },
-    // All windows
+    // All main windows
     KeymapEntry {
         key: "g",
         action: "badjuju.refresh",
-        description: "refresh (or r)",
+        description: "refresh",
         windows: &["status", "log", "diff"],
     },
-    // Status + diff close
+    KeymapEntry {
+        key: "R",
+        action: "badjuju.refresh",
+        description: "refresh",
+        windows: &["status", "log", "diff"],
+    },
+    // Close (all main windows)
     KeymapEntry {
         key: "q",
         action: "",
         description: "close",
-        windows: &["status", "diff"],
+        windows: &["status", "log", "diff"],
+    },
+    // Help (all windows)
+    KeymapEntry {
+        key: "?",
+        action: "badjuju.help",
+        description: "show help",
+        windows: &["status", "log", "diff", "describe"],
+    },
+    // Describe-only
+    KeymapEntry {
+        key: "Ctrl-c Ctrl-c",
+        action: "badjuju.describe.finalize",
+        description: "finalize commit (save and close)",
+        windows: &["describe"],
+    },
+    KeymapEntry {
+        key: "Ctrl-c Ctrl-k",
+        action: "badjuju.describe.abort",
+        description: "abort (close without saving)",
+        windows: &["describe"],
     },
 ];
 
@@ -157,12 +183,16 @@ mod tests {
     fn render_status_contains_all_expected_keys() {
         let text = render_command_reference(&KeymapProfile::Magit, "status");
         assert!(text.starts_with("COMMAND REFERENCE:"));
-        for key in ["n", "l", "d", "D", "s", "U", "a", "u", "=", "g", "q"] {
+        for key in ["n", "l", "d", "D", "s", "U", "a", "u", "=", "g", "R", "q", "?"] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in:\n{text}"
             );
         }
+        assert!(
+            !text.lines().any(|l| l.starts_with("r\t") || l == "r"),
+            "status must not have 'r' binding — reserved for rebase"
+        );
     }
 
     #[test]
@@ -173,15 +203,40 @@ mod tests {
             "missing log intro in:\n{text}"
         );
         assert!(text.contains("shortcut line"), "missing shortcut hint in:\n{text}");
-        assert!(text.lines().any(|l| l.starts_with("d")));
-        assert!(text.lines().any(|l| l.starts_with("a")));
+        for key in ["d", "D", "a", "g", "R", "q", "?"] {
+            assert!(
+                text.lines().any(|l| l.starts_with(key)),
+                "missing key `{key}` in log:\n{text}"
+            );
+        }
+        assert!(
+            !text.lines().any(|l| l.starts_with("r\t") || l == "r"),
+            "log must not have 'r' binding — reserved for rebase"
+        );
     }
 
     #[test]
-    fn render_diff_has_g_and_q() {
+    fn render_diff_has_g_r_q_help() {
         let text = render_command_reference(&KeymapProfile::Magit, "diff");
-        assert!(text.lines().any(|l| l.starts_with("g")));
-        assert!(text.lines().any(|l| l.starts_with("q")));
+        for key in ["g", "R", "q", "?"] {
+            assert!(
+                text.lines().any(|l| l.starts_with(key)),
+                "missing key `{key}` in diff:\n{text}"
+            );
+        }
+        assert!(
+            !text.lines().any(|l| l.starts_with("r\t") || l == "r"),
+            "diff must not have 'r' binding — reserved for rebase"
+        );
+    }
+
+    #[test]
+    fn render_describe_has_finalize_abort_help() {
+        let text = render_command_reference(&KeymapProfile::Magit, "describe");
+        assert!(text.starts_with("COMMAND REFERENCE:"));
+        assert!(text.contains("Ctrl-c Ctrl-c"), "missing finalize key");
+        assert!(text.contains("Ctrl-c Ctrl-k"), "missing abort key");
+        assert!(text.lines().any(|l| l.starts_with('?')), "missing help key");
     }
 
     #[test]

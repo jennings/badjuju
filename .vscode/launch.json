@@ -8,7 +8,7 @@
       "cwd": "${workspaceFolder}/clients/vscode",
       "args": ["--extensionDevelopmentPath=${workspaceFolder}/clients/vscode"],
       "outFiles": ["${workspaceFolder}/clients/vscode/out/**/*.js"],
-      "preLaunchTask": "build"
+      "preLaunchTask": "VSCode: Build"
     }
   ]
 }

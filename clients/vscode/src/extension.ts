@@ -120,6 +120,10 @@ function isDiffFile(uri: Uri): boolean {
   return uri.path.endsWith("/diff.jujutsu");
 }
 
+function isDescribeFile(uri: Uri): boolean {
+  return uri.path.endsWith("/describe.jujutsu");
+}
+
 // Generated buffers the server rewrites on every command must open through
 // the readonly scheme. log.jujutsu is intentionally excluded — its REVSET
 // header is editable and re-runs the query on save.
@@ -512,6 +516,10 @@ export async function activate(context: ExtensionContext) {
       });
       await openServerResult(result as string, { aside: true });
     }),
+    commands.registerCommand("badjuju.describe.finalize", async () => {
+      await commands.executeCommand("workbench.action.files.save");
+      await commands.executeCommand("workbench.action.closeActiveEditor");
+    }),
     commands.registerCommand("badjuju.help.open", async () => {
       const editor = window.activeTextEditor;
       let windowType = "status";
@@ -519,6 +527,7 @@ export async function activate(context: ExtensionContext) {
         const uri = editor.document.uri;
         if (isLogFile(uri)) windowType = "log";
         else if (isDiffFile(uri)) windowType = "diff";
+        else if (isDescribeFile(uri)) windowType = "describe";
       }
       const result = await client.sendRequest("workspace/executeCommand", {
         command: "badjuju.help",

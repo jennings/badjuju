@@ -590,12 +590,17 @@ mod tests {
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         // Every key in the magit status profile must appear at the start of a line.
-        for key in ["n", "l", "d", "D", "s", "U", "a", "u", "=", "g", "q"] {
+        for key in ["n", "l", "d", "D", "s", "U", "a", "u", "=", "g", "R", "q", "?"] {
             assert!(
                 content.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in status command reference:\n{content}"
             );
         }
+        // 'r' must NOT appear — reserved for jj rebase.
+        assert!(
+            !content.lines().any(|l| l.starts_with("r\t") || l == "r"),
+            "'r' must not be in status COMMAND REFERENCE"
+        );
     }
 
     #[test]

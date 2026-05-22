@@ -15,7 +15,7 @@ end
 
 local STATUS_MAPS = {
   { 'g', 'JJRefresh',    'badjuju: refresh' },
-  { 'r', 'JJRefresh',    'badjuju: refresh' },
+  { 'R', 'JJRefresh',    'badjuju: refresh' },
   { 'n', 'JJNew',        'badjuju: new change' },
   { 'l', 'JJLog',        'badjuju: open log' },
   { 'u', 'JJUndo',       'badjuju: undo' },
@@ -83,7 +83,7 @@ end
 
 local LOG_MAPS = {
   { 'g', 'JJRefresh', 'badjuju: refresh' },
-  { 'r', 'JJRefresh', 'badjuju: refresh' },
+  { 'R', 'JJRefresh', 'badjuju: refresh' },
   { 'a', 'JJAbandon', 'badjuju: abandon revision' },
 }
 
@@ -213,6 +213,7 @@ function M.setup_for_buffer(bufnr)
     for _, m in ipairs(LOG_MAPS) do
       map_cmd(bufnr, m[1], m[2], m[3])
     end
+    nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
     nmap(bufnr, 'd', function() run_at_cursor_split('log', 'badjuju.describe', 'describe') end,
       'badjuju: describe commit at cursor in a split')
     nmap(bufnr, 'D', function() run_at_cursor_split('log', 'badjuju.diff', 'diff') end,
@@ -221,9 +222,19 @@ function M.setup_for_buffer(bufnr)
     nmap(bufnr, '?', function() show_help('log') end, 'badjuju: show help')
   elseif name:match('/%.jj/badjuju/diff%.jujutsu$') then
     nmap(bufnr, 'g', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
-    nmap(bufnr, 'r', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
+    nmap(bufnr, 'R', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
     nmap(bufnr, '?', function() show_help('diff') end, 'badjuju: show help')
+  elseif name:match('/%.jj/badjuju/describe%.jujutsu$') then
+    nmap(bufnr, '?', function() show_help('describe') end, 'badjuju: show help')
+    nmap(bufnr, '<C-c><C-c>', '<Cmd>write | quit<CR>', 'badjuju: finalize commit (save and close)')
+    nmap(bufnr, '<C-c><C-k>', '<Cmd>quit!<CR>', 'badjuju: abort (close without saving)')
+    vim.keymap.set('i', '<C-c>', '<Esc><Cmd>write | quit<CR>', {
+      buffer = bufnr,
+      silent = true,
+      nowait = true,
+      desc = 'badjuju: finalize commit (save and close)',
+    })
   end
 end
 
