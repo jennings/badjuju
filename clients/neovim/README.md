@@ -59,27 +59,63 @@ use {
 
 #### Option C — vim-plug
 
-vim-plug can install from a remote repo. Use the `rtp` option so only
-`clients/neovim/` is added to the runtimepath, then call `setup` and
-`vim.lsp.enable` from your `init.lua`:
+The plugin lives in the `clients/neovim/` subdirectory of the repo, so
+scope the runtimepath with vim-plug's `rtp` option:
 
 ```vim
-" In init.vim (or wrapped in lua << EOF ... EOF inside init.lua):
-call plug#begin()
 Plug 'jennings/bad-juju', { 'rtp': 'clients/neovim' }
-call plug#end()
 ```
 
 ```lua
--- After plug#end() has run, e.g. in init.lua:
 require('badjuju').setup({})
 vim.lsp.enable('jujutsu')
 ```
 
-You still need the `badjuju` server binary on your `PATH` (see the
-`redo server/install` step above).
+#### Option D — pathogen
 
-#### Option D — manual / no plugin manager
+Pathogen has no subdirectory option, so symlink `clients/neovim/` into
+your bundle directory:
+
+```sh
+ln -s /absolute/path/to/bad-juju/clients/neovim ~/.vim/bundle/bad-juju
+```
+
+```lua
+require('badjuju').setup({})
+vim.lsp.enable('jujutsu')
+```
+
+#### Option E — Vundle
+
+Vundle has no subdirectory option, so add the subpath to `runtimepath`
+after `vundle#end()`:
+
+```vim
+Plugin 'jennings/bad-juju'
+" Plugin lives in clients/neovim/.
+set rtp+=~/.vim/bundle/bad-juju/clients/neovim
+```
+
+```lua
+require('badjuju').setup({})
+vim.lsp.enable('jujutsu')
+```
+
+#### Option F — Neovim built-in packages (`pack/*/start/`)
+
+Symlink the `clients/neovim/` subdirectory into a start path:
+
+```sh
+ln -s /absolute/path/to/bad-juju/clients/neovim \
+  ~/.local/share/nvim/site/pack/badjuju/start/bad-juju
+```
+
+```lua
+require('badjuju').setup({})
+vim.lsp.enable('jujutsu')
+```
+
+#### Option G — manual / no plugin manager
 
 Add the directory to `runtimepath` and call `setup` + `vim.lsp.enable`
 yourself:
@@ -89,10 +125,6 @@ vim.opt.rtp:prepend('/absolute/path/to/bad-juju/clients/neovim')
 require('badjuju').setup({})
 vim.lsp.enable('jujutsu')
 ```
-
-A symlink works too — e.g.
-`ln -s /absolute/path/to/bad-juju/clients/neovim ~/.config/nvim/pack/badjuju/start/bad-juju`
-puts the plugin on your runtimepath via Neovim's built-in package layout.
 
 ### 2. Configure (optional) and enable the LSP
 
