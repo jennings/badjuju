@@ -304,7 +304,7 @@ impl LanguageServer for Backend {
         }
         if params.command == "badjuju.version" {
             return Ok(Some(serde_json::json!({
-                "version": env!("CARGO_PKG_VERSION"),
+                "version": env!("BADJUJU_VERSION"),
                 "commit": env!("BADJUJU_COMMIT"),
             })));
         }

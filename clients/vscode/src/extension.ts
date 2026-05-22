@@ -25,6 +25,7 @@ import {
 } from "vscode-languageclient/node";
 
 declare const __BADJUJU_COMMIT__: string;
+declare const __BADJUJU_VERSION__: string;
 
 let client: LanguageClient;
 
@@ -543,9 +544,8 @@ export async function activate(context: ExtensionContext) {
         arguments: [],
       });
       const server = result as { version: string; commit: string };
-      const clientVersion = context.extension.packageJSON.version as string;
       window.showInformationMessage(
-        `Bad Juju  |  Client: v${clientVersion} (${__BADJUJU_COMMIT__})  |  Server: v${server.version} (${server.commit})`,
+        `Bad Juju  |  Client: v${__BADJUJU_VERSION__} (${__BADJUJU_COMMIT__})  |  Server: v${server.version} (${server.commit})`,
       );
     }),
     commands.registerCommand("badjuju.help.open", async () => {
