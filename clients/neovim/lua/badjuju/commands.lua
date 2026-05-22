@@ -92,6 +92,10 @@ function M.register_all()
     local revision = args.args ~= '' and args.args or '@'
     badjuju.execute('badjuju.edit', { revision })
   end)
+
+  cmd('JJFetch', {}, function()
+    badjuju.execute('badjuju.fetch')
+  end)
 end
 
 return M

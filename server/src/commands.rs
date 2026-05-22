@@ -429,6 +429,16 @@ pub fn run_undo(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     }
 }
 
+/// Run `badjuju.fetch`: run `jj git fetch`, then refresh status.
+/// Surfaces failures as a MESSAGE prelude.
+pub fn run_fetch(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
+    let stat = read_current_stat(workspace);
+    match jj.git_fetch() {
+        Ok(_) => run_status(jj, workspace),
+        Err(e) => write_status(jj, workspace, Some(&format!("fetch failed: {e}")), stat),
+    }
+}
+
 /// Run `badjuju.edit`: move @ to `revision` (`jj edit REV`), then refresh status
 /// and log (if log file exists). Surfaces failures as a MESSAGE prelude.
 pub fn run_edit(jj: &Jj, workspace: &Path, revision: &str) -> Result<String, CommandError> {
@@ -609,7 +619,7 @@ mod tests {
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         // Every key in the magit status profile must appear at the start of a line.
-        for key in ["n", "l", "e", "d", "D", "s", "U", "a", "u", "=", "g", "R", "q", "?"] {
+        for key in ["n", "l", "e", "d", "D", "s", "U", "a", "f", "u", "=", "g", "R", "q", "?"] {
             assert!(
                 content.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in status command reference:\n{content}"
@@ -1414,6 +1424,18 @@ mod tests {
         assert!(
             content.starts_with("MESSAGE: squash readme.txt from root(): revision has 0 parents"),
             "got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn run_fetch_with_no_remote_reports_error_in_status() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let uri = run_fetch(&jj, dir.path()).expect("run_fetch should produce a URI even on error");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.starts_with("MESSAGE: fetch failed:"),
+            "expected error MESSAGE prelude, got:\n{content}"
         );
     }
 

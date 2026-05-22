@@ -142,6 +142,11 @@
         "title": "Undo last operation (jj undo)"
       },
       {
+        "command": "badjuju.fetch.run",
+        "category": "jj",
+        "title": "Git fetch"
+      },
+      {
         "command": "badjuju.edit.cursor",
         "category": "jj",
         "title": "Edit commit at cursor (move @)"
@@ -216,6 +221,11 @@
       {
         "command": "badjuju.log.open",
         "key": "l",
+        "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.fetch.run",
+        "key": "f",
         "when": "resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {

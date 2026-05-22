@@ -182,6 +182,11 @@ impl Jj {
             .collect())
     }
 
+    /// Fetch from all remotes (`jj git fetch`). Returns stdout.
+    pub fn git_fetch(&self) -> Result<String, JjError> {
+        self.run(&["git", "fetch"])
+    }
+
     /// Move the working copy to the given revision (`jj edit REV`).
     pub fn edit(&self, revision: &str) -> Result<(), JjError> {
         self.run(&["edit", revision])?;
@@ -439,6 +444,17 @@ mod tests {
         let jj = init_jj_repo(dir.path());
         let result = jj.change_ids("not-a-valid-revset!!!");
         assert!(matches!(result, Err(JjError::JjFailed { .. })));
+    }
+
+    #[test]
+    fn git_fetch_with_no_remote_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let result = jj.git_fetch();
+        assert!(
+            matches!(result, Err(JjError::JjFailed { .. })),
+            "expected JjFailed when no remote configured"
+        );
     }
 
     #[test]

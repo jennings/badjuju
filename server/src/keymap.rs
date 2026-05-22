@@ -67,6 +67,12 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         windows: &["status"],
     },
     KeymapEntry {
+        key: "f",
+        action: "badjuju.fetch",
+        description: "git fetch",
+        windows: &["status"],
+    },
+    KeymapEntry {
         key: "u",
         action: "badjuju.undo",
         description: "jj undo",
@@ -189,7 +195,7 @@ mod tests {
     fn render_status_contains_all_expected_keys() {
         let text = render_command_reference(&KeymapProfile::Magit, "status");
         assert!(text.starts_with("COMMAND REFERENCE:"));
-        for key in ["n", "l", "e", "d", "D", "s", "U", "a", "u", "=", "g", "R", "q", "?"] {
+        for key in ["n", "l", "e", "d", "D", "s", "U", "a", "f", "u", "=", "g", "R", "q", "?"] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in:\n{text}"

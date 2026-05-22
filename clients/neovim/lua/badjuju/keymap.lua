@@ -18,6 +18,7 @@ local STATUS_MAPS = {
   { 'R', 'JJRefresh',    'badjuju: refresh' },
   { 'n', 'JJNew',        'badjuju: new change' },
   { 'l', 'JJLog',        'badjuju: open log' },
+  { 'f', 'JJFetch',      'badjuju: git fetch' },
   { 'u', 'JJUndo',       'badjuju: undo' },
   { '=', 'JJToggleStat', 'badjuju: toggle --stat' },
   { 'a', 'JJAbandon',    'badjuju: abandon revision' },

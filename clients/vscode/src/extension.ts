@@ -563,6 +563,13 @@ export async function activate(context: ExtensionContext) {
         placeHolder: "Press Escape to close",
       });
     }),
+    commands.registerCommand("badjuju.fetch.run", async () => {
+      const result = await client.sendRequest("workspace/executeCommand", {
+        command: "badjuju.fetch",
+        arguments: [],
+      });
+      await openServerResult(result as string);
+    }),
     commands.registerCommand("badjuju.edit.cursor", async () => {
       const editor = window.activeTextEditor;
       let revision = "@";
