@@ -203,49 +203,70 @@ function M.setup_for_buffer(bufnr)
   local name = vim.api.nvim_buf_get_name(bufnr)
 
   if name:match('/%.jj/badjuju/status%.jujutsu$') then
-    for _, m in ipairs(STATUS_MAPS) do
-      map_cmd(bufnr, m[1], m[2], m[3])
-    end
-    nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
-    nmap(bufnr, 'P', '<Cmd>JJPush!<CR>', 'badjuju: git push --force-with-lease')
-    nmap(bufnr, 'e', function() run_at_cursor_split('status', 'badjuju.edit', 'edit') end,
-      'badjuju: edit commit at cursor (move @)')
-    nmap(bufnr, 'b', function()
+    -- Shared helpers used by both profiles.
+    local function status_bookmark()
       local revision = revision_at_cursor('status') or '@'
       local ACTIONS = { 'create', 'move', 'delete', 'track', 'forget' }
       vim.ui.select(ACTIONS, { prompt = 'jj bookmark: ' }, function(sub_action)
         if not sub_action then return end
         local prompt = sub_action == 'track' and 'Bookmark (e.g. main@origin): ' or 'Bookmark name: '
-        vim.ui.input({ prompt = prompt }, function(name)
-          if not name or name == '' then return end
+        vim.ui.input({ prompt = prompt }, function(bname)
+          if not bname or bname == '' then return end
           local rev = (sub_action == 'create' or sub_action == 'move') and revision or ''
-          require('badjuju').execute('badjuju.bookmark', { sub_action, name, rev })
+          require('badjuju').execute('badjuju.bookmark', { sub_action, bname, rev })
         end)
       end)
-    end, 'badjuju: bookmark (create / move / delete / track / forget)')
-    nmap(bufnr, 'r', function()
+    end
+    local function status_rebase()
       local revision = revision_at_cursor('status')
       local dest = vim.fn.input('Rebase to: ')
       if dest == '' then return end
       require('badjuju').execute('badjuju.rebase', { revision or '@', dest })
-    end, 'badjuju: rebase commit at cursor to destination')
-    nmap(bufnr, 'd', function() run_at_cursor_split('status', 'badjuju.describe', 'describe') end,
-      'badjuju: describe commit at cursor in a split')
-    nmap(bufnr, 'D', function() run_at_cursor_split('status', 'badjuju.diff', 'diff') end,
-      'badjuju: diff commit at cursor in a split')
-    nmap(bufnr, 's', function() run_file_scoped('badjuju.squash') end,
-      'badjuju: squash file at cursor into parent')
-    nmap(bufnr, 'U', function() run_file_scoped('badjuju.unsquash') end,
-      'badjuju: unsquash file at cursor from parent into child')
-    nmap(bufnr, '?', function() show_help('status') end, 'badjuju: show help')
-  elseif name:match('/%.jj/badjuju/log%.jujutsu$') then
-    for _, m in ipairs(LOG_MAPS) do
-      map_cmd(bufnr, m[1], m[2], m[3])
+    end
+
+    if profile == 'vim' then
+      nmap(bufnr, 'nn', '<Cmd>JJNew<CR>', 'badjuju: new change')
+      nmap(bufnr, 'll', '<Cmd>JJLog<CR>', 'badjuju: open log')
+      nmap(bufnr, 'ss', function() run_file_scoped('badjuju.squash') end,
+        'badjuju: squash file at cursor into parent')
+      nmap(bufnr, 'UU', function() run_file_scoped('badjuju.unsquash') end,
+        'badjuju: unsquash file at cursor from parent into child')
+      nmap(bufnr, 'ff', '<Cmd>JJFetch<CR>', 'badjuju: git fetch')
+      nmap(bufnr, 'pp', '<Cmd>JJPush<CR>', 'badjuju: git push')
+      nmap(bufnr, 'PP', '<Cmd>JJPush!<CR>', 'badjuju: git push --force-with-lease')
+      nmap(bufnr, 'uu', '<Cmd>JJUndo<CR>', 'badjuju: undo')
+      nmap(bufnr, '=', '<Cmd>JJToggleStat<CR>', 'badjuju: toggle --stat')
+      nmap(bufnr, 'bb', status_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
+      nmap(bufnr, 'rr', status_rebase, 'badjuju: rebase commit at cursor to destination')
+      nmap(bufnr, 'ee', function() run_at_cursor_split('status', 'badjuju.edit', 'edit') end,
+        'badjuju: edit commit at cursor (move @)')
+      nmap(bufnr, 'dd', function() run_at_cursor_split('status', 'badjuju.describe', 'describe') end,
+        'badjuju: describe commit at cursor in a split')
+      nmap(bufnr, 'D', function() run_at_cursor_split('status', 'badjuju.diff', 'diff') end,
+        'badjuju: diff commit at cursor in a split')
+      nmap(bufnr, 'aa', '<Cmd>JJAbandon<CR>', 'badjuju: abandon revision')
+    else
+      for _, m in ipairs(STATUS_MAPS) do
+        map_cmd(bufnr, m[1], m[2], m[3])
+      end
+      nmap(bufnr, 'P', '<Cmd>JJPush!<CR>', 'badjuju: git push --force-with-lease')
+      nmap(bufnr, 'e', function() run_at_cursor_split('status', 'badjuju.edit', 'edit') end,
+        'badjuju: edit commit at cursor (move @)')
+      nmap(bufnr, 'b', status_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
+      nmap(bufnr, 'r', status_rebase, 'badjuju: rebase commit at cursor to destination')
+      nmap(bufnr, 'd', function() run_at_cursor_split('status', 'badjuju.describe', 'describe') end,
+        'badjuju: describe commit at cursor in a split')
+      nmap(bufnr, 'D', function() run_at_cursor_split('status', 'badjuju.diff', 'diff') end,
+        'badjuju: diff commit at cursor in a split')
+      nmap(bufnr, 's', function() run_file_scoped('badjuju.squash') end,
+        'badjuju: squash file at cursor into parent')
+      nmap(bufnr, 'U', function() run_file_scoped('badjuju.unsquash') end,
+        'badjuju: unsquash file at cursor from parent into child')
     end
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
-    nmap(bufnr, 'e', function() run_at_cursor_split('log', 'badjuju.edit', 'edit') end,
-      'badjuju: edit commit at cursor (move @)')
-    nmap(bufnr, 'b', function()
+    nmap(bufnr, '?', function() show_help('status') end, 'badjuju: show help')
+  elseif name:match('/%.jj/badjuju/log%.jujutsu$') then
+    local function log_bookmark()
       local revision = revision_at_cursor('log')
       local ACTIONS = { 'create', 'move', 'delete', 'track', 'forget' }
       vim.ui.select(ACTIONS, { prompt = 'jj bookmark: ' }, function(sub_action)
@@ -255,14 +276,14 @@ function M.setup_for_buffer(bufnr)
           return
         end
         local prompt = sub_action == 'track' and 'Bookmark (e.g. main@origin): ' or 'Bookmark name: '
-        vim.ui.input({ prompt = prompt }, function(name)
-          if not name or name == '' then return end
+        vim.ui.input({ prompt = prompt }, function(bname)
+          if not bname or bname == '' then return end
           local rev = (sub_action == 'create' or sub_action == 'move') and (revision or '@') or ''
-          require('badjuju').execute('badjuju.bookmark', { sub_action, name, rev })
+          require('badjuju').execute('badjuju.bookmark', { sub_action, bname, rev })
         end)
       end)
-    end, 'badjuju: bookmark (create / move / delete / track / forget)')
-    nmap(bufnr, 'r', function()
+    end
+    local function log_rebase()
       local revision = revision_at_cursor('log')
       if not revision then
         vim.notify('rebase: place cursor on a commit line', vim.log.levels.INFO)
@@ -271,11 +292,35 @@ function M.setup_for_buffer(bufnr)
       local dest = vim.fn.input('Rebase to: ')
       if dest == '' then return end
       require('badjuju').execute('badjuju.rebase', { revision, dest })
-    end, 'badjuju: rebase commit at cursor to destination')
-    nmap(bufnr, 'd', function() run_at_cursor_split('log', 'badjuju.describe', 'describe') end,
-      'badjuju: describe commit at cursor in a split')
-    nmap(bufnr, 'D', function() run_at_cursor_split('log', 'badjuju.diff', 'diff') end,
-      'badjuju: diff commit at cursor in a split')
+    end
+
+    if profile == 'vim' then
+      nmap(bufnr, 'bb', log_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
+      nmap(bufnr, 'rr', log_rebase, 'badjuju: rebase commit at cursor to destination')
+      nmap(bufnr, 'ee', function() run_at_cursor_split('log', 'badjuju.edit', 'edit') end,
+        'badjuju: edit commit at cursor (move @)')
+      nmap(bufnr, 'dd', function() run_at_cursor_split('log', 'badjuju.describe', 'describe') end,
+        'badjuju: describe commit at cursor in a split')
+      nmap(bufnr, 'D', function() run_at_cursor_split('log', 'badjuju.diff', 'diff') end,
+        'badjuju: diff commit at cursor in a split')
+      nmap(bufnr, 'aa', '<Cmd>JJAbandon<CR>', 'badjuju: abandon revision')
+      for _, m in ipairs(LOG_MAPS) do
+        if m[1] ~= 'a' then map_cmd(bufnr, m[1], m[2], m[3]) end
+      end
+    else
+      for _, m in ipairs(LOG_MAPS) do
+        map_cmd(bufnr, m[1], m[2], m[3])
+      end
+      nmap(bufnr, 'e', function() run_at_cursor_split('log', 'badjuju.edit', 'edit') end,
+        'badjuju: edit commit at cursor (move @)')
+      nmap(bufnr, 'b', log_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
+      nmap(bufnr, 'r', log_rebase, 'badjuju: rebase commit at cursor to destination')
+      nmap(bufnr, 'd', function() run_at_cursor_split('log', 'badjuju.describe', 'describe') end,
+        'badjuju: describe commit at cursor in a split')
+      nmap(bufnr, 'D', function() run_at_cursor_split('log', 'badjuju.diff', 'diff') end,
+        'badjuju: diff commit at cursor in a split')
+    end
+    nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
     nmap(bufnr, '<CR>', apply_log_shortcut, 'badjuju: apply revset shortcut under cursor')
     nmap(bufnr, '?', function() show_help('log') end, 'badjuju: show help')
   elseif name:match('/%.jj/badjuju/diff%.jujutsu$') then

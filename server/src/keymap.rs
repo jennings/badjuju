@@ -16,6 +16,7 @@ pub struct KeymapEntry {
 pub enum KeymapProfile {
     #[default]
     Magit,
+    Vim,
     None,
 }
 
@@ -23,6 +24,7 @@ impl KeymapProfile {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Magit => "magit",
+            Self::Vim => "vim",
             Self::None => "none",
         }
     }
@@ -34,6 +36,7 @@ impl std::str::FromStr for KeymapProfile {
     fn from_str(s: &str) -> Result<Self, ()> {
         match s {
             "magit" => Ok(Self::Magit),
+            "vim" => Ok(Self::Vim),
             "none" => Ok(Self::None),
             _ => Err(()),
         }
@@ -175,6 +178,142 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
     },
 ];
 
+/// Fugitive-style two-letter verb profile.
+static VIM_ENTRIES: &[KeymapEntry] = &[
+    // Status-only
+    KeymapEntry {
+        key: "nn",
+        action: "badjuju.new",
+        description: "new change",
+        windows: &["status"],
+    },
+    KeymapEntry {
+        key: "ll",
+        action: "badjuju.log",
+        description: "open log",
+        windows: &["status"],
+    },
+    KeymapEntry {
+        key: "ss",
+        action: "badjuju.squash",
+        description: "squash file at cursor into parent",
+        windows: &["status"],
+    },
+    KeymapEntry {
+        key: "UU",
+        action: "badjuju.unsquash",
+        description: "unsquash file at cursor from parent into child",
+        windows: &["status"],
+    },
+    KeymapEntry {
+        key: "ff",
+        action: "badjuju.fetch",
+        description: "git fetch",
+        windows: &["status"],
+    },
+    KeymapEntry {
+        key: "pp",
+        action: "badjuju.push",
+        description: "git push",
+        windows: &["status"],
+    },
+    KeymapEntry {
+        key: "PP",
+        action: "badjuju.push",
+        description: "git push (force)",
+        windows: &["status"],
+    },
+    KeymapEntry {
+        key: "uu",
+        action: "badjuju.undo",
+        description: "jj undo",
+        windows: &["status"],
+    },
+    KeymapEntry {
+        key: "=",
+        action: "badjuju.toggleStat",
+        description: "toggle --stat on the stack log",
+        windows: &["status"],
+    },
+    // Status + log
+    KeymapEntry {
+        key: "bb",
+        action: "badjuju.bookmark",
+        description: "bookmark (create / move / delete / track / forget)",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "rr",
+        action: "badjuju.rebase",
+        description: "rebase to destination",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "ee",
+        action: "badjuju.edit",
+        description: "edit commit at cursor (move @)",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "dd",
+        action: "badjuju.describe",
+        description: "describe commit at cursor",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "D",
+        action: "badjuju.diff",
+        description: "diff commit at cursor",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "aa",
+        action: "badjuju.abandon",
+        description: "abandon commit at cursor",
+        windows: &["status", "log"],
+    },
+    // All main windows
+    KeymapEntry {
+        key: "g",
+        action: "badjuju.refresh",
+        description: "refresh",
+        windows: &["status", "log", "diff"],
+    },
+    KeymapEntry {
+        key: "R",
+        action: "badjuju.refresh",
+        description: "refresh",
+        windows: &["status", "log", "diff"],
+    },
+    // Close
+    KeymapEntry {
+        key: "q",
+        action: "",
+        description: "close",
+        windows: &["status", "log", "diff"],
+    },
+    // Help
+    KeymapEntry {
+        key: "?",
+        action: "badjuju.help",
+        description: "show help",
+        windows: &["status", "log", "diff", "describe"],
+    },
+    // Describe-only
+    KeymapEntry {
+        key: "Ctrl-c Ctrl-c",
+        action: "badjuju.describe.finalize",
+        description: "finalize commit (save and close)",
+        windows: &["describe"],
+    },
+    KeymapEntry {
+        key: "Ctrl-c Ctrl-k",
+        action: "badjuju.describe.abort",
+        description: "abort (close without saving)",
+        windows: &["describe"],
+    },
+];
+
 /// Return the keymap entries for a given profile and window type.
 pub fn entries_for_window(
     profile: &KeymapProfile,
@@ -182,6 +321,7 @@ pub fn entries_for_window(
 ) -> Vec<&'static KeymapEntry> {
     let table = match profile {
         KeymapProfile::Magit => MAGIT_ENTRIES,
+        KeymapProfile::Vim => VIM_ENTRIES,
         KeymapProfile::None => return vec![],
     };
     table
@@ -195,7 +335,7 @@ pub fn render_command_reference(profile: &KeymapProfile, window: &str) -> String
     let entries = entries_for_window(profile, window);
     let mut lines = vec!["COMMAND REFERENCE:".to_string()];
 
-    if matches!(profile, KeymapProfile::None) {
+    if *profile == KeymapProfile::None {
         lines.push(
             "No default bindings active. Configure your own hotkeys via editor keybinding settings."
                 .to_string(),
@@ -289,8 +429,38 @@ mod tests {
     #[test]
     fn profile_from_str_round_trips() {
         assert_eq!("magit".parse::<KeymapProfile>(), Ok(KeymapProfile::Magit));
+        assert_eq!("vim".parse::<KeymapProfile>(), Ok(KeymapProfile::Vim));
         assert_eq!("none".parse::<KeymapProfile>(), Ok(KeymapProfile::None));
-        assert!("vim".parse::<KeymapProfile>().is_err());
+        assert!("dvorak".parse::<KeymapProfile>().is_err());
         assert!("".parse::<KeymapProfile>().is_err());
+    }
+
+    #[test]
+    fn vim_profile_status_contains_two_letter_verbs() {
+        let text = render_command_reference(&KeymapProfile::Vim, "status");
+        assert!(text.starts_with("COMMAND REFERENCE:"));
+        for key in ["nn", "ll", "ff", "pp", "PP", "uu", "ss", "UU", "bb", "rr", "ee", "dd", "D", "aa", "g", "R", "q", "?"] {
+            assert!(
+                text.lines().any(|l| l.starts_with(key)),
+                "missing key `{key}` in vim status:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn vim_profile_log_contains_two_letter_verbs() {
+        let text = render_command_reference(&KeymapProfile::Vim, "log");
+        for key in ["bb", "rr", "ee", "dd", "D", "aa", "g", "R", "q", "?"] {
+            assert!(
+                text.lines().any(|l| l.starts_with(key)),
+                "missing key `{key}` in vim log:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn vim_entries_for_status_nonempty() {
+        let entries = entries_for_window(&KeymapProfile::Vim, "status");
+        assert!(!entries.is_empty(), "vim profile should have status entries");
     }
 }

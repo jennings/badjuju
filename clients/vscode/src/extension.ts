@@ -286,13 +286,15 @@ export async function activate(context: ExtensionContext) {
   const initializationOptions: Record<string, unknown> = { keymapProfile };
   if (binaryPath) initializationOptions.binaryPath = binaryPath;
 
-  // Gate all package.json keybindings on this context key so the 'none'
-  // profile produces zero hotkey registrations without modifying every when-clause.
+  // Set context keys so package.json keybindings can be gated by profile.
+  // badjuju.keymapsActive is false only for 'none' (convenience for any when-clause).
+  // badjuju.keymapProfile holds the raw string so profile-specific bindings can match.
   commands.executeCommand(
     "setContext",
     "badjuju.keymapsActive",
     keymapProfile !== "none",
   );
+  commands.executeCommand("setContext", "badjuju.keymapProfile", keymapProfile);
 
   const clientOptions: LanguageClientOptions = {
     documentSelector: [
