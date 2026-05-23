@@ -1,10 +1,7 @@
 //! LSP semantic tokens for the generated `*.jujutsu` buffers.
 //!
 //! Pure line-by-line scanner that emits LSP wire-format tokens (delta-line,
-//! delta-start, length, type-index, modifier-bits). Mirrors the categories
-//! covered by the tree-sitter highlight queries in
-//! `clients/neovim/queries/jujutsu/highlights.scm` so the two highlighting
-//! sources can coexist briefly.
+//! delta-start, length, type-index, modifier-bits).
 //!
 //! Positions are reported in Unicode code-point units. All non-ASCII glyphs
 //! that appear in jj output (graph chars like `│`, `◆`, `○`, `…`) are on the
@@ -46,8 +43,7 @@ const TT_OPERATOR: u32 = 6;
 const MOD_DOCUMENTATION: u32 = 1 << 0;
 
 /// Graph drawing + working-copy marker characters emitted by jj log. Mirrors
-/// the union of `COMMIT_HEADER_CHARS` / `STAT_GRAPH_CHARS` in `cursor.rs` and
-/// the `graph_char` token in the tree-sitter grammar.
+/// the union of `COMMIT_HEADER_CHARS` / `STAT_GRAPH_CHARS` in `cursor.rs`.
 const GRAPH_CHARS: &[char] = &[
     '@', '*', '│', '◆', '○', '●', '◉', '~', '…', '╭', '╮', '╯', '╰', '├', '─', '┤', '┬', '┴', '┼',
 ];
@@ -127,9 +123,9 @@ fn scan_inline(
     out: &mut Vec<(u32, u32, u32, u32)>,
 ) {
     // True when the previous emitted-or-skipped character could be part of a
-    // longer identifier (ASCII alphanumeric or `_`). Mirrors the word-boundary
-    // assertion that tree-sitter approximates with `_alnum_run` — an
-    // identifier atom must not start mid-run.
+    // longer identifier (ASCII alphanumeric or `_`). Enforces a word-boundary
+    // assertion so identifier atoms (commit_id, change_id) cannot start
+    // mid-run.
     let mut prev_alnum = false;
     while byte_idx < line.len() {
         let rest = &line[byte_idx..];
