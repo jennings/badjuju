@@ -279,7 +279,9 @@ fn lsp_execute_describe_with_cursor_form_resolves_revision_from_log() {
 }
 
 #[test]
-fn lsp_execute_describe_legacy_string_form_still_works() {
+fn lsp_execute_describe_string_arg_returns_error() {
+    // T19: revision-scoped commands no longer accept a literal string arg.
+    // A string where cursor-form is expected must surface as a clear error.
     let dir = tempfile::tempdir().unwrap();
     init_jj_repo(dir.path());
 
@@ -289,12 +291,14 @@ fn lsp_execute_describe_legacy_string_form_still_works() {
 
     let resp = session.execute_command_with_args("badjuju.describe", serde_json::json!(["@"]));
     assert!(
-        resp.get("error").is_none(),
-        "describe with legacy string form returned error: {resp}"
+        resp.get("error").is_some(),
+        "expected error for string arg to describe, got: {resp}"
     );
-    let uri = resp["result"].as_str().unwrap();
-    let content = read_file(uri);
-    assert!(content.contains("JJ:"));
+    let message = resp["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("cursor"),
+        "expected error to mention cursor form, got: {message}"
+    );
 }
 
 /// Find the 0-indexed line in a status.jujutsu buffer that matches a status
@@ -362,39 +366,22 @@ fn lsp_execute_squash_with_cursor_form_resolves_file_and_revision() {
 }
 
 #[test]
-fn lsp_execute_squash_legacy_form_still_works() {
+fn lsp_execute_squash_string_args_return_error() {
+    // T19: squash/unsquash no longer accept the legacy [file_str, rev_str]
+    // form. A string arg where cursor-form is expected must surface as a
+    // clear error rather than silently doing the wrong thing.
     let dir = tempfile::tempdir().unwrap();
     init_jj_repo(dir.path());
-
-    std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
-    Command::new("jj")
-        .args(["describe", "-m", "parent"])
-        .current_dir(dir.path())
-        .output()
-        .expect("describe failed");
-    Command::new("jj")
-        .args(["new"])
-        .current_dir(dir.path())
-        .output()
-        .expect("new failed");
-    std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
 
     let root_uri = format!("file://{}", dir.path().display());
     let mut session = LspSession::start(dir.path());
     session.initialize(&root_uri);
 
-    let resp =
-        session.execute_command_with_args("badjuju.squash", serde_json::json!(["readme.txt", "@"]));
+    let resp = session
+        .execute_command_with_args("badjuju.squash", serde_json::json!(["readme.txt", "@"]));
     assert!(
-        resp.get("error").is_none(),
-        "squash legacy form returned error: {resp}"
-    );
-    let status_uri = resp["result"].as_str().unwrap();
-    let status = read_file(status_uri);
-    assert!(status.contains("STATUS:"));
-    assert!(
-        !status.contains("M readme.txt"),
-        "expected readme.txt squashed away:\n{status}"
+        resp.get("error").is_some(),
+        "expected error for string args to squash, got: {resp}"
     );
 }
 

@@ -682,7 +682,7 @@ pub enum CommandError {
 /// Error returned when a cursor-form command argument cannot be resolved.
 #[derive(Debug, thiserror::Error)]
 pub enum CursorResolveError {
-    #[error("invalid cursor argument shape; expected string or {{cursor:{{uri,line}}}}")]
+    #[error("invalid cursor argument shape; expected {{cursor:{{uri,line}}}}")]
     InvalidArg,
     #[error("unsupported buffer URI for cursor argument: {0}")]
     UnsupportedBuffer(String),
@@ -705,9 +705,11 @@ pub struct CursorPos {
 
 /// Extract a `{cursor: {uri, line}}` object from a single argument value.
 ///
-/// Returns `Ok(None)` for string / null / missing values so callers can fall
-/// through to the legacy string-form code path. Returns `Err(InvalidArg)` for
-/// objects that look cursor-shaped but are malformed.
+/// Returns `Ok(None)` for null / missing values so callers can apply a default
+/// (typically `@`). Strings return `Ok(None)` too — only `resolve_log_shortcut_arg`
+/// uses that to fall through to literal-revset behavior; revision/file-scoped
+/// resolvers explicitly reject strings via `reject_string_arg`. Returns
+/// `Err(InvalidArg)` for objects that look cursor-shaped but are malformed.
 pub fn parse_cursor_arg(
     arg: Option<&serde_json::Value>,
 ) -> std::result::Result<Option<CursorPos>, CursorResolveError> {
@@ -730,9 +732,19 @@ pub fn parse_cursor_arg(
     Ok(Some(CursorPos { uri, line }))
 }
 
-/// Resolve a revision argument that may be either a legacy string form or a
-/// cursor-form object. `doc_lookup(uri)` should return the buffer's text —
-/// callers typically check `State.documents` then fall back to reading disk.
+/// Reject string arguments where only cursor-form is now accepted. Used by
+/// revision-scoped and file-scoped resolvers after the legacy string-form
+/// path was removed (T19).
+fn reject_string_arg(arg: Option<&serde_json::Value>) -> std::result::Result<(), CursorResolveError> {
+    if arg.is_some_and(|v| v.is_string()) {
+        return Err(CursorResolveError::InvalidArg);
+    }
+    Ok(())
+}
+
+/// Resolve a revision argument. Accepts only a `{cursor:{uri,line}}` object
+/// or a missing / null arg (defaults to empty → `@` downstream). String args
+/// are rejected with `InvalidArg`.
 pub fn resolve_revision_arg<F>(
     arg: Option<&serde_json::Value>,
     doc_lookup: F,
@@ -740,9 +752,7 @@ pub fn resolve_revision_arg<F>(
 where
     F: FnOnce(&str) -> Option<String>,
 {
-    if let Some(s) = arg.and_then(|v| v.as_str()) {
-        return Ok(s.to_string());
-    }
+    reject_string_arg(arg)?;
     let Some(cp) = parse_cursor_arg(arg)? else {
         return Ok(String::new());
     };
@@ -754,21 +764,17 @@ where
 }
 
 /// Resolve both file and revision from a single cursor-form arg (used by
-/// file-scoped commands like squash/unsquash).
-///
-/// If `arg[0]` is a string, this returns `Ok(None)` — the caller falls through
-/// to the legacy `[file, revision]` form. If it's a cursor-form object, both
-/// the file and revision are resolved from the same line of `status.jujutsu`.
+/// file-scoped commands like squash/unsquash). Only `{cursor:{uri,line}}` is
+/// accepted; string args and missing args both error with `InvalidArg`.
 pub fn resolve_file_and_revision_arg<F>(
     arg: Option<&serde_json::Value>,
     doc_lookup: F,
-) -> std::result::Result<Option<(String, String)>, CursorResolveError>
+) -> std::result::Result<(String, String), CursorResolveError>
 where
     F: FnOnce(&str) -> Option<String>,
 {
-    let Some(cp) = parse_cursor_arg(arg)? else {
-        return Ok(None);
-    };
+    reject_string_arg(arg)?;
+    let cp = parse_cursor_arg(arg)?.ok_or(CursorResolveError::InvalidArg)?;
     let kind = BufferKind::from_uri(&cp.uri)
         .ok_or_else(|| CursorResolveError::UnsupportedBuffer(cp.uri.clone()))?;
     let content =
@@ -776,14 +782,16 @@ where
     let file = cursor::file_at_line(&content, cp.line).ok_or(CursorResolveError::NoFileAtCursor)?;
     let revision = cursor::revision_at_line(&content, cp.line, kind)
         .ok_or(CursorResolveError::NoRevisionAtCursor)?;
-    Ok(Some((file, revision)))
+    Ok((file, revision))
 }
 
 /// Resolve a log-shortcut revset from a cursor-form arg pointing at a
 /// `JJ: <Label>: <revset>` line in `log.jujutsu`.
 ///
-/// Returns `Ok(None)` for non-cursor args (the caller falls through to the
-/// legacy `[revset_string]` form).
+/// Returns `Ok(None)` for non-cursor args (the `badjuju.log` adapter falls
+/// through to literal-revset handling). String revsets are still valid for
+/// `badjuju.log`; T19 only removed the legacy form from revision-scoped
+/// commands.
 pub fn resolve_log_shortcut_arg<F>(
     arg: Option<&serde_json::Value>,
     doc_lookup: F,
@@ -2071,10 +2079,10 @@ mod tests {
     }
 
     #[test]
-    fn resolve_revision_arg_string_arg_passes_through() {
+    fn resolve_revision_arg_string_arg_errors() {
         let v = serde_json::json!("abc123");
-        let r = resolve_revision_arg(Some(&v), no_docs).unwrap();
-        assert_eq!(r, "abc123");
+        let err = resolve_revision_arg(Some(&v), no_docs).unwrap_err();
+        assert!(matches!(err, CursorResolveError::InvalidArg));
     }
 
     #[test]
@@ -2133,10 +2141,16 @@ mod tests {
     }
 
     #[test]
-    fn resolve_file_and_revision_arg_string_returns_none() {
+    fn resolve_file_and_revision_arg_string_errors() {
         let v = serde_json::json!("foo.rs");
-        let r = resolve_file_and_revision_arg(Some(&v), no_docs).unwrap();
-        assert_eq!(r, None);
+        let err = resolve_file_and_revision_arg(Some(&v), no_docs).unwrap_err();
+        assert!(matches!(err, CursorResolveError::InvalidArg));
+    }
+
+    #[test]
+    fn resolve_file_and_revision_arg_no_arg_errors() {
+        let err = resolve_file_and_revision_arg(None, no_docs).unwrap_err();
+        assert!(matches!(err, CursorResolveError::InvalidArg));
     }
 
     #[test]
@@ -2154,9 +2168,8 @@ mod tests {
         let arg = serde_json::json!({
             "cursor": { "uri": "file:///x/status.jujutsu", "line": 2 }
         });
-        let (file, rev) = resolve_file_and_revision_arg(Some(&arg), |_| Some(status.clone()))
-            .unwrap()
-            .unwrap();
+        let (file, rev) =
+            resolve_file_and_revision_arg(Some(&arg), |_| Some(status.clone())).unwrap();
         assert_eq!(file, "src/main.rs");
         // File lines belong to the working copy → "@"
         assert_eq!(rev, "@");
