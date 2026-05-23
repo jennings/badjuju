@@ -733,16 +733,6 @@ pub fn parse_cursor_arg(
     Ok(Some(CursorPos { uri, line }))
 }
 
-/// Reject string arguments where only cursor-form is now accepted. Used by
-/// the file-scoped resolver. Revision-scoped commands accept strings directly
-/// (CLI user commands and pre-resolved code-action args).
-fn reject_string_arg(arg: Option<&serde_json::Value>) -> std::result::Result<(), CursorResolveError> {
-    if arg.is_some_and(|v| v.is_string()) {
-        return Err(CursorResolveError::InvalidArg);
-    }
-    Ok(())
-}
-
 /// Resolve a revision argument. Accepts either a literal revision string
 /// (e.g. `"@-"` from CLI user commands or pre-resolved code actions), a
 /// `{cursor:{uri,line}}` object, or a missing / null arg (defaults to empty
@@ -767,18 +757,25 @@ where
     cursor::revision_at_line(&content, cp.line, kind).ok_or(CursorResolveError::NoRevisionAtCursor)
 }
 
-/// Resolve both file and revision from a single cursor-form arg (used by
-/// file-scoped commands like squash/unsquash). Only `{cursor:{uri,line}}` is
-/// accepted; string args and missing args both error with `InvalidArg`.
+/// Resolve both file and revision for file-scoped commands like squash and
+/// unsquash. Accepts either the legacy `[file_str, revision_str]` form (Neovim
+/// CLI: `:JJSquash <file> @-`) or a single `{cursor:{uri,line}}` arg passed
+/// as `file_arg` (code actions). Missing args error with `InvalidArg`.
 pub fn resolve_file_and_revision_arg<F>(
-    arg: Option<&serde_json::Value>,
+    file_arg: Option<&serde_json::Value>,
+    rev_arg: Option<&serde_json::Value>,
     doc_lookup: F,
 ) -> std::result::Result<(String, String), CursorResolveError>
 where
     F: FnOnce(&str) -> Option<String>,
 {
-    reject_string_arg(arg)?;
-    let cp = parse_cursor_arg(arg)?.ok_or(CursorResolveError::InvalidArg)?;
+    if let (Some(f), Some(r)) = (
+        file_arg.and_then(|v| v.as_str()),
+        rev_arg.and_then(|v| v.as_str()),
+    ) {
+        return Ok((f.to_string(), r.to_string()));
+    }
+    let cp = parse_cursor_arg(file_arg)?.ok_or(CursorResolveError::InvalidArg)?;
     let kind = BufferKind::from_uri(&cp.uri)
         .ok_or_else(|| CursorResolveError::UnsupportedBuffer(cp.uri.clone()))?;
     let content =
@@ -2145,15 +2142,26 @@ mod tests {
     }
 
     #[test]
-    fn resolve_file_and_revision_arg_string_errors() {
-        let v = serde_json::json!("foo.rs");
-        let err = resolve_file_and_revision_arg(Some(&v), no_docs).unwrap_err();
+    fn resolve_file_and_revision_arg_string_args_return_pair() {
+        let file = serde_json::json!("readme.txt");
+        let rev = serde_json::json!("@-");
+        let (f, r) = resolve_file_and_revision_arg(Some(&file), Some(&rev), no_docs).unwrap();
+        assert_eq!(f, "readme.txt");
+        assert_eq!(r, "@-");
+    }
+
+    #[test]
+    fn resolve_file_and_revision_arg_no_args_errors() {
+        let err = resolve_file_and_revision_arg(None, None, no_docs).unwrap_err();
         assert!(matches!(err, CursorResolveError::InvalidArg));
     }
 
     #[test]
-    fn resolve_file_and_revision_arg_no_arg_errors() {
-        let err = resolve_file_and_revision_arg(None, no_docs).unwrap_err();
+    fn resolve_file_and_revision_arg_lone_file_string_errors() {
+        // Single string arg (no second arg) isn't the legacy 2-string form
+        // and isn't cursor form, so it should error rather than guess.
+        let v = serde_json::json!("foo.rs");
+        let err = resolve_file_and_revision_arg(Some(&v), None, no_docs).unwrap_err();
         assert!(matches!(err, CursorResolveError::InvalidArg));
     }
 
@@ -2173,7 +2181,7 @@ mod tests {
             "cursor": { "uri": "file:///x/status.jujutsu", "line": 2 }
         });
         let (file, rev) =
-            resolve_file_and_revision_arg(Some(&arg), |_| Some(status.clone())).unwrap();
+            resolve_file_and_revision_arg(Some(&arg), None, |_| Some(status.clone())).unwrap();
         assert_eq!(file, "src/main.rs");
         // File lines belong to the working copy → "@"
         assert_eq!(rev, "@");

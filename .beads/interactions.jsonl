@@ -130,3 +130,5 @@
 {"id":"int-f4d9b318","kind":"field_change","created_at":"2026-05-23T06:16:00.183479Z","actor":"Stephen Jennings","issue_id":"bad-juju-eii","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-9c8444e4","kind":"field_change","created_at":"2026-05-23T06:18:58.094441Z","actor":"Stephen Jennings","issue_id":"bad-juju-446","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-c9184c13","kind":"field_change","created_at":"2026-05-23T06:28:03.331989Z","actor":"Stephen Jennings","issue_id":"bad-juju-51u","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-acf23fdb","kind":"field_change","created_at":"2026-05-23T06:50:03.583454Z","actor":"Stephen Jennings","issue_id":"bad-juju-qv3","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-15a2299b","kind":"field_change","created_at":"2026-05-23T06:50:03.773806Z","actor":"Stephen Jennings","issue_id":"bad-juju-6qw","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}

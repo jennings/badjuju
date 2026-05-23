@@ -509,22 +509,78 @@ fn lsp_execute_squash_with_cursor_form_resolves_file_and_revision() {
 }
 
 #[test]
-fn lsp_execute_squash_string_args_return_error() {
-    // T19: squash/unsquash no longer accept the legacy [file_str, rev_str]
-    // form. A string arg where cursor-form is expected must surface as a
-    // clear error rather than silently doing the wrong thing.
+fn lsp_execute_squash_string_args_succeed() {
+    // squash accepts the legacy `[file_str, revision_str]` form so Neovim
+    // CLI users can run `:JJSquash <file> @`. Setup: parent has readme.txt,
+    // working copy modifies it; squash @ → parent moves the change away.
     let dir = tempfile::tempdir().unwrap();
     init_jj_repo(dir.path());
+    std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "parent"])
+        .current_dir(dir.path())
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new"])
+        .current_dir(dir.path())
+        .output()
+        .expect("new failed");
+    std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let resp =
+        session.execute_command_with_args("badjuju.squash", serde_json::json!(["readme.txt", "@"]));
+    assert!(
+        resp.get("error").is_none(),
+        "squash with string args returned error: {resp}"
+    );
+    let new_status_uri = resp["result"].as_str().unwrap();
+    let new_status = read_file(new_status_uri);
+    assert!(new_status.contains("STATUS:"));
+    assert!(
+        !new_status.contains("M readme.txt"),
+        "expected readme.txt squashed away:\n{new_status}"
+    );
+}
+
+#[test]
+fn lsp_execute_unsquash_string_args_succeed() {
+    // unsquash @- moves a file from the parent down into @ (its only child).
+    // Setup: parent has readme.txt, @ is an empty child of parent.
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "parent"])
+        .current_dir(dir.path())
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new"])
+        .current_dir(dir.path())
+        .output()
+        .expect("new failed");
 
     let root_uri = format!("file://{}", dir.path().display());
     let mut session = LspSession::start(dir.path());
     session.initialize(&root_uri);
 
     let resp = session
-        .execute_command_with_args("badjuju.squash", serde_json::json!(["readme.txt", "@"]));
+        .execute_command_with_args("badjuju.unsquash", serde_json::json!(["readme.txt", "@-"]));
     assert!(
-        resp.get("error").is_some(),
-        "expected error for string args to squash, got: {resp}"
+        resp.get("error").is_none(),
+        "unsquash with string args returned error: {resp}"
+    );
+    let new_status_uri = resp["result"].as_str().unwrap();
+    let new_status = read_file(new_status_uri);
+    assert!(new_status.contains("STATUS:"));
+    assert!(
+        new_status.contains("readme.txt"),
+        "expected readme.txt in working copy after unsquash:\n{new_status}"
     );
 }
 
