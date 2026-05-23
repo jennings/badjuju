@@ -25,31 +25,9 @@ local STATUS_MAPS = {
   { 'a', 'JJAbandon',    'badjuju: abandon revision' },
 }
 
---- Resolve the revision under the cursor on the current jujutsu buffer.
---- - status: returns the cursor's commit, defaulting to `@` (working copy)
----   when there is no commit context (matches find_revision_for_line).
---- - log: returns the cursor's commit. Returns nil if the cursor isn't on or
----   below a commit header line; the caller should notify and bail.
----
---- Used by hotkey handlers that still need the resolved revision string
---- client-side (rebase / bookmark prompts that branch on whether a commit was
---- found). Other revision-scoped hotkeys ship the cursor straight to the
---- server via [[cursor_arg]] instead.
----@param buffer 'status'|'log'
----@return string?
-local function revision_at_cursor(buffer)
-  local parse = require('badjuju.parse')
-  local cursor_line = vim.api.nvim_win_get_cursor(0)[1] - 1 -- 0-indexed
-  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-  if buffer == 'log' then
-    return parse.find_log_revision(lines, cursor_line)
-  end
-  return parse.find_revision_for_line(lines, cursor_line)
-end
-
 --- Build a `{cursor = {uri, line}}` argument the server can resolve to a
---- revision on the current jujutsu buffer. Read from the current window's
---- cursor.
+--- revision (or file) on the current jujutsu buffer. Read from the current
+--- window's cursor.
 ---@return table
 local function cursor_arg()
   local name = vim.api.nvim_buf_get_name(0)
@@ -185,25 +163,28 @@ function M.setup_for_buffer(bufnr)
   local name = vim.api.nvim_buf_get_name(bufnr)
 
   if name:match('/%.jj/badjuju/status%.jujutsu$') then
-    -- Shared helpers used by both profiles.
+    -- Shared helpers used by both profiles. Both send a cursor-form arg so
+    -- the server resolves the revision; create/move on a non-commit line
+    -- surfaces a server-side error rather than the old client-side check.
     local function status_bookmark()
-      local revision = revision_at_cursor('status') or '@'
+      local arg = cursor_arg()
       local ACTIONS = { 'create', 'move', 'delete', 'track', 'forget' }
       vim.ui.select(ACTIONS, { prompt = 'jj bookmark: ' }, function(sub_action)
         if not sub_action then return end
         local prompt = sub_action == 'track' and 'Bookmark (e.g. main@origin): ' or 'Bookmark name: '
         vim.ui.input({ prompt = prompt }, function(bname)
           if not bname or bname == '' then return end
-          local rev = (sub_action == 'create' or sub_action == 'move') and revision or ''
+          local rev = (sub_action == 'create' or sub_action == 'move') and arg or ''
           require('badjuju').execute('badjuju.bookmark', { sub_action, bname, rev })
         end)
       end)
     end
     local function status_rebase()
-      local revision = revision_at_cursor('status')
-      local dest = vim.fn.input('Rebase to: ')
-      if dest == '' then return end
-      require('badjuju').execute('badjuju.rebase', { revision or '@', dest })
+      local arg = cursor_arg()
+      vim.ui.input({ prompt = 'Rebase to: ' }, function(dest)
+        if not dest or dest == '' then return end
+        require('badjuju').execute('badjuju.rebase', { arg, dest })
+      end)
     end
 
     if profile == 'vim' then
@@ -256,32 +237,27 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'A', vim.lsp.buf.code_action, 'badjuju: code actions menu')
     end
   elseif name:match('/%.jj/badjuju/log%.jujutsu$') then
+    -- Both helpers send cursor-form args; the server returns an LSP error if
+    -- the cursor isn't on a commit (surfaced via badjuju.execute's error path).
     local function log_bookmark()
-      local revision = revision_at_cursor('log')
+      local arg = cursor_arg()
       local ACTIONS = { 'create', 'move', 'delete', 'track', 'forget' }
       vim.ui.select(ACTIONS, { prompt = 'jj bookmark: ' }, function(sub_action)
         if not sub_action then return end
-        if not revision and (sub_action == 'create' or sub_action == 'move') then
-          vim.notify('bookmark ' .. sub_action .. ': place cursor on a commit line', vim.log.levels.INFO)
-          return
-        end
         local prompt = sub_action == 'track' and 'Bookmark (e.g. main@origin): ' or 'Bookmark name: '
         vim.ui.input({ prompt = prompt }, function(bname)
           if not bname or bname == '' then return end
-          local rev = (sub_action == 'create' or sub_action == 'move') and (revision or '@') or ''
+          local rev = (sub_action == 'create' or sub_action == 'move') and arg or ''
           require('badjuju').execute('badjuju.bookmark', { sub_action, bname, rev })
         end)
       end)
     end
     local function log_rebase()
-      local revision = revision_at_cursor('log')
-      if not revision then
-        vim.notify('rebase: place cursor on a commit line', vim.log.levels.INFO)
-        return
-      end
-      local dest = vim.fn.input('Rebase to: ')
-      if dest == '' then return end
-      require('badjuju').execute('badjuju.rebase', { revision, dest })
+      local arg = cursor_arg()
+      vim.ui.input({ prompt = 'Rebase to: ' }, function(dest)
+        if not dest or dest == '' then return end
+        require('badjuju').execute('badjuju.rebase', { arg, dest })
+      end)
     end
 
     if profile == 'vim' then

@@ -14,22 +14,21 @@ local function is_jujutsu_buffer(bufnr)
   return vim.bo[bufnr or 0].filetype == 'jujutsu'
 end
 
---- When invoked from a status.jujutsu or log.jujutsu buffer, return the
---- revision of the commit under the cursor (so :JJNew creates the new change
---- as a child of THAT commit). Returns nil from any other buffer or when the
---- cursor in a log buffer isn't on a commit line — callers fall back to the
---- server's default of creating a child of @.
-local function new_parent_at_cursor()
+--- When invoked from a status.jujutsu or log.jujutsu buffer, return a
+--- cursor-form argument the server can resolve to the commit under the
+--- cursor (so :JJNew creates the new change as a child of THAT commit).
+--- Returns nil from any other buffer; callers fall back to the server's
+--- default of creating a child of @.
+local function new_parent_cursor_arg()
   local name = vim.api.nvim_buf_get_name(0)
-  local cursor_line = vim.api.nvim_win_get_cursor(0)[1] - 1
-  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-  local parse = require('badjuju.parse')
-  if name:match('/%.jj/badjuju/status%.jujutsu$') then
-    return parse.find_revision_for_line(lines, cursor_line)
-  elseif name:match('/%.jj/badjuju/log%.jujutsu$') then
-    return parse.find_log_revision(lines, cursor_line)
+  if
+    not name:match('/%.jj/badjuju/status%.jujutsu$')
+    and not name:match('/%.jj/badjuju/log%.jujutsu$')
+  then
+    return nil
   end
-  return nil
+  local cursor_line = vim.api.nvim_win_get_cursor(0)[1] - 1
+  return { cursor = { uri = vim.uri_from_fname(name), line = cursor_line } }
 end
 
 local function cmd(name, opts, fn)
@@ -58,8 +57,8 @@ function M.register_all()
   end)
 
   cmd('JJNew', {}, function()
-    local parent = new_parent_at_cursor()
-    badjuju.execute('badjuju.new', parent and { parent } or {})
+    local arg = new_parent_cursor_arg()
+    badjuju.execute('badjuju.new', arg and { arg } or {})
   end)
 
   cmd('JJRefresh', {}, function()
