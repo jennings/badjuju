@@ -110,6 +110,34 @@ impl LspSession {
         );
         resp["result"].as_str().unwrap().to_string()
     }
+
+    fn execute_command_with_args(
+        &mut self,
+        command: &str,
+        arguments: serde_json::Value,
+    ) -> serde_json::Value {
+        self.request(
+            "workspace/executeCommand",
+            serde_json::json!({
+                "command": command,
+                "arguments": arguments,
+            }),
+        )
+    }
+
+    fn did_open(&mut self, uri: &str, language_id: &str, text: &str) {
+        self.notify(
+            "textDocument/didOpen",
+            serde_json::json!({
+                "textDocument": {
+                    "uri": uri,
+                    "languageId": language_id,
+                    "version": 1,
+                    "text": text,
+                }
+            }),
+        );
+    }
 }
 
 impl Drop for LspSession {
@@ -191,4 +219,100 @@ fn lsp_execute_new_creates_change_and_returns_status_uri() {
     assert!(uri.starts_with("file://"), "unexpected URI: {uri}");
     let content = read_file(&uri);
     assert!(content.contains("STATUS:"));
+}
+
+/// Find the 0-indexed line in `content` that starts with one of the commit
+/// graph chars and parse out the change id (the first ASCII-lowercase word).
+fn first_commit_line(content: &str) -> Option<(usize, String)> {
+    for (i, line) in content.lines().enumerate() {
+        let Some(first) = line.chars().next() else {
+            continue;
+        };
+        if !matches!(first, '@' | '○' | '●' | '◆' | '*') {
+            continue;
+        }
+        let rest = line[first.len_utf8()..].trim_start();
+        let id: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_lowercase())
+            .collect();
+        if !id.is_empty() {
+            return Some((i, id));
+        }
+    }
+    None
+}
+
+#[test]
+fn lsp_execute_describe_with_cursor_form_resolves_revision_from_log() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let log_uri = session.execute_command("badjuju.log");
+    let log_content = read_file(&log_uri);
+    let (line, change_id) = first_commit_line(&log_content)
+        .unwrap_or_else(|| panic!("no commit line found in log buffer:\n{log_content}"));
+
+    session.did_open(&log_uri, "jujutsu", &log_content);
+
+    let resp = session.execute_command_with_args(
+        "badjuju.describe",
+        serde_json::json!([{ "cursor": { "uri": log_uri, "line": line } }]),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "describe with cursor form returned error: {resp}"
+    );
+    let describe_uri = resp["result"].as_str().unwrap();
+    let describe_content = read_file(describe_uri);
+    assert!(describe_content.contains("JJ:"));
+    // describe.jujutsu should reference the resolved change id in its trailer.
+    assert!(
+        describe_content.contains(&change_id),
+        "describe.jujutsu should mention change_id `{change_id}`:\n{describe_content}"
+    );
+}
+
+#[test]
+fn lsp_execute_describe_legacy_string_form_still_works() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let resp = session.execute_command_with_args("badjuju.describe", serde_json::json!(["@"]));
+    assert!(
+        resp.get("error").is_none(),
+        "describe with legacy string form returned error: {resp}"
+    );
+    let uri = resp["result"].as_str().unwrap();
+    let content = read_file(uri);
+    assert!(content.contains("JJ:"));
+}
+
+#[test]
+fn lsp_execute_cursor_form_invalid_buffer_returns_error() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let resp = session.execute_command_with_args(
+        "badjuju.describe",
+        serde_json::json!([
+            { "cursor": { "uri": "file:///nope/other.txt", "line": 0 } }
+        ]),
+    );
+    assert!(
+        resp.get("error").is_some(),
+        "expected error for unsupported buffer URI, got: {resp}"
+    );
 }

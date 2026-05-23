@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::{Error, Result};
-use tower_lsp::lsp_types::*;
+use tower_lsp::lsp_types::{Url, *};
 use tower_lsp::{Client, LanguageServer};
 use tracing::{info, warn};
 
@@ -91,6 +91,15 @@ fn lsp_err(msg: impl ToString) -> Error {
     let mut err = Error::internal_error();
     err.message = msg.to_string().into();
     err
+}
+
+/// Read a `file://` URI from disk; returns `None` for non-`file:` schemes or
+/// missing files. Used as a fallback when a command's cursor-form arg refers
+/// to a buffer the server doesn't have cached in `State.documents`.
+fn read_uri_from_disk(uri: &str) -> Option<String> {
+    let url = Url::parse(uri).ok()?;
+    let path = url.to_file_path().ok()?;
+    std::fs::read_to_string(path).ok()
 }
 
 /// Parse the optional `commandReference` object passed in `initializationOptions`.
@@ -309,13 +318,16 @@ impl LanguageServer for Backend {
             })));
         }
 
-        let state = self.state.read().await;
-        let jj = state.jj().ok_or_else(Error::invalid_request)?;
-        let workspace = state
-            .workspace_root
-            .clone()
-            .ok_or_else(Error::invalid_request)?;
-        drop(state);
+        let (jj, workspace, documents) = {
+            let state = self.state.read().await;
+            let jj = state.jj().ok_or_else(Error::invalid_request)?;
+            let workspace = state
+                .workspace_root
+                .clone()
+                .ok_or_else(Error::invalid_request)?;
+            let documents = state.documents.clone();
+            (jj, workspace, documents)
+        };
 
         match params.command.as_str() {
             "badjuju.status" => {
@@ -332,30 +344,36 @@ impl LanguageServer for Backend {
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.describe" => {
-                let revision = params
-                    .arguments
-                    .first()
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let uri = commands::run_describe(&jj, &workspace, revision).map_err(lsp_err)?;
+                let revision = commands::resolve_revision_arg(params.arguments.first(), |uri| {
+                    documents
+                        .get(uri)
+                        .cloned()
+                        .or_else(|| read_uri_from_disk(uri))
+                })
+                .map_err(lsp_err)?;
+                let uri = commands::run_describe(&jj, &workspace, &revision).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.diff" => {
-                let revision = params
-                    .arguments
-                    .first()
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let uri = commands::run_diff(&jj, &workspace, revision).map_err(lsp_err)?;
+                let revision = commands::resolve_revision_arg(params.arguments.first(), |uri| {
+                    documents
+                        .get(uri)
+                        .cloned()
+                        .or_else(|| read_uri_from_disk(uri))
+                })
+                .map_err(lsp_err)?;
+                let uri = commands::run_diff(&jj, &workspace, &revision).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.new" => {
-                let parent = params
-                    .arguments
-                    .first()
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let uri = commands::run_new(&jj, &workspace, parent).map_err(lsp_err)?;
+                let parent = commands::resolve_revision_arg(params.arguments.first(), |uri| {
+                    documents
+                        .get(uri)
+                        .cloned()
+                        .or_else(|| read_uri_from_disk(uri))
+                })
+                .map_err(lsp_err)?;
+                let uri = commands::run_new(&jj, &workspace, &parent).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.next" => {
@@ -423,21 +441,25 @@ impl LanguageServer for Backend {
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.abandon" => {
-                let revision = params
-                    .arguments
-                    .first()
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let uri = commands::run_abandon(&jj, &workspace, revision).map_err(lsp_err)?;
+                let revision = commands::resolve_revision_arg(params.arguments.first(), |uri| {
+                    documents
+                        .get(uri)
+                        .cloned()
+                        .or_else(|| read_uri_from_disk(uri))
+                })
+                .map_err(lsp_err)?;
+                let uri = commands::run_abandon(&jj, &workspace, &revision).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.edit" => {
-                let revision = params
-                    .arguments
-                    .first()
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let uri = commands::run_edit(&jj, &workspace, revision).map_err(lsp_err)?;
+                let revision = commands::resolve_revision_arg(params.arguments.first(), |uri| {
+                    documents
+                        .get(uri)
+                        .cloned()
+                        .or_else(|| read_uri_from_disk(uri))
+                })
+                .map_err(lsp_err)?;
+                let uri = commands::run_edit(&jj, &workspace, &revision).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.fetch" => {
@@ -455,17 +477,19 @@ impl LanguageServer for Backend {
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.rebase" => {
-                let source = params
-                    .arguments
-                    .first()
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let source = commands::resolve_revision_arg(params.arguments.first(), |uri| {
+                    documents
+                        .get(uri)
+                        .cloned()
+                        .or_else(|| read_uri_from_disk(uri))
+                })
+                .map_err(lsp_err)?;
                 let dest = params
                     .arguments
                     .get(1)
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let uri = commands::run_rebase(&jj, &workspace, source, dest).map_err(lsp_err)?;
+                let uri = commands::run_rebase(&jj, &workspace, &source, dest).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.bookmark" => {
@@ -479,12 +503,14 @@ impl LanguageServer for Backend {
                     .get(1)
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let revision = params
-                    .arguments
-                    .get(2)
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let uri = commands::run_bookmark(&jj, &workspace, sub_action, name, revision)
+                let revision = commands::resolve_revision_arg(params.arguments.get(2), |uri| {
+                    documents
+                        .get(uri)
+                        .cloned()
+                        .or_else(|| read_uri_from_disk(uri))
+                })
+                .map_err(lsp_err)?;
+                let uri = commands::run_bookmark(&jj, &workspace, sub_action, name, &revision)
                     .map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }

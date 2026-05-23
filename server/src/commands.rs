@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::Url;
 
+use crate::cursor::{self, BufferKind};
 use crate::jj::{Jj, JjError};
 use crate::keymap::{self, KeymapProfile};
 
@@ -674,6 +675,133 @@ pub enum CommandError {
     Jj(#[from] JjError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+// --- Cursor-form argument resolution ----------------------------------------
+
+/// Error returned when a cursor-form command argument cannot be resolved.
+#[derive(Debug, thiserror::Error)]
+pub enum CursorResolveError {
+    #[error("invalid cursor argument shape; expected string or {{cursor:{{uri,line}}}}")]
+    InvalidArg,
+    #[error("unsupported buffer URI for cursor argument: {0}")]
+    UnsupportedBuffer(String),
+    #[error("document content not available for {0}")]
+    DocNotFound(String),
+    #[error("no revision at cursor position")]
+    NoRevisionAtCursor,
+    #[error("no file at cursor position")]
+    NoFileAtCursor,
+    #[error("no log shortcut at cursor position")]
+    NoShortcutAtCursor,
+}
+
+/// Parsed `{cursor: {uri, line}}` command argument.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CursorPos {
+    pub uri: String,
+    pub line: usize,
+}
+
+/// Extract a `{cursor: {uri, line}}` object from a single argument value.
+///
+/// Returns `Ok(None)` for string / null / missing values so callers can fall
+/// through to the legacy string-form code path. Returns `Err(InvalidArg)` for
+/// objects that look cursor-shaped but are malformed.
+pub fn parse_cursor_arg(
+    arg: Option<&serde_json::Value>,
+) -> std::result::Result<Option<CursorPos>, CursorResolveError> {
+    let Some(v) = arg else {
+        return Ok(None);
+    };
+    if v.is_null() || v.is_string() {
+        return Ok(None);
+    }
+    let cursor = v.get("cursor").ok_or(CursorResolveError::InvalidArg)?;
+    let uri = cursor
+        .get("uri")
+        .and_then(|x| x.as_str())
+        .ok_or(CursorResolveError::InvalidArg)?
+        .to_string();
+    let line = cursor
+        .get("line")
+        .and_then(|x| x.as_u64())
+        .ok_or(CursorResolveError::InvalidArg)? as usize;
+    Ok(Some(CursorPos { uri, line }))
+}
+
+/// Resolve a revision argument that may be either a legacy string form or a
+/// cursor-form object. `doc_lookup(uri)` should return the buffer's text —
+/// callers typically check `State.documents` then fall back to reading disk.
+pub fn resolve_revision_arg<F>(
+    arg: Option<&serde_json::Value>,
+    doc_lookup: F,
+) -> std::result::Result<String, CursorResolveError>
+where
+    F: FnOnce(&str) -> Option<String>,
+{
+    if let Some(s) = arg.and_then(|v| v.as_str()) {
+        return Ok(s.to_string());
+    }
+    let Some(cp) = parse_cursor_arg(arg)? else {
+        return Ok(String::new());
+    };
+    let kind = BufferKind::from_uri(&cp.uri)
+        .ok_or_else(|| CursorResolveError::UnsupportedBuffer(cp.uri.clone()))?;
+    let content =
+        doc_lookup(&cp.uri).ok_or_else(|| CursorResolveError::DocNotFound(cp.uri.clone()))?;
+    cursor::revision_at_line(&content, cp.line, kind).ok_or(CursorResolveError::NoRevisionAtCursor)
+}
+
+/// Resolve both file and revision from a single cursor-form arg (used by
+/// file-scoped commands like squash/unsquash).
+///
+/// If `arg[0]` is a string, this returns `Ok(None)` — the caller falls through
+/// to the legacy `[file, revision]` form. If it's a cursor-form object, both
+/// the file and revision are resolved from the same line of `status.jujutsu`.
+pub fn resolve_file_and_revision_arg<F>(
+    arg: Option<&serde_json::Value>,
+    doc_lookup: F,
+) -> std::result::Result<Option<(String, String)>, CursorResolveError>
+where
+    F: FnOnce(&str) -> Option<String>,
+{
+    let Some(cp) = parse_cursor_arg(arg)? else {
+        return Ok(None);
+    };
+    let kind = BufferKind::from_uri(&cp.uri)
+        .ok_or_else(|| CursorResolveError::UnsupportedBuffer(cp.uri.clone()))?;
+    let content =
+        doc_lookup(&cp.uri).ok_or_else(|| CursorResolveError::DocNotFound(cp.uri.clone()))?;
+    let file = cursor::file_at_line(&content, cp.line).ok_or(CursorResolveError::NoFileAtCursor)?;
+    let revision = cursor::revision_at_line(&content, cp.line, kind)
+        .ok_or(CursorResolveError::NoRevisionAtCursor)?;
+    Ok(Some((file, revision)))
+}
+
+/// Resolve a log-shortcut revset from a cursor-form arg pointing at a
+/// `JJ: <Label>: <revset>` line in `log.jujutsu`.
+///
+/// Returns `Ok(None)` for non-cursor args (the caller falls through to the
+/// legacy `[revset_string]` form).
+pub fn resolve_log_shortcut_arg<F>(
+    arg: Option<&serde_json::Value>,
+    doc_lookup: F,
+) -> std::result::Result<Option<String>, CursorResolveError>
+where
+    F: FnOnce(&str) -> Option<String>,
+{
+    let Some(cp) = parse_cursor_arg(arg)? else {
+        return Ok(None);
+    };
+    if BufferKind::from_uri(&cp.uri) != Some(BufferKind::Log) {
+        return Err(CursorResolveError::UnsupportedBuffer(cp.uri));
+    }
+    let content =
+        doc_lookup(&cp.uri).ok_or_else(|| CursorResolveError::DocNotFound(cp.uri.clone()))?;
+    let shortcut = cursor::log_shortcut_at_line(&content, cp.line)
+        .ok_or(CursorResolveError::NoShortcutAtCursor)?;
+    Ok(Some(shortcut.revset))
 }
 
 #[cfg(test)]
@@ -1928,5 +2056,147 @@ mod tests {
             content.starts_with("STATUS:"),
             "expected STATUS: header, got:\n{content}"
         );
+    }
+
+    // --- Cursor-arg resolver tests ----------------------------------------
+
+    fn no_docs(_uri: &str) -> Option<String> {
+        None
+    }
+
+    #[test]
+    fn resolve_revision_arg_no_arg_returns_empty() {
+        let r = resolve_revision_arg(None, no_docs).unwrap();
+        assert_eq!(r, "");
+    }
+
+    #[test]
+    fn resolve_revision_arg_string_arg_passes_through() {
+        let v = serde_json::json!("abc123");
+        let r = resolve_revision_arg(Some(&v), no_docs).unwrap();
+        assert_eq!(r, "abc123");
+    }
+
+    #[test]
+    fn resolve_revision_arg_null_arg_returns_empty() {
+        let v = serde_json::Value::Null;
+        let r = resolve_revision_arg(Some(&v), no_docs).unwrap();
+        assert_eq!(r, "");
+    }
+
+    #[test]
+    fn resolve_revision_arg_cursor_form_resolves_log_commit() {
+        let log = ["REVSET: @", "", "OUTPUT:", "", "@  qpvuntsm 1234abcd"].join("\n");
+        let arg = serde_json::json!({
+            "cursor": { "uri": "file:///x/log.jujutsu", "line": 4 }
+        });
+        let r = resolve_revision_arg(Some(&arg), |uri| {
+            (uri == "file:///x/log.jujutsu").then(|| log.clone())
+        })
+        .unwrap();
+        assert_eq!(r, "qpvuntsm");
+    }
+
+    #[test]
+    fn resolve_revision_arg_cursor_form_invalid_shape_errors() {
+        let arg = serde_json::json!({ "cursor": { "uri": "file:///x/log.jujutsu" } });
+        let err = resolve_revision_arg(Some(&arg), no_docs).unwrap_err();
+        assert!(matches!(err, CursorResolveError::InvalidArg));
+    }
+
+    #[test]
+    fn resolve_revision_arg_cursor_form_unsupported_buffer_errors() {
+        let arg = serde_json::json!({
+            "cursor": { "uri": "file:///x/other.txt", "line": 0 }
+        });
+        let err = resolve_revision_arg(Some(&arg), |_| Some(String::new())).unwrap_err();
+        assert!(matches!(err, CursorResolveError::UnsupportedBuffer(_)));
+    }
+
+    #[test]
+    fn resolve_revision_arg_cursor_form_doc_missing_errors() {
+        let arg = serde_json::json!({
+            "cursor": { "uri": "file:///x/log.jujutsu", "line": 0 }
+        });
+        let err = resolve_revision_arg(Some(&arg), no_docs).unwrap_err();
+        assert!(matches!(err, CursorResolveError::DocNotFound(_)));
+    }
+
+    #[test]
+    fn resolve_revision_arg_cursor_form_no_commit_errors() {
+        let log = "REVSET: @\n".to_string();
+        let arg = serde_json::json!({
+            "cursor": { "uri": "file:///x/log.jujutsu", "line": 0 }
+        });
+        let err = resolve_revision_arg(Some(&arg), |_| Some(log.clone())).unwrap_err();
+        assert!(matches!(err, CursorResolveError::NoRevisionAtCursor));
+    }
+
+    #[test]
+    fn resolve_file_and_revision_arg_string_returns_none() {
+        let v = serde_json::json!("foo.rs");
+        let r = resolve_file_and_revision_arg(Some(&v), no_docs).unwrap();
+        assert_eq!(r, None);
+    }
+
+    #[test]
+    fn resolve_file_and_revision_arg_cursor_form_resolves_both() {
+        let status = [
+            "STATUS:",
+            "",
+            "M src/main.rs",
+            "",
+            "STACK: @",
+            "",
+            "@  qpvuntsm 1234abcd",
+        ]
+        .join("\n");
+        let arg = serde_json::json!({
+            "cursor": { "uri": "file:///x/status.jujutsu", "line": 2 }
+        });
+        let (file, rev) = resolve_file_and_revision_arg(Some(&arg), |_| Some(status.clone()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(file, "src/main.rs");
+        // File lines belong to the working copy → "@"
+        assert_eq!(rev, "@");
+    }
+
+    #[test]
+    fn resolve_log_shortcut_arg_string_returns_none() {
+        let v = serde_json::json!("foo");
+        let r = resolve_log_shortcut_arg(Some(&v), no_docs).unwrap();
+        assert_eq!(r, None);
+    }
+
+    #[test]
+    fn resolve_log_shortcut_arg_cursor_form_resolves_revset() {
+        let log = ["REVSET: @", "JJ: Mutable: ancestors(@)", ""].join("\n");
+        let arg = serde_json::json!({
+            "cursor": { "uri": "file:///x/log.jujutsu", "line": 1 }
+        });
+        let r = resolve_log_shortcut_arg(Some(&arg), |_| Some(log.clone()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(r, "ancestors(@)");
+    }
+
+    #[test]
+    fn resolve_log_shortcut_arg_non_shortcut_line_errors() {
+        let log = ["REVSET: @", "OUTPUT:", "@  qpvuntsm 1234"].join("\n");
+        let arg = serde_json::json!({
+            "cursor": { "uri": "file:///x/log.jujutsu", "line": 2 }
+        });
+        let err = resolve_log_shortcut_arg(Some(&arg), |_| Some(log.clone())).unwrap_err();
+        assert!(matches!(err, CursorResolveError::NoShortcutAtCursor));
+    }
+
+    #[test]
+    fn resolve_log_shortcut_arg_non_log_buffer_errors() {
+        let arg = serde_json::json!({
+            "cursor": { "uri": "file:///x/status.jujutsu", "line": 0 }
+        });
+        let err = resolve_log_shortcut_arg(Some(&arg), |_| Some(String::new())).unwrap_err();
+        assert!(matches!(err, CursorResolveError::UnsupportedBuffer(_)));
     }
 }
