@@ -762,6 +762,59 @@ fn lsp_code_action_on_log_non_commit_line_returns_empty() {
     );
 }
 
+/// Find the 0-indexed line + label of the first `JJ: <Label>: <revset>`
+/// shortcut line in the log buffer.
+fn first_log_shortcut_with_label(content: &str) -> Option<(usize, String)> {
+    for (i, line) in content.lines().enumerate() {
+        let Some(rest) = line.strip_prefix("JJ:") else {
+            continue;
+        };
+        let after = rest.trim_start();
+        let Some(colon) = after.find(':') else {
+            continue;
+        };
+        let label = after[..colon].trim();
+        let revset = after[colon + 1..].trim();
+        if !revset.is_empty() && !label.is_empty() {
+            return Some((i, label.to_string()));
+        }
+    }
+    None
+}
+
+#[test]
+fn lsp_code_action_on_log_shortcut_line_returns_apply_revset() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let log_uri = session.execute_command("badjuju.log");
+    let log_content = read_file(&log_uri);
+    let (shortcut_line, label) = first_log_shortcut_with_label(&log_content)
+        .unwrap_or_else(|| panic!("no log shortcut line:\n{log_content}"));
+
+    session.did_open(&log_uri, "jujutsu", &log_content);
+
+    let actions = code_action_at(&mut session, &log_uri, shortcut_line);
+    assert_eq!(actions.len(), 1, "expected one action, got: {actions:?}");
+    let action = &actions[0];
+    let title = action["title"].as_str().expect("missing title");
+    assert!(
+        title.starts_with("Apply revset:") && title.contains(&label),
+        "title `{title}` should mention label `{label}`"
+    );
+    let cmd = &action["command"];
+    assert_eq!(cmd["command"].as_str(), Some("badjuju.log"));
+    let args = cmd["arguments"].as_array().expect("missing arguments");
+    assert_eq!(args.len(), 1);
+    let cursor = &args[0]["cursor"];
+    assert_eq!(cursor["uri"].as_str(), Some(log_uri.as_str()));
+    assert_eq!(cursor["line"].as_u64(), Some(shortcut_line as u64));
+}
+
 #[test]
 fn lsp_execute_cursor_form_invalid_buffer_returns_error() {
     let dir = tempfile::tempdir().unwrap();

@@ -161,6 +161,23 @@ fn commit_actions(revision: &str) -> Vec<CodeActionOrCommand> {
     ]
 }
 
+/// Build the single "Apply revset" code action for a log-buffer shortcut line.
+/// The command ships a cursor-form arg so the server re-reads the shortcut
+/// when the user picks the action (stable across buffer regenerations).
+fn log_shortcut_action(uri: &str, line: usize, label: &str) -> CodeActionOrCommand {
+    let cursor_arg = serde_json::json!({ "cursor": { "uri": uri, "line": line } });
+    CodeActionOrCommand::CodeAction(CodeAction {
+        title: format!("Apply revset: {label}"),
+        kind: Some(CodeActionKind::EMPTY),
+        command: Some(Command {
+            title: String::new(),
+            command: "badjuju.log".to_string(),
+            arguments: Some(vec![cursor_arg]),
+        }),
+        ..Default::default()
+    })
+}
+
 /// Build the two squash/unsquash code actions offered for a status-buffer file
 /// line. Both commands ship a cursor-form arg so the server resolves the file
 /// and revision fresh when the user picks the action (stable across buffer
@@ -304,7 +321,12 @@ impl LanguageServer for Backend {
 
         match kind {
             BufferKind::Log => {
-                if let Some(revision) = cursor::revision_at_line(&content, line, kind) {
+                // Try the shortcut form first — shortcut lines start with
+                // `JJ:` and don't match commit-header detection, so the order
+                // is for clarity rather than correctness.
+                if let Some(shortcut) = cursor::log_shortcut_at_line(&content, line) {
+                    actions.push(log_shortcut_action(&uri, line, &shortcut.label));
+                } else if let Some(revision) = cursor::revision_at_line(&content, line, kind) {
                     actions.extend(commit_actions(&revision));
                 }
             }
