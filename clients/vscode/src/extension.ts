@@ -363,16 +363,19 @@ export async function activate(context: ExtensionContext) {
       const cursorLine = editor.selection.active.line;
       const cursorChar = editor.selection.active.character;
       const doc = editor.document;
-      const lineText = doc.lineAt(cursorLine).text;
-      const match = lineText.match(LOG_SHORTCUT_LINE_RE);
-      if (!match) return;
-      const revset = match[2].trim();
 
       const reloaded = waitForDocumentChange(doc, 1000);
-      await client.sendRequest("workspace/executeCommand", {
-        command: "badjuju.log",
-        arguments: [revset],
-      });
+      try {
+        await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.log",
+          arguments: [
+            { cursor: { uri: doc.uri.toString(), line: cursorLine } },
+          ],
+        });
+      } catch (e) {
+        window.showInformationMessage(`log: ${(e as Error).message}`);
+        return;
+      }
       await reloaded;
 
       const restoredLine = Math.min(cursorLine, doc.lineCount - 1);
