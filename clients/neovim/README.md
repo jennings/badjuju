@@ -154,19 +154,19 @@ attaches to buffers with filetype `jujutsu`.
 All commands send a `workspace/executeCommand` request to the running
 `jujutsu` LSP and open the returned file in the current window.
 
-| Command | Description |
-|---|---|
-| `:JJStatus` | Open `.jj/badjuju/status.jujutsu` |
-| `:JJLog [revset]` | Open `.jj/badjuju/log.jujutsu`; defaults to `@` |
-| `:JJDescribe [revision]` | Open the describe buffer for a revision (defaults to `@`) |
-| `:JJDiff [revision]` | Open `.jj/badjuju/diff.jujutsu` for a revision (defaults to `@`) |
-| `:JJNew` | Create a new change and refresh log |
-| `:JJRefresh` | Refresh the badjuju buffer at the cursor |
-| `:JJSquash [file] [revision]` | Squash a file into its parent (see `s` keymap below) |
-| `:JJUnsquash [file] [revision]` | Unsquash a file from parent into child (see `U` keymap below) |
-| `:JJToggleStat` | Toggle `--stat` rendering in log |
-| `:JJUndo` | Run `jj undo` and refresh |
-| `:JJAbandon [revision]` | Abandon a revision (defaults to `@`) |
+| Command                         | Description                                                      |
+| ------------------------------- | ---------------------------------------------------------------- |
+| `:JJStatus`                     | Open `.jj/badjuju/status.jujutsu`                                |
+| `:JJLog [revset]`               | Open `.jj/badjuju/log.jujutsu`; defaults to `@`                  |
+| `:JJDescribe [revision]`        | Open the describe buffer for a revision (defaults to `@`)        |
+| `:JJDiff [revision]`            | Open `.jj/badjuju/diff.jujutsu` for a revision (defaults to `@`) |
+| `:JJNew`                        | Create a new change and refresh log                              |
+| `:JJRefresh`                    | Refresh the badjuju buffer at the cursor                         |
+| `:JJSquash [file] [revision]`   | Squash a file into its parent (see `s` keymap below)             |
+| `:JJUnsquash [file] [revision]` | Unsquash a file from parent into child (see `U` keymap below)    |
+| `:JJToggleStat`                 | Toggle `--stat` rendering in log                                 |
+| `:JJUndo`                       | Run `jj undo` and refresh                                        |
+| `:JJAbandon [revision]`         | Abandon a revision (defaults to `@`)                             |
 
 Commands auto-start the `jujutsu` LSP for the current workspace if it isn't
 already running, so `:JJStatus` works from any buffer inside a jj workspace
@@ -176,41 +176,130 @@ reports an error.
 ## Keymaps
 
 The plugin installs buffer-local normal-mode maps on the generated
-`status.jujutsu` and `log.jujutsu` buffers. They mirror the keys advertised
-in the COMMAND REFERENCE block at the bottom of each buffer.
+`status.jujutsu`, `log.jujutsu`, `diff.jujutsu`, and `describe.jujutsu`
+buffers. The active profile is set via `keymapProfile` in `setup()`.
 
-### `status.jujutsu`
+Two built-in profiles are available. The **default (magit-style) profile is
+active whenever `keymapProfile` is unset, `nil`, or `"magit"`**.
 
-| Key | Action |
-|---|---|
-| `g`, `r` | refresh |
-| `n` | `:JJNew` — create a new change |
-| `l` | `:JJLog` — open log |
-| `d` | describe the commit under the cursor in a split (defaults to `@`) |
-| `D` | open the diff for the commit under the cursor in a split (defaults to `@`) |
-| `s` | squash the file under the cursor into its parent |
-| `U` | unsquash the file under the cursor from parent into child |
-| `a` | abandon the commit under the cursor (defaults to `@`) |
-| `u` | `:JJUndo` — revert the last operation |
-| `=` | toggle `--stat` rendering in the STACK section |
-| `q` | close the window |
+### Default profile — single-key bindings
 
-### `log.jujutsu`
+Inspired by Magit/Lazygit conventions.
 
-| Key | Action |
-|---|---|
-| `g`, `r` | refresh |
-| `d` | describe the commit under the cursor in a split |
-| `D` | open the diff for the commit under the cursor in a split |
-| `a` | abandon the commit under the cursor |
-| `<CR>` | apply the revset shortcut on the current line (no-op elsewhere) |
+#### `status.jujutsu`
 
-### `diff.jujutsu`
+| Key      | Action                                             |
+| -------- | -------------------------------------------------- |
+| `g`, `R` | Refresh                                            |
+| `n`      | New change (`:JJNew`)                              |
+| `L`      | Open log (`:JJLog`)                                |
+| `f`      | Git fetch                                          |
+| `p`      | Git push                                           |
+| `P`      | Git push --force-with-lease                        |
+| `e`      | Edit commit at cursor (move @)                     |
+| `b`      | Bookmark (create / move / delete / track / forget) |
+| `r`      | Rebase commit at cursor to destination             |
+| `d`      | Describe commit at cursor in a split               |
+| `D`      | Diff commit at cursor in a split                   |
+| `s`      | Squash file at cursor into parent                  |
+| `U`      | Unsquash file at cursor from parent into child     |
+| `a`      | Abandon commit at cursor                           |
+| `u`      | Undo (`:JJUndo`)                                   |
+| `=`      | Toggle `--stat` rendering in STACK section         |
+| `q`      | Close window                                       |
+| `?`      | Show key binding help                              |
 
-| Key | Action |
-|---|---|
-| `g`, `r` | refresh (re-runs `jj diff` for the same revision) |
-| `q` | close the window |
+#### `log.jujutsu`
+
+| Key      | Action                                                 |
+| -------- | ------------------------------------------------------ |
+| `g`, `R` | Refresh                                                |
+| `e`      | Edit commit at cursor (move @)                         |
+| `b`      | Bookmark                                               |
+| `r`      | Rebase commit at cursor to destination                 |
+| `d`      | Describe commit at cursor in a split                   |
+| `D`      | Diff commit at cursor in a split                       |
+| `a`      | Abandon commit at cursor                               |
+| `<CR>`   | Apply revset shortcut on cursor line (no-op elsewhere) |
+| `q`      | Close window                                           |
+| `?`      | Show key binding help                                  |
+#### `diff.jujutsu`
+
+| Key      | Action                                            |
+| -------- | ------------------------------------------------- |
+| `g`, `R` | Refresh (re-runs `jj diff` for the same revision) |
+| `q`      | Close window                                      |
+| `?`      | Show key binding help                             |
+
+#### `describe.jujutsu`
+
+| Key (mode)            | Action                           |
+| --------------------- | -------------------------------- |
+| `<C-c><C-c>` (normal) | Finalize commit (save and close) |
+| `<C-c><C-k>` (normal) | Abort (close without saving)     |
+| `<C-c>` (insert)      | Finalize commit (save and close) |
+| `?` (normal)          | Show key binding help            |
+
+---
+
+### `vim` profile — two-letter verb chords
+
+Enable with `keymapProfile = "vim"` in `setup()`. Inspired by Fugitive-style
+bindings; most actions use doubled letters (`nn`, `dd`, etc.) so single keys
+remain available for text navigation. A few unambiguous actions keep single
+keys.
+
+```lua
+require('badjuju').setup({ keymapProfile = 'vim' })
+```
+
+#### `status.jujutsu`
+
+| Key  | Action                                         |
+| ---- | ---------------------------------------------- |
+| `nn` | New change                                     |
+| `ll` | Open log                                       |
+| `ff` | Git fetch                                      |
+| `pp` | Git push                                       |
+| `PP` | Git push --force-with-lease                    |
+| `ee` | Edit commit at cursor (move @)                 |
+| `bb` | Bookmark                                       |
+| `rr` | Rebase commit at cursor to destination         |
+| `dd` | Describe commit at cursor in a split           |
+| `D`  | Diff commit at cursor in a split               |
+| `ss` | Squash file at cursor into parent              |
+| `uu` | Undo                                           |
+| `UU` | Unsquash file at cursor from parent into child |
+| `aa` | Abandon commit at cursor                       |
+| `=`  | Toggle `--stat` rendering in STACK section     |
+| `q`  | Close window                                   |
+| `?`  | Show key binding help                          |
+
+#### `log.jujutsu`
+
+| Key      | Action                                 |
+| -------- | -------------------------------------- |
+| `g`, `R` | Refresh                                |
+| `ee`     | Edit commit at cursor (move @)         |
+| `bb`     | Bookmark                               |
+| `rr`     | Rebase commit at cursor to destination |
+| `dd`     | Describe commit at cursor in a split   |
+| `D`      | Diff commit at cursor in a split       |
+| `aa`     | Abandon commit at cursor               |
+| `<CR>`   | Apply revset shortcut on cursor line   |
+| `q`      | Close window                           |
+| `?`      | Show key binding help                  |
+
+#### `diff.jujutsu` and `describe.jujutsu`
+
+Same bindings as the default profile (see above).
+
+---
+
+### `none` profile — no built-in keymaps
+
+Set `keymapProfile = "none"` in `setup()` to skip all hotkey registrations and
+define your own using the `:JJ*` commands listed above.
 
 ## Syntax highlighting (tree-sitter)
 
