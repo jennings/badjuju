@@ -247,6 +247,14 @@ function M.setup_for_buffer(bufnr)
     end
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
     nmap(bufnr, '?', function() show_help('status') end, 'badjuju: show help')
+    -- Open the LSP code-action menu for the current cursor line. Server emits
+    -- actions for commit headers (edit/abandon/describe/diff/new/rebase/bookmark)
+    -- and file lines (squash/unsquash).
+    if profile == 'vim' then
+      nmap(bufnr, '<leader>a', vim.lsp.buf.code_action, 'badjuju: code actions menu')
+    else
+      nmap(bufnr, 'A', vim.lsp.buf.code_action, 'badjuju: code actions menu')
+    end
   elseif name:match('/%.jj/badjuju/log%.jujutsu$') then
     local function log_bookmark()
       local revision = revision_at_cursor('log')
@@ -304,6 +312,11 @@ function M.setup_for_buffer(bufnr)
     end
     nmap(bufnr, '<CR>', apply_log_shortcut, 'badjuju: apply revset shortcut under cursor')
     nmap(bufnr, '?', function() show_help('log') end, 'badjuju: show help')
+    if profile == 'vim' then
+      nmap(bufnr, '<leader>a', vim.lsp.buf.code_action, 'badjuju: code actions menu')
+    else
+      nmap(bufnr, 'A', vim.lsp.buf.code_action, 'badjuju: code actions menu')
+    end
   elseif name:match('/%.jj/badjuju/diff%.jujutsu$') then
     nmap(bufnr, 'g', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
     nmap(bufnr, 'r', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')

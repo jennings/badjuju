@@ -4,3 +4,4 @@ end
 vim.g.loaded_badjuju = 1
 
 require('badjuju.commands').register_all()
+require('badjuju.client_commands').register()
