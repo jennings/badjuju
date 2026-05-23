@@ -535,6 +535,111 @@ fn lsp_code_action_returns_empty_list() {
     assert_eq!(result.as_array().unwrap().len(), 0);
 }
 
+/// Send a `textDocument/codeAction` for `uri` at `line` and return the array
+/// of returned `CodeAction` objects (or empty array on no actions).
+fn code_action_at(session: &mut LspSession, uri: &str, line: usize) -> Vec<serde_json::Value> {
+    let resp = session.request(
+        "textDocument/codeAction",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": line, "character": 0 },
+                "end":   { "line": line, "character": 0 }
+            },
+            "context": { "diagnostics": [] }
+        }),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "code action returned error: {resp}"
+    );
+    resp["result"].as_array().cloned().unwrap_or_default()
+}
+
+#[test]
+fn lsp_code_action_on_log_commit_line_returns_seven_actions() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    // Create a second commit so the log buffer has at least two commit lines.
+    Command::new("jj")
+        .args(["describe", "-m", "first"])
+        .current_dir(dir.path())
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new", "-m", "second"])
+        .current_dir(dir.path())
+        .output()
+        .expect("new failed");
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let log_uri = session.execute_command("badjuju.log");
+    let log_content = read_file(&log_uri);
+    let (commit_line, change_id) =
+        first_commit_line(&log_content).unwrap_or_else(|| panic!("no commit line:\n{log_content}"));
+
+    session.did_open(&log_uri, "jujutsu", &log_content);
+
+    let actions = code_action_at(&mut session, &log_uri, commit_line);
+    let expected: &[(&str, &str)] = &[
+        ("Edit commit", "badjuju.edit"),
+        ("Abandon commit", "badjuju.abandon"),
+        ("Describe commit", "badjuju.describe"),
+        ("Show diff for", "badjuju.diff"),
+        ("New child of", "badjuju.new"),
+        ("Rebase commit", "badjuju.client.rebasePrompt"),
+        ("Bookmark", "badjuju.client.bookmarkPrompt"),
+    ];
+    assert_eq!(
+        actions.len(),
+        expected.len(),
+        "expected {} actions, got {}: {actions:?}",
+        expected.len(),
+        actions.len()
+    );
+    for (action, (title_prefix, command_name)) in actions.iter().zip(expected) {
+        let title = action["title"].as_str().expect("missing title");
+        assert!(
+            title.starts_with(title_prefix),
+            "title `{title}` should start with `{title_prefix}`"
+        );
+        assert!(
+            title.contains(&change_id),
+            "title `{title}` should contain change_id `{change_id}`"
+        );
+        let cmd = &action["command"];
+        assert_eq!(cmd["command"].as_str(), Some(*command_name));
+        let args = cmd["arguments"].as_array().expect("missing arguments");
+        assert_eq!(args.len(), 1, "expected one argument");
+        assert_eq!(args[0].as_str(), Some(change_id.as_str()));
+    }
+}
+
+#[test]
+fn lsp_code_action_on_log_non_commit_line_returns_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let log_uri = session.execute_command("badjuju.log");
+    let log_content = read_file(&log_uri);
+    session.did_open(&log_uri, "jujutsu", &log_content);
+
+    // Line 0 is the REVSET: header — not a commit, no actions.
+    let actions = code_action_at(&mut session, &log_uri, 0);
+    assert!(
+        actions.is_empty(),
+        "expected no actions on REVSET line, got: {actions:?}"
+    );
+}
+
 #[test]
 fn lsp_execute_cursor_form_invalid_buffer_returns_error() {
     let dir = tempfile::tempdir().unwrap();

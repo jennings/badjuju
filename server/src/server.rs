@@ -8,6 +8,7 @@ use tower_lsp::{Client, LanguageServer};
 use tracing::{info, warn};
 
 use crate::commands::{self, CommandReference};
+use crate::cursor::{self, BufferKind};
 use crate::jj::Jj;
 use crate::keymap::{self, KeymapProfile};
 use crate::workspace::find_workspace_root;
@@ -125,6 +126,41 @@ fn resolve_file_scoped_args(
     Ok((file, revision))
 }
 
+/// Build the seven code actions offered for a commit line (log buffer commit
+/// headers; reused for status buffer commit headers in T7). Direct-action
+/// commands invoke server commands with a pre-resolved revision; prompt-needing
+/// commands invoke client-registered handlers (`badjuju.client.*Prompt`).
+fn commit_actions(revision: &str) -> Vec<CodeActionOrCommand> {
+    let arg = serde_json::Value::String(revision.to_string());
+    let make = |title: String, command: &str| -> CodeActionOrCommand {
+        CodeActionOrCommand::CodeAction(CodeAction {
+            title,
+            kind: Some(CodeActionKind::EMPTY),
+            command: Some(Command {
+                title: String::new(),
+                command: command.to_string(),
+                arguments: Some(vec![arg.clone()]),
+            }),
+            ..Default::default()
+        })
+    };
+    vec![
+        make(format!("Edit commit {revision}"), "badjuju.edit"),
+        make(format!("Abandon commit {revision}"), "badjuju.abandon"),
+        make(format!("Describe commit {revision}"), "badjuju.describe"),
+        make(format!("Show diff for {revision}"), "badjuju.diff"),
+        make(format!("New child of {revision}"), "badjuju.new"),
+        make(
+            format!("Rebase commit {revision}…"),
+            "badjuju.client.rebasePrompt",
+        ),
+        make(
+            format!("Bookmark {revision}…"),
+            "badjuju.client.bookmarkPrompt",
+        ),
+    ]
+}
+
 /// Parse the optional `commandReference` object passed in `initializationOptions`.
 /// Each of `status`, `log`, and `diff` is an optional string override. Missing
 /// or non-string values fall back to the profile-rendered defaults.
@@ -220,8 +256,35 @@ impl LanguageServer for Backend {
         })
     }
 
-    async fn code_action(&self, _params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
-        Ok(Some(vec![]))
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri.to_string();
+        let line = params.range.start.line as usize;
+
+        let Some(kind) = BufferKind::from_uri(&uri) else {
+            return Ok(Some(vec![]));
+        };
+
+        let content = {
+            let state = self.state.read().await;
+            state
+                .documents
+                .get(&uri)
+                .cloned()
+                .or_else(|| read_uri_from_disk(&uri))
+        };
+        let Some(content) = content else {
+            return Ok(Some(vec![]));
+        };
+
+        let mut actions: Vec<CodeActionOrCommand> = Vec::new();
+
+        if kind == BufferKind::Log
+            && let Some(revision) = cursor::revision_at_line(&content, line, kind)
+        {
+            actions.extend(commit_actions(&revision));
+        }
+
+        Ok(Some(actions))
     }
 
     async fn initialized(&self, _: InitializedParams) {
