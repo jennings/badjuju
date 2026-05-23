@@ -81,27 +81,17 @@ local LOG_MAPS = {
   { 'a', 'JJAbandon', 'badjuju: abandon revision' },
 }
 
---- Handle <CR> on a log.jujutsu buffer. If the cursor sits on a
---- `JJ: <label>: <revset>` shortcut line, re-run badjuju.log with that
---- revset and restore the cursor (row/col clamped to the new buffer). On
---- any other line, fall through to the default <CR> behavior.
+--- Handle <CR> on a log.jujutsu buffer. Ships the cursor position to the
+--- server which re-runs `badjuju.log` with the revset of any `JJ: <label>:
+--- <revset>` shortcut at that line. The cursor is restored (row/col clamped
+--- to the new buffer) after the buffer regenerates. If the cursor isn't on
+--- a shortcut line the server returns an LSP error which surfaces through
+--- the standard notification path.
 local function apply_log_shortcut()
-  local line = vim.api.nvim_get_current_line()
-  local _, revset = require('badjuju.log_shortcut').parse(line)
-  if not revset then
-    -- Pass the keypress through unchanged.
-    vim.api.nvim_feedkeys(
-      vim.api.nvim_replace_termcodes('<CR>', true, false, true),
-      'n',
-      false
-    )
-    return
-  end
-
   local win = vim.api.nvim_get_current_win()
   local saved = vim.api.nvim_win_get_cursor(win) -- {row (1-based), col}
 
-  require('badjuju').execute('badjuju.log', { revset }, {
+  require('badjuju').execute('badjuju.log', { cursor_arg() }, {
     after = function()
       if not vim.api.nvim_win_is_valid(win) then
         return

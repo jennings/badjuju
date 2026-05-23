@@ -195,6 +195,29 @@ describe('revision-scoped hotkeys send cursor-form', function()
     )
   end
 
+  it('log.jujutsu <CR> sends cursor-form for badjuju.log', function()
+    local captured, restore = capture_execute()
+    local buf = setup_buffer('.jj/badjuju/log.jujutsu', {
+      'REVSET: @',
+      'JJ: Mutable: ancestors(reachable(@, mutable()))',
+      '',
+      '@  qpvuntsm 1234abcd',
+    })
+    -- Cursor on the JJ: shortcut line (line 2, 1-indexed).
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+
+    local cb = find_callback(buf, '<CR>')
+    assert.is_not_nil(cb, 'expected callback for <CR>')
+    cb()
+    restore()
+
+    assert.are.equal(1, #captured)
+    assert.are.equal('badjuju.log', captured[1].command)
+    local arg = captured[1].args[1]
+    assert.are.equal(1, arg.cursor.line, 'cursor line is 0-indexed (row 2 -> 1)')
+    assert.is_truthy(arg.cursor.uri:match('/log%.jujutsu$'))
+  end)
+
   it('status.jujutsu e sends cursor-form for badjuju.edit', function()
     local captured, restore = capture_execute()
     local buf = setup_buffer('.jj/badjuju/status.jujutsu', {
