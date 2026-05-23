@@ -279,9 +279,10 @@ fn lsp_execute_describe_with_cursor_form_resolves_revision_from_log() {
 }
 
 #[test]
-fn lsp_execute_describe_string_arg_returns_error() {
-    // T19: revision-scoped commands no longer accept a literal string arg.
-    // A string where cursor-form is expected must surface as a clear error.
+fn lsp_execute_describe_string_arg_succeeds() {
+    // Revision-scoped commands accept a literal string arg so Neovim CLI user
+    // commands (`:JJDescribe @-`) and pre-resolved commit-line code actions
+    // can pass the revision directly.
     let dir = tempfile::tempdir().unwrap();
     init_jj_repo(dir.path());
 
@@ -291,13 +292,155 @@ fn lsp_execute_describe_string_arg_returns_error() {
 
     let resp = session.execute_command_with_args("badjuju.describe", serde_json::json!(["@"]));
     assert!(
-        resp.get("error").is_some(),
-        "expected error for string arg to describe, got: {resp}"
+        resp.get("error").is_none(),
+        "describe with string arg returned error: {resp}"
     );
-    let message = resp["error"]["message"].as_str().unwrap_or("");
+    let uri = resp["result"].as_str().unwrap();
+    let content = read_file(uri);
+    assert!(content.contains("JJ:"));
+}
+
+#[test]
+fn lsp_execute_edit_string_arg_succeeds() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    // Need a non-@ commit to edit.
+    Command::new("jj")
+        .args(["describe", "-m", "first"])
+        .current_dir(dir.path())
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new", "-m", "second"])
+        .current_dir(dir.path())
+        .output()
+        .expect("new failed");
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let resp = session.execute_command_with_args("badjuju.edit", serde_json::json!(["@-"]));
     assert!(
-        message.contains("cursor"),
-        "expected error to mention cursor form, got: {message}"
+        resp.get("error").is_none(),
+        "edit with string arg returned error: {resp}"
+    );
+    let uri = resp["result"].as_str().unwrap();
+    assert!(uri.starts_with("file://"));
+}
+
+#[test]
+fn lsp_execute_abandon_string_arg_succeeds() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    Command::new("jj")
+        .args(["describe", "-m", "first"])
+        .current_dir(dir.path())
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new", "-m", "second"])
+        .current_dir(dir.path())
+        .output()
+        .expect("new failed");
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let resp = session.execute_command_with_args("badjuju.abandon", serde_json::json!(["@-"]));
+    assert!(
+        resp.get("error").is_none(),
+        "abandon with string arg returned error: {resp}"
+    );
+}
+
+#[test]
+fn lsp_execute_diff_string_arg_succeeds() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let resp = session.execute_command_with_args("badjuju.diff", serde_json::json!(["@"]));
+    assert!(
+        resp.get("error").is_none(),
+        "diff with string arg returned error: {resp}"
+    );
+    let uri = resp["result"].as_str().unwrap();
+    assert!(uri.starts_with("file://"));
+}
+
+#[test]
+fn lsp_execute_new_string_arg_succeeds() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let resp = session.execute_command_with_args("badjuju.new", serde_json::json!(["@"]));
+    assert!(
+        resp.get("error").is_none(),
+        "new with string arg returned error: {resp}"
+    );
+    let uri = resp["result"].as_str().unwrap();
+    let content = read_file(uri);
+    assert!(content.contains("STATUS:"));
+}
+
+#[test]
+fn lsp_execute_rebase_string_args_succeed() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    // Three commits so `@-` rebases onto `@--` non-trivially.
+    Command::new("jj")
+        .args(["describe", "-m", "first"])
+        .current_dir(dir.path())
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new", "-m", "second"])
+        .current_dir(dir.path())
+        .output()
+        .expect("new failed");
+    Command::new("jj")
+        .args(["new", "-m", "third"])
+        .current_dir(dir.path())
+        .output()
+        .expect("new failed");
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let resp =
+        session.execute_command_with_args("badjuju.rebase", serde_json::json!(["@-", "@--"]));
+    assert!(
+        resp.get("error").is_none(),
+        "rebase with string args returned error: {resp}"
+    );
+}
+
+#[test]
+fn lsp_execute_bookmark_string_args_succeed() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let resp = session.execute_command_with_args(
+        "badjuju.bookmark",
+        serde_json::json!(["create", "scratch", "@"]),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "bookmark create with string args returned error: {resp}"
     );
 }
 
@@ -604,6 +747,23 @@ fn lsp_code_action_on_log_commit_line_returns_seven_actions() {
         assert_eq!(args.len(), 1, "expected one argument");
         assert_eq!(args[0].as_str(), Some(change_id.as_str()));
     }
+
+    // Direct-action commands ship a Value::String(revision); the server must
+    // accept that string-form so picking the action actually invokes the
+    // command rather than erroring out. Invoke `badjuju.describe` since it
+    // doesn't mutate the repo.
+    let describe_action = actions
+        .iter()
+        .find(|a| a["command"]["command"].as_str() == Some("badjuju.describe"))
+        .expect("describe action missing");
+    let resp = session.execute_command_with_args(
+        "badjuju.describe",
+        describe_action["command"]["arguments"].clone(),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "invoking describe with code-action arg returned error: {resp}"
+    );
 }
 
 #[test]

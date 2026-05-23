@@ -706,10 +706,11 @@ pub struct CursorPos {
 /// Extract a `{cursor: {uri, line}}` object from a single argument value.
 ///
 /// Returns `Ok(None)` for null / missing values so callers can apply a default
-/// (typically `@`). Strings return `Ok(None)` too — only `resolve_log_shortcut_arg`
-/// uses that to fall through to literal-revset behavior; revision/file-scoped
-/// resolvers explicitly reject strings via `reject_string_arg`. Returns
-/// `Err(InvalidArg)` for objects that look cursor-shaped but are malformed.
+/// (typically `@`). Strings return `Ok(None)` too — callers that accept the
+/// legacy literal-string form (`resolve_revision_arg`,
+/// `resolve_file_and_revision_arg`, `resolve_log_shortcut_arg`) check for
+/// strings themselves before invoking this. Returns `Err(InvalidArg)` for
+/// objects that look cursor-shaped but are malformed.
 pub fn parse_cursor_arg(
     arg: Option<&serde_json::Value>,
 ) -> std::result::Result<Option<CursorPos>, CursorResolveError> {
@@ -733,8 +734,8 @@ pub fn parse_cursor_arg(
 }
 
 /// Reject string arguments where only cursor-form is now accepted. Used by
-/// revision-scoped and file-scoped resolvers after the legacy string-form
-/// path was removed (T19).
+/// the file-scoped resolver. Revision-scoped commands accept strings directly
+/// (CLI user commands and pre-resolved code-action args).
 fn reject_string_arg(arg: Option<&serde_json::Value>) -> std::result::Result<(), CursorResolveError> {
     if arg.is_some_and(|v| v.is_string()) {
         return Err(CursorResolveError::InvalidArg);
@@ -742,9 +743,10 @@ fn reject_string_arg(arg: Option<&serde_json::Value>) -> std::result::Result<(),
     Ok(())
 }
 
-/// Resolve a revision argument. Accepts only a `{cursor:{uri,line}}` object
-/// or a missing / null arg (defaults to empty → `@` downstream). String args
-/// are rejected with `InvalidArg`.
+/// Resolve a revision argument. Accepts either a literal revision string
+/// (e.g. `"@-"` from CLI user commands or pre-resolved code actions), a
+/// `{cursor:{uri,line}}` object, or a missing / null arg (defaults to empty
+/// → `@` downstream).
 pub fn resolve_revision_arg<F>(
     arg: Option<&serde_json::Value>,
     doc_lookup: F,
@@ -752,7 +754,9 @@ pub fn resolve_revision_arg<F>(
 where
     F: FnOnce(&str) -> Option<String>,
 {
-    reject_string_arg(arg)?;
+    if let Some(s) = arg.and_then(|v| v.as_str()) {
+        return Ok(s.to_string());
+    }
     let Some(cp) = parse_cursor_arg(arg)? else {
         return Ok(String::new());
     };
@@ -2079,10 +2083,10 @@ mod tests {
     }
 
     #[test]
-    fn resolve_revision_arg_string_arg_errors() {
+    fn resolve_revision_arg_string_arg_returns_string() {
         let v = serde_json::json!("abc123");
-        let err = resolve_revision_arg(Some(&v), no_docs).unwrap_err();
-        assert!(matches!(err, CursorResolveError::InvalidArg));
+        let r = resolve_revision_arg(Some(&v), no_docs).unwrap();
+        assert_eq!(r, "abc123");
     }
 
     #[test]
