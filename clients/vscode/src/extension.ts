@@ -11,7 +11,6 @@ import {
   Selection,
   type TextDocument,
   type TextDocumentContentProvider,
-  type TextEditor,
   TextEditorRevealType,
   Uri,
   window,
@@ -49,67 +48,6 @@ class StatusContentProvider implements TextDocumentContentProvider {
 }
 
 const statusProvider = new StatusContentProvider();
-
-const LOG_SHORTCUT_LINE_RE = /^JJ:\s+([A-Za-z][\w ]*?):\s+(.+)$/;
-const STATUS_FILE_LINE_RE = /^([MADCR])\s+(.+)$/;
-// Matches a `jj log --stat` per-file line, e.g. "│  src/main.rs | 3 +++".
-// Skips the summary line ("N files changed, ...") because it has no " | <N> <+/->".
-const STAT_LINE_RE =
-  /^[\s│○●◆~*╭╮╯╰─├┤┬┴┼]*\s(\S[\S ]*?)\s+\|\s+\d+\s+[+-]+\s*$/;
-// A commit header line in jj log output: graph node char + spaces + change_id.
-// Graph node chars: @ (current), ○ ● (other), ◆ (immutable), * (rare). NOT ~ (elided continuation).
-const COMMIT_HEADER_RE = /^[@○●◆*]\s+([a-z]+)\b/;
-
-/** Parse a status.jujutsu line and return the file path it refers to, or null. */
-export function parseStatusFile(line: string): string | null {
-  const m = line.match(STATUS_FILE_LINE_RE) ?? line.match(STAT_LINE_RE);
-  if (!m) return null;
-  const rest = m[m.length - 1].trim();
-  // jj renders renames/copies as "old => new" — squash needs the destination path.
-  const arrow = rest.lastIndexOf(" => ");
-  return arrow >= 0 ? rest.slice(arrow + 4).trim() : rest;
-}
-
-/**
- * Return the revision that owns the file at the cursor.
- *
- * - STATUS-section lines (matched by STATUS_FILE_LINE_RE) belong to the working copy → "@".
- * - Walks up from `cursorLine` (inclusive) so a cursor parked on a commit header
- *   returns that commit, not the one above it.
- * - Hitting the STATUS section header without finding a commit means we were in
- *   the STATUS file list with no commit context → working copy.
- */
-export function findRevisionForLine(
-  lines: readonly string[],
-  cursorLine: number,
-): string {
-  const current = lines[cursorLine] ?? "";
-  if (STATUS_FILE_LINE_RE.test(current)) return "@";
-  for (let i = cursorLine; i >= 0; i--) {
-    const text = lines[i] ?? "";
-    const h = text.match(COMMIT_HEADER_RE);
-    if (h) return h[1];
-    if (text.startsWith("STATUS:")) return "@";
-  }
-  return "@";
-}
-
-/**
- * Return the change_id of the commit at or above the cursor in a log.jujutsu buffer.
- *
- * Walks up from `cursorLine` (inclusive) looking for a commit header line. Returns
- * null if none is found (e.g. cursor is inside the REVSET header section).
- */
-export function findLogRevision(
-  lines: readonly string[],
-  cursorLine: number,
-): string | null {
-  for (let i = cursorLine; i >= 0; i--) {
-    const m = (lines[i] ?? "").match(COMMIT_HEADER_RE);
-    if (m) return m[1];
-  }
-  return null;
-}
 
 function isStatusFile(uri: Uri): boolean {
   return uri.path.endsWith("/status.jujutsu");
@@ -152,19 +90,6 @@ function waitForDocumentChange(
     const timer = setTimeout(done, timeoutMs);
     disposables.push({ dispose: () => clearTimeout(timer) });
   });
-}
-
-function updateLogShortcutContext(editor: TextEditor | undefined): void {
-  let onShortcutLine = false;
-  if (editor && isLogFile(editor.document.uri)) {
-    const lineText = editor.document.lineAt(editor.selection.active.line).text;
-    onShortcutLine = LOG_SHORTCUT_LINE_RE.test(lineText);
-  }
-  commands.executeCommand(
-    "setContext",
-    "badjuju.onLogShortcutLine",
-    onShortcutLine,
-  );
 }
 
 function toReadonlyUri(fileUri: Uri): Uri {
@@ -219,13 +144,15 @@ function cursorArgsForActiveEditor():
   ];
 }
 
+type RevisionArg = string | { cursor: { uri: string; line: number } };
+
 /**
  * Prompt for a rebase destination and execute `badjuju.rebase`. Shared
- * between the `badjuju.rebase.prompt` hotkey (which resolves source client-
- * side) and the `badjuju.client.rebasePrompt` code-action command (which
- * receives a pre-resolved source from the server).
+ * between the `badjuju.rebase.prompt` hotkey (which ships a cursor-form
+ * source) and the `badjuju.client.rebasePrompt` code-action command (which
+ * receives a pre-resolved source string from the server).
  */
-async function runRebasePrompt(source: string): Promise<void> {
+async function runRebasePrompt(source: RevisionArg): Promise<void> {
   const dest = await window.showInputBox({
     prompt: "Rebase to (destination revision):",
     placeHolder: "e.g. main, @-, abc1234",
@@ -249,7 +176,7 @@ async function runRebasePrompt(source: string): Promise<void> {
  */
 async function runBookmarkPrompt(
   subAction: string,
-  revision: string,
+  revision: RevisionArg,
 ): Promise<void> {
   const needsRev = subAction === "create" || subAction === "move";
   const namePrompt =
@@ -437,12 +364,6 @@ export async function activate(context: ExtensionContext) {
       editor.selection = new Selection(pos, pos);
       editor.revealRange(new Range(pos, pos), TextEditorRevealType.Default);
     }),
-    window.onDidChangeTextEditorSelection((e) => {
-      updateLogShortcutContext(e.textEditor);
-    }),
-    window.onDidChangeActiveTextEditor((editor) => {
-      updateLogShortcutContext(editor);
-    }),
     commands.registerCommand("badjuju.new.open", async () => {
       // When invoked from a status or log buffer, ship the cursor so the server
       // can resolve the commit under it; otherwise fall back to the server
@@ -596,28 +517,10 @@ export async function activate(context: ExtensionContext) {
       await openServerResult(result as string);
     }),
     commands.registerCommand("badjuju.rebase.prompt", async () => {
-      const editor = window.activeTextEditor;
-      let source = "@";
-      if (editor) {
-        const uri = editor.document.uri;
-        const lines: string[] = [];
-        for (let i = 0; i < editor.document.lineCount; i++) {
-          lines.push(editor.document.lineAt(i).text);
-        }
-        const cursorLine = editor.selection.active.line;
-        if (isStatusFile(uri)) {
-          source = findRevisionForLine(lines, cursorLine);
-        } else if (isLogFile(uri)) {
-          const found = findLogRevision(lines, cursorLine);
-          if (!found) {
-            window.showInformationMessage(
-              "rebase: place cursor on a commit line",
-            );
-            return;
-          }
-          source = found;
-        }
-      }
+      const cursorArgs = cursorArgsForActiveEditor();
+      // Cursor-form when in a jujutsu buffer; literal "@" otherwise. Server
+      // returns an LSP error if the cursor isn't on a commit line.
+      const source: RevisionArg = cursorArgs ? cursorArgs[0] : "@";
       await runRebasePrompt(source);
     }),
     commands.registerCommand("badjuju.edit.cursor", async () => {
@@ -688,33 +591,8 @@ export async function activate(context: ExtensionContext) {
       });
       if (!picked) return;
 
-      // Determine the revision at cursor (used by create and move).
-      const editor = window.activeTextEditor;
-      let revision = "@";
-      if (editor) {
-        const uri = editor.document.uri;
-        const lines: string[] = [];
-        for (let i = 0; i < editor.document.lineCount; i++) {
-          lines.push(editor.document.lineAt(i).text);
-        }
-        const cursorLine = editor.selection.active.line;
-        if (isStatusFile(uri)) {
-          revision = findRevisionForLine(lines, cursorLine);
-        } else if (isLogFile(uri)) {
-          const found = findLogRevision(lines, cursorLine);
-          if (
-            !found &&
-            (picked.label === "create" || picked.label === "move")
-          ) {
-            window.showInformationMessage(
-              `bookmark ${picked.label}: place cursor on a commit line`,
-            );
-            return;
-          }
-          revision = found ?? "@";
-        }
-      }
-
+      const cursorArgs = cursorArgsForActiveEditor();
+      const revision: RevisionArg = cursorArgs ? cursorArgs[0] : "@";
       await runBookmarkPrompt(picked.label, revision);
     }),
     // Client-side commands invoked by server-provided code actions. The server

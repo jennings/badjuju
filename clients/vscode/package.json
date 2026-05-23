@@ -321,7 +321,7 @@
       {
         "command": "badjuju.log.applyShortcut",
         "key": "enter",
-        "when": "badjuju.keymapProfile == 'magit' && badjuju.onLogShortcutLine && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
+        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
       },
       {
         "command": "badjuju.abandon.cursor",
@@ -571,7 +571,7 @@
       {
         "command": "badjuju.log.applyShortcut",
         "key": "enter",
-        "when": "badjuju.keymapProfile == 'vim' && badjuju.onLogShortcutLine && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
+        "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
       },
       {
         "command": "badjuju.refresh.open",
