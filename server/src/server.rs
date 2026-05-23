@@ -161,6 +161,30 @@ fn commit_actions(revision: &str) -> Vec<CodeActionOrCommand> {
     ]
 }
 
+/// Build the two squash/unsquash code actions offered for a status-buffer file
+/// line. Both commands ship a cursor-form arg so the server resolves the file
+/// and revision fresh when the user picks the action (stable across buffer
+/// regenerations).
+fn file_actions(uri: &str, line: usize, file: &str) -> Vec<CodeActionOrCommand> {
+    let cursor_arg = serde_json::json!({ "cursor": { "uri": uri, "line": line } });
+    let make = |title: String, command: &str| -> CodeActionOrCommand {
+        CodeActionOrCommand::CodeAction(CodeAction {
+            title,
+            kind: Some(CodeActionKind::EMPTY),
+            command: Some(Command {
+                title: String::new(),
+                command: command.to_string(),
+                arguments: Some(vec![cursor_arg.clone()]),
+            }),
+            ..Default::default()
+        })
+    };
+    vec![
+        make(format!("Squash {file}"), "badjuju.squash"),
+        make(format!("Unsquash {file}"), "badjuju.unsquash"),
+    ]
+}
+
 /// Parse the optional `commandReference` object passed in `initializationOptions`.
 /// Each of `status`, `log`, and `diff` is an optional string override. Missing
 /// or non-string values fall back to the profile-rendered defaults.
@@ -278,10 +302,24 @@ impl LanguageServer for Backend {
 
         let mut actions: Vec<CodeActionOrCommand> = Vec::new();
 
-        if kind == BufferKind::Log
-            && let Some(revision) = cursor::revision_at_line(&content, line, kind)
-        {
-            actions.extend(commit_actions(&revision));
+        match kind {
+            BufferKind::Log => {
+                if let Some(revision) = cursor::revision_at_line(&content, line, kind) {
+                    actions.extend(commit_actions(&revision));
+                }
+            }
+            BufferKind::Status => {
+                // File lines take precedence — squash/unsquash actions reference
+                // the file under the cursor. The server re-resolves the file
+                // when the command runs, so the action stays stable across
+                // buffer regenerations.
+                if let Some(file) = cursor::file_at_line(&content, line) {
+                    actions.extend(file_actions(&uri, line, &file));
+                } else if let Some(revision) = cursor::commit_id_at_line(&content, line) {
+                    actions.extend(commit_actions(&revision));
+                }
+            }
+            BufferKind::Diff => {}
         }
 
         Ok(Some(actions))

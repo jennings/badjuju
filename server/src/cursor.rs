@@ -133,6 +133,16 @@ pub fn log_shortcut_at_line(content: &str, line: usize) -> Option<LogShortcut> {
     parse_log_shortcut(line_text)
 }
 
+/// Resolve the change_id when the cursor line IS itself a commit-header line
+/// (graph char + change_id). Unlike [`revision_at_line`], this does *not*
+/// walk upward — it returns `None` when the cursor sits on a description /
+/// file / header line. Useful when a buffer mixes commit-headers with other
+/// actionable line kinds (e.g., file lines in `status.jujutsu`).
+pub fn commit_id_at_line(content: &str, line: usize) -> Option<String> {
+    let line_text = content.lines().nth(line)?;
+    match_commit_header(line_text).map(|s| s.to_string())
+}
+
 // --- internal parsers ----------------------------------------------------
 
 const COMMIT_HEADER_CHARS: &[char] = &['@', '*', '○', '●', '◆'];
@@ -643,5 +653,39 @@ mod tests {
     fn log_shortcut_at_line_rejects_missing_revset() {
         assert_eq!(log_shortcut_at_line("JJ: Foo:", 0), None);
         assert_eq!(log_shortcut_at_line("JJ: Foo:   ", 0), None);
+    }
+
+    // --- commit_id_at_line ---
+
+    #[test]
+    fn commit_id_at_line_returns_id_on_header_line() {
+        let content = "@  qpvuntsm 1234abcd\n│  description\n○  abcdwxyz e6f7\n";
+        assert_eq!(commit_id_at_line(content, 0).as_deref(), Some("qpvuntsm"));
+        assert_eq!(commit_id_at_line(content, 2).as_deref(), Some("abcdwxyz"));
+    }
+
+    #[test]
+    fn commit_id_at_line_returns_none_for_description_line() {
+        // Even though revision_at_line walks up to find the commit, the strict
+        // variant returns None on a description line.
+        let content = "@  qpvuntsm 1234abcd\n│  description\n";
+        assert_eq!(commit_id_at_line(content, 1), None);
+    }
+
+    #[test]
+    fn commit_id_at_line_returns_none_for_status_file_line() {
+        let content = "M src/main.rs\nA new.txt\n";
+        assert_eq!(commit_id_at_line(content, 0), None);
+        assert_eq!(commit_id_at_line(content, 1), None);
+    }
+
+    #[test]
+    fn commit_id_at_line_returns_none_off_the_end() {
+        assert_eq!(commit_id_at_line("@  qpvuntsm 1234", 99), None);
+    }
+
+    #[test]
+    fn commit_id_at_line_returns_none_on_empty() {
+        assert_eq!(commit_id_at_line("", 0), None);
     }
 }

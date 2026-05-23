@@ -620,6 +620,128 @@ fn lsp_code_action_on_log_commit_line_returns_seven_actions() {
 }
 
 #[test]
+fn lsp_code_action_on_status_file_line_returns_squash_unsquash() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    // Set up: parent has readme.txt, working copy modifies it.
+    std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "parent"])
+        .current_dir(dir.path())
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new"])
+        .current_dir(dir.path())
+        .output()
+        .expect("new failed");
+    std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+    let line = status_file_line(&status_content, "readme.txt")
+        .unwrap_or_else(|| panic!("readme.txt not found:\n{status_content}"));
+    session.did_open(&status_uri, "jujutsu", &status_content);
+
+    let actions = code_action_at(&mut session, &status_uri, line);
+    let expected: &[(&str, &str)] = &[
+        ("Squash readme.txt", "badjuju.squash"),
+        ("Unsquash readme.txt", "badjuju.unsquash"),
+    ];
+    assert_eq!(
+        actions.len(),
+        expected.len(),
+        "expected {} actions, got {}: {actions:?}",
+        expected.len(),
+        actions.len()
+    );
+    for (action, (title, command_name)) in actions.iter().zip(expected) {
+        assert_eq!(action["title"].as_str(), Some(*title));
+        let cmd = &action["command"];
+        assert_eq!(cmd["command"].as_str(), Some(*command_name));
+        let args = cmd["arguments"].as_array().expect("missing arguments");
+        assert_eq!(args.len(), 1);
+        let cursor = &args[0]["cursor"];
+        assert_eq!(cursor["uri"].as_str(), Some(status_uri.as_str()));
+        assert_eq!(cursor["line"].as_u64(), Some(line as u64));
+    }
+}
+
+#[test]
+fn lsp_code_action_on_status_commit_header_returns_commit_actions() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    // Need a second commit so the status log section has a non-@ commit too.
+    Command::new("jj")
+        .args(["describe", "-m", "first"])
+        .current_dir(dir.path())
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new", "-m", "second"])
+        .current_dir(dir.path())
+        .output()
+        .expect("new failed");
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+    let (commit_line, change_id) = first_commit_line(&status_content)
+        .unwrap_or_else(|| panic!("no commit line:\n{status_content}"));
+    session.did_open(&status_uri, "jujutsu", &status_content);
+
+    let actions = code_action_at(&mut session, &status_uri, commit_line);
+    assert_eq!(
+        actions.len(),
+        7,
+        "expected 7 commit actions, got: {actions:?}"
+    );
+    let first = &actions[0];
+    assert!(
+        first["title"]
+            .as_str()
+            .is_some_and(|t| t.starts_with("Edit commit") && t.contains(&change_id))
+    );
+    assert_eq!(first["command"]["command"].as_str(), Some("badjuju.edit"));
+    let args = first["command"]["arguments"].as_array().unwrap();
+    assert_eq!(args[0].as_str(), Some(change_id.as_str()));
+}
+
+#[test]
+fn lsp_code_action_on_status_blank_line_returns_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+    session.did_open(&status_uri, "jujutsu", &status_content);
+
+    // Find a blank line in the buffer (always present after STATUS: header).
+    let blank_line = status_content
+        .lines()
+        .enumerate()
+        .find_map(|(i, l)| l.is_empty().then_some(i))
+        .expect("status buffer should contain a blank line");
+    let actions = code_action_at(&mut session, &status_uri, blank_line);
+    assert!(
+        actions.is_empty(),
+        "expected no actions on blank line, got: {actions:?}"
+    );
+}
+
+#[test]
 fn lsp_code_action_on_log_non_commit_line_returns_empty() {
     let dir = tempfile::tempdir().unwrap();
     init_jj_repo(dir.path());
