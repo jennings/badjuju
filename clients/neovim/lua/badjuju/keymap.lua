@@ -30,6 +30,11 @@ local STATUS_MAPS = {
 ---   when there is no commit context (matches find_revision_for_line).
 --- - log: returns the cursor's commit. Returns nil if the cursor isn't on or
 ---   below a commit header line; the caller should notify and bail.
+---
+--- Used by hotkey handlers that still need the resolved revision string
+--- client-side (rebase / bookmark prompts that branch on whether a commit was
+--- found). Other revision-scoped hotkeys ship the cursor straight to the
+--- server via [[cursor_arg]] instead.
 ---@param buffer 'status'|'log'
 ---@return string?
 local function revision_at_cursor(buffer)
@@ -42,19 +47,23 @@ local function revision_at_cursor(buffer)
   return parse.find_revision_for_line(lines, cursor_line)
 end
 
+--- Build a `{cursor = {uri, line}}` argument the server can resolve to a
+--- revision on the current jujutsu buffer. Read from the current window's
+--- cursor.
+---@return table
+local function cursor_arg()
+  local name = vim.api.nvim_buf_get_name(0)
+  local cursor_line = vim.api.nvim_win_get_cursor(0)[1] - 1 -- 0-indexed
+  return { cursor = { uri = vim.uri_from_fname(name), line = cursor_line } }
+end
+
 --- Run a server command for the commit under the cursor, opening the result
---- in a horizontal split. On log.jujutsu, a missing cursor revision triggers a
---- notification and the command is not sent.
----@param buffer 'status'|'log'
+--- in a horizontal split. The cursor position is shipped to the server which
+--- resolves the revision; a server-side "no revision at cursor" error surfaces
+--- through the normal LSP error path.
 ---@param server_command string  badjuju.* command name
----@param label string  human-readable label for the notification on miss
-local function run_at_cursor_split(buffer, server_command, label)
-  local revision = revision_at_cursor(buffer)
-  if not revision then
-    vim.notify(label .. ': place cursor on a commit line', vim.log.levels.INFO)
-    return
-  end
-  require('badjuju').execute(server_command, { revision }, { split = 'h' })
+local function run_at_cursor_split(server_command)
+  require('badjuju').execute(server_command, { cursor_arg() }, { split = 'h' })
 end
 
 --- Run a file-scoped status command. The cursor line is parsed for a file
@@ -238,11 +247,11 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, '=', '<Cmd>JJToggleStat<CR>', 'badjuju: toggle --stat')
       nmap(bufnr, 'bb', status_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
       nmap(bufnr, 'rr', status_rebase, 'badjuju: rebase commit at cursor to destination')
-      nmap(bufnr, 'ee', function() run_at_cursor_split('status', 'badjuju.edit', 'edit') end,
+      nmap(bufnr, 'ee', function() run_at_cursor_split('badjuju.edit') end,
         'badjuju: edit commit at cursor (move @)')
-      nmap(bufnr, 'dd', function() run_at_cursor_split('status', 'badjuju.describe', 'describe') end,
+      nmap(bufnr, 'dd', function() run_at_cursor_split('badjuju.describe') end,
         'badjuju: describe commit at cursor in a split')
-      nmap(bufnr, 'D', function() run_at_cursor_split('status', 'badjuju.diff', 'diff') end,
+      nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: diff commit at cursor in a split')
       nmap(bufnr, 'aa', '<Cmd>JJAbandon<CR>', 'badjuju: abandon revision')
     else
@@ -250,13 +259,13 @@ function M.setup_for_buffer(bufnr)
         map_cmd(bufnr, m[1], m[2], m[3])
       end
       nmap(bufnr, 'P', '<Cmd>JJPush!<CR>', 'badjuju: git push --force-with-lease')
-      nmap(bufnr, 'e', function() run_at_cursor_split('status', 'badjuju.edit', 'edit') end,
+      nmap(bufnr, 'e', function() run_at_cursor_split('badjuju.edit') end,
         'badjuju: edit commit at cursor (move @)')
       nmap(bufnr, 'b', status_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
       nmap(bufnr, 'r', status_rebase, 'badjuju: rebase commit at cursor to destination')
-      nmap(bufnr, 'd', function() run_at_cursor_split('status', 'badjuju.describe', 'describe') end,
+      nmap(bufnr, 'd', function() run_at_cursor_split('badjuju.describe') end,
         'badjuju: describe commit at cursor in a split')
-      nmap(bufnr, 'D', function() run_at_cursor_split('status', 'badjuju.diff', 'diff') end,
+      nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: diff commit at cursor in a split')
       nmap(bufnr, 's', function() run_file_scoped('badjuju.squash') end,
         'badjuju: squash file at cursor into parent')
@@ -297,11 +306,11 @@ function M.setup_for_buffer(bufnr)
     if profile == 'vim' then
       nmap(bufnr, 'bb', log_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
       nmap(bufnr, 'rr', log_rebase, 'badjuju: rebase commit at cursor to destination')
-      nmap(bufnr, 'ee', function() run_at_cursor_split('log', 'badjuju.edit', 'edit') end,
+      nmap(bufnr, 'ee', function() run_at_cursor_split('badjuju.edit') end,
         'badjuju: edit commit at cursor (move @)')
-      nmap(bufnr, 'dd', function() run_at_cursor_split('log', 'badjuju.describe', 'describe') end,
+      nmap(bufnr, 'dd', function() run_at_cursor_split('badjuju.describe') end,
         'badjuju: describe commit at cursor in a split')
-      nmap(bufnr, 'D', function() run_at_cursor_split('log', 'badjuju.diff', 'diff') end,
+      nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: diff commit at cursor in a split')
       nmap(bufnr, 'aa', '<Cmd>JJAbandon<CR>', 'badjuju: abandon revision')
       for _, m in ipairs(LOG_MAPS) do
@@ -311,13 +320,13 @@ function M.setup_for_buffer(bufnr)
       for _, m in ipairs(LOG_MAPS) do
         map_cmd(bufnr, m[1], m[2], m[3])
       end
-      nmap(bufnr, 'e', function() run_at_cursor_split('log', 'badjuju.edit', 'edit') end,
+      nmap(bufnr, 'e', function() run_at_cursor_split('badjuju.edit') end,
         'badjuju: edit commit at cursor (move @)')
       nmap(bufnr, 'b', log_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
       nmap(bufnr, 'r', log_rebase, 'badjuju: rebase commit at cursor to destination')
-      nmap(bufnr, 'd', function() run_at_cursor_split('log', 'badjuju.describe', 'describe') end,
+      nmap(bufnr, 'd', function() run_at_cursor_split('badjuju.describe') end,
         'badjuju: describe commit at cursor in a split')
-      nmap(bufnr, 'D', function() run_at_cursor_split('log', 'badjuju.diff', 'diff') end,
+      nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: diff commit at cursor in a split')
     end
     nmap(bufnr, '<CR>', apply_log_shortcut, 'badjuju: apply revset shortcut under cursor')
