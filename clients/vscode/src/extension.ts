@@ -219,6 +219,56 @@ function cursorArgsForActiveEditor():
   ];
 }
 
+/**
+ * Prompt for a rebase destination and execute `badjuju.rebase`. Shared
+ * between the `badjuju.rebase.prompt` hotkey (which resolves source client-
+ * side) and the `badjuju.client.rebasePrompt` code-action command (which
+ * receives a pre-resolved source from the server).
+ */
+async function runRebasePrompt(source: string): Promise<void> {
+  const dest = await window.showInputBox({
+    prompt: "Rebase to (destination revision):",
+    placeHolder: "e.g. main, @-, abc1234",
+  });
+  if (!dest) return;
+  try {
+    const result = await client.sendRequest("workspace/executeCommand", {
+      command: "badjuju.rebase",
+      arguments: [source, dest],
+    });
+    await openServerResult(result as string);
+  } catch (e) {
+    window.showInformationMessage(`rebase: ${(e as Error).message}`);
+  }
+}
+
+/**
+ * Prompt for a bookmark name and execute `badjuju.bookmark`. Shared between
+ * the `badjuju.bookmark.prompt` hotkey and the `badjuju.client.bookmarkPrompt`
+ * code-action command. `subAction` is one of create/move/delete/track/forget.
+ */
+async function runBookmarkPrompt(
+  subAction: string,
+  revision: string,
+): Promise<void> {
+  const needsRev = subAction === "create" || subAction === "move";
+  const namePrompt =
+    subAction === "track"
+      ? "Bookmark name (e.g. main@origin):"
+      : "Bookmark name:";
+  const name = await window.showInputBox({ prompt: namePrompt });
+  if (!name) return;
+  try {
+    const result = await client.sendRequest("workspace/executeCommand", {
+      command: "badjuju.bookmark",
+      arguments: [subAction, name, needsRev ? revision : ""],
+    });
+    await openServerResult(result as string);
+  } catch (e) {
+    window.showInformationMessage(`bookmark: ${(e as Error).message}`);
+  }
+}
+
 async function runFileScopedStatusCommand(
   serverCommand: string,
 ): Promise<void> {
@@ -568,16 +618,7 @@ export async function activate(context: ExtensionContext) {
           source = found;
         }
       }
-      const dest = await window.showInputBox({
-        prompt: "Rebase to (destination revision):",
-        placeHolder: "e.g. main, @-, abc1234",
-      });
-      if (!dest) return;
-      const result = await client.sendRequest("workspace/executeCommand", {
-        command: "badjuju.rebase",
-        arguments: [source, dest],
-      });
-      await openServerResult(result as string);
+      await runRebasePrompt(source);
     }),
     commands.registerCommand("badjuju.edit.cursor", async () => {
       const args = cursorArgsForActiveEditor() ?? [];
@@ -674,20 +715,48 @@ export async function activate(context: ExtensionContext) {
         }
       }
 
-      const needsRev = picked.label === "create" || picked.label === "move";
-      const namePrompt =
-        picked.label === "track"
-          ? "Bookmark name (e.g. main@origin):"
-          : "Bookmark name:";
-      const name = await window.showInputBox({ prompt: namePrompt });
-      if (!name) return;
-
-      const result = await client.sendRequest("workspace/executeCommand", {
-        command: "badjuju.bookmark",
-        arguments: [picked.label, name, needsRev ? revision : ""],
-      });
-      await openServerResult(result as string);
+      await runBookmarkPrompt(picked.label, revision);
     }),
+    // Client-side commands invoked by server-provided code actions. The server
+    // ships {command: "badjuju.client.rebasePrompt", arguments: [<revision>]}
+    // when a code action would need a destination/name that the server can't
+    // resolve on its own; the handler prompts and forwards to the server cmd.
+    commands.registerCommand(
+      "badjuju.client.rebasePrompt",
+      async (revision: string) => {
+        await runRebasePrompt(revision ?? "@");
+      },
+    ),
+    commands.registerCommand(
+      "badjuju.client.bookmarkPrompt",
+      async (revision: string) => {
+        const SUB_ACTIONS = [
+          {
+            label: "create",
+            description: "Create a new bookmark at this revision",
+          },
+          {
+            label: "move",
+            description: "Move an existing bookmark to this revision",
+          },
+          { label: "delete", description: "Delete a bookmark" },
+          {
+            label: "track",
+            description: "Track a remote bookmark (e.g. main@origin)",
+          },
+          {
+            label: "forget",
+            description: "Forget a bookmark without recording deletion",
+          },
+        ];
+        const picked = await window.showQuickPick(SUB_ACTIONS, {
+          title: "jj bookmark — choose action",
+          placeHolder: "Select a bookmark action",
+        });
+        if (!picked) return;
+        await runBookmarkPrompt(picked.label, revision ?? "@");
+      },
+    ),
   );
 
   client = new LanguageClient(
