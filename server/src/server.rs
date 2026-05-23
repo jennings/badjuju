@@ -451,8 +451,7 @@ impl LanguageServer for Backend {
                     .and_then(|v| v.get("forceWithLease"))
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let uri =
-                    commands::run_push(&jj, &workspace, force_with_lease).map_err(lsp_err)?;
+                let uri = commands::run_push(&jj, &workspace, force_with_lease).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.rebase" => {
@@ -466,8 +465,7 @@ impl LanguageServer for Backend {
                     .get(1)
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let uri =
-                    commands::run_rebase(&jj, &workspace, source, dest).map_err(lsp_err)?;
+                let uri = commands::run_rebase(&jj, &workspace, source, dest).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.bookmark" => {

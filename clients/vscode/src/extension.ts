@@ -701,11 +701,23 @@ export async function activate(context: ExtensionContext) {
     }),
     commands.registerCommand("badjuju.bookmark.prompt", async () => {
       const SUB_ACTIONS = [
-        { label: "create", description: "Create a new bookmark at cursor revision" },
-        { label: "move", description: "Move an existing bookmark to cursor revision" },
+        {
+          label: "create",
+          description: "Create a new bookmark at cursor revision",
+        },
+        {
+          label: "move",
+          description: "Move an existing bookmark to cursor revision",
+        },
         { label: "delete", description: "Delete a bookmark" },
-        { label: "track", description: "Track a remote bookmark (e.g. main@origin)" },
-        { label: "forget", description: "Forget a bookmark without recording deletion" },
+        {
+          label: "track",
+          description: "Track a remote bookmark (e.g. main@origin)",
+        },
+        {
+          label: "forget",
+          description: "Forget a bookmark without recording deletion",
+        },
       ];
       const picked = await window.showQuickPick(SUB_ACTIONS, {
         title: "jj bookmark — choose action",
@@ -727,7 +739,10 @@ export async function activate(context: ExtensionContext) {
           revision = findRevisionForLine(lines, cursorLine);
         } else if (isLogFile(uri)) {
           const found = findLogRevision(lines, cursorLine);
-          if (!found && (picked.label === "create" || picked.label === "move")) {
+          if (
+            !found &&
+            (picked.label === "create" || picked.label === "move")
+          ) {
             window.showInformationMessage(
               `bookmark ${picked.label}: place cursor on a commit line`,
             );

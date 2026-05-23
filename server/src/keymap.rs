@@ -315,10 +315,7 @@ static VIM_ENTRIES: &[KeymapEntry] = &[
 ];
 
 /// Return the keymap entries for a given profile and window type.
-pub fn entries_for_window(
-    profile: &KeymapProfile,
-    window: &str,
-) -> Vec<&'static KeymapEntry> {
+pub fn entries_for_window(profile: &KeymapProfile, window: &str) -> Vec<&'static KeymapEntry> {
     let table = match profile {
         KeymapProfile::Magit => MAGIT_ENTRIES,
         KeymapProfile::Vim => VIM_ENTRIES,
@@ -345,9 +342,7 @@ pub fn render_command_reference(profile: &KeymapProfile, window: &str) -> String
 
     if window == "log" {
         lines.push("Edit REVSET above and save to re-run the query.".to_string());
-        lines.push(
-            "Place the cursor on a shortcut line and press Enter to apply it.".to_string(),
-        );
+        lines.push("Place the cursor on a shortcut line and press Enter to apply it.".to_string());
     }
 
     let max_key = entries.iter().map(|e| e.key.len()).max().unwrap_or(0);
@@ -367,7 +362,10 @@ mod tests {
     fn render_status_contains_all_expected_keys() {
         let text = render_command_reference(&KeymapProfile::Magit, "status");
         assert!(text.starts_with("COMMAND REFERENCE:"));
-        for key in ["n", "L", "b", "r", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "=", "g", "R", "q", "?"] {
+        for key in [
+            "n", "L", "b", "r", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "=", "g", "R",
+            "q", "?",
+        ] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in:\n{text}"
@@ -382,7 +380,10 @@ mod tests {
             text.contains("Edit REVSET above"),
             "missing log intro in:\n{text}"
         );
-        assert!(text.contains("shortcut line"), "missing shortcut hint in:\n{text}");
+        assert!(
+            text.contains("shortcut line"),
+            "missing shortcut hint in:\n{text}"
+        );
         for key in ["b", "r", "e", "d", "D", "a", "g", "R", "q", "?"] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
@@ -439,7 +440,10 @@ mod tests {
     fn vim_profile_status_contains_two_letter_verbs() {
         let text = render_command_reference(&KeymapProfile::Vim, "status");
         assert!(text.starts_with("COMMAND REFERENCE:"));
-        for key in ["nn", "ll", "ff", "pp", "PP", "uu", "ss", "UU", "bb", "rr", "ee", "dd", "D", "aa", "g", "R", "q", "?"] {
+        for key in [
+            "nn", "ll", "ff", "pp", "PP", "uu", "ss", "UU", "bb", "rr", "ee", "dd", "D", "aa", "g",
+            "R", "q", "?",
+        ] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in vim status:\n{text}"
@@ -461,6 +465,9 @@ mod tests {
     #[test]
     fn vim_entries_for_status_nonempty() {
         let entries = entries_for_window(&KeymapProfile::Vim, "status");
-        assert!(!entries.is_empty(), "vim profile should have status entries");
+        assert!(
+            !entries.is_empty(),
+            "vim profile should have status entries"
+        );
     }
 }

@@ -70,7 +70,11 @@
         },
         "badjuju.keymapProfile": {
           "type": "string",
-          "enum": ["magit", "vim", "none"],
+          "enum": [
+            "magit",
+            "vim",
+            "none"
+          ],
           "default": "magit",
           "description": "Hotkey profile. 'magit' enables Magit-consensus single-key bindings; 'vim' enables Fugitive-style two-letter verb chords; 'none' disables all default hotkeys so you can define your own."
         }

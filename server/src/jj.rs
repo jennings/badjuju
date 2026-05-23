@@ -499,7 +499,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
         let result = jj.git_push();
-        assert!(result.is_ok(), "expected no error for push with no remote: {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected no error for push with no remote: {result:?}"
+        );
     }
 
     #[test]
@@ -579,7 +582,8 @@ mod tests {
     fn bookmark_create_and_delete_round_trip() {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
-        jj.bookmark_create("mybookmark", "@").expect("create failed");
+        jj.bookmark_create("mybookmark", "@")
+            .expect("create failed");
         // After creation, the bookmark should resolve to @.
         let at_ids = jj.change_ids("@").unwrap();
         let bk_ids = jj.change_ids("mybookmark").unwrap();
