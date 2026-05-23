@@ -296,6 +296,107 @@ fn lsp_execute_describe_legacy_string_form_still_works() {
     assert!(content.contains("JJ:"));
 }
 
+/// Find the 0-indexed line in a status.jujutsu buffer that matches a status
+/// header line (`M path` etc.) for the given filename.
+fn status_file_line(content: &str, filename: &str) -> Option<usize> {
+    for (i, line) in content.lines().enumerate() {
+        let Some(first) = line.chars().next() else {
+            continue;
+        };
+        if !matches!(first, 'M' | 'A' | 'D' | 'C' | 'R') {
+            continue;
+        }
+        if line[1..].trim() == filename {
+            return Some(i);
+        }
+    }
+    None
+}
+
+#[test]
+fn lsp_execute_squash_with_cursor_form_resolves_file_and_revision() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    // Set up: parent has readme.txt, working copy modifies it.
+    std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "parent"])
+        .current_dir(dir.path())
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new"])
+        .current_dir(dir.path())
+        .output()
+        .expect("new failed");
+    std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+    let line = status_file_line(&status_content, "readme.txt")
+        .unwrap_or_else(|| panic!("readme.txt not found in status:\n{status_content}"));
+
+    session.did_open(&status_uri, "jujutsu", &status_content);
+
+    let resp = session.execute_command_with_args(
+        "badjuju.squash",
+        serde_json::json!([{ "cursor": { "uri": status_uri, "line": line } }]),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "squash with cursor form returned error: {resp}"
+    );
+    let new_status_uri = resp["result"].as_str().unwrap();
+    let new_status = read_file(new_status_uri);
+    assert!(new_status.contains("STATUS:"));
+    assert!(
+        !new_status.contains("M readme.txt"),
+        "expected readme.txt squashed away:\n{new_status}"
+    );
+}
+
+#[test]
+fn lsp_execute_squash_legacy_form_still_works() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "parent"])
+        .current_dir(dir.path())
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new"])
+        .current_dir(dir.path())
+        .output()
+        .expect("new failed");
+    std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let resp =
+        session.execute_command_with_args("badjuju.squash", serde_json::json!(["readme.txt", "@"]));
+    assert!(
+        resp.get("error").is_none(),
+        "squash legacy form returned error: {resp}"
+    );
+    let status_uri = resp["result"].as_str().unwrap();
+    let status = read_file(status_uri);
+    assert!(status.contains("STATUS:"));
+    assert!(
+        !status.contains("M readme.txt"),
+        "expected readme.txt squashed away:\n{status}"
+    );
+}
+
 #[test]
 fn lsp_execute_cursor_form_invalid_buffer_returns_error() {
     let dir = tempfile::tempdir().unwrap();

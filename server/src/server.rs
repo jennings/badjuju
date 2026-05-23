@@ -102,6 +102,29 @@ fn read_uri_from_disk(uri: &str) -> Option<String> {
     std::fs::read_to_string(path).ok()
 }
 
+/// Resolve `(file, revision)` for squash/unsquash. Accepts either the legacy
+/// `[file, revision]` string pair or a single `[{cursor:{uri,line}}]` object
+/// (server pulls both from the same status.jujutsu line).
+fn resolve_file_scoped_args(
+    first: Option<&serde_json::Value>,
+    second: Option<&serde_json::Value>,
+    documents: &HashMap<String, String>,
+) -> Result<(String, String)> {
+    if let Some(resolved) = commands::resolve_file_and_revision_arg(first, |uri| {
+        documents
+            .get(uri)
+            .cloned()
+            .or_else(|| read_uri_from_disk(uri))
+    })
+    .map_err(lsp_err)?
+    {
+        return Ok(resolved);
+    }
+    let file = first.and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let revision = second.and_then(|v| v.as_str()).unwrap_or("").to_string();
+    Ok((file, revision))
+}
+
 /// Parse the optional `commandReference` object passed in `initializationOptions`.
 /// Each of `status`, `log`, and `diff` is an optional string override. Missing
 /// or non-string values fall back to the profile-rendered defaults.
@@ -404,32 +427,23 @@ impl LanguageServer for Backend {
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.squash" => {
-                let file = params
-                    .arguments
-                    .first()
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let revision = params
-                    .arguments
-                    .get(1)
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let uri = commands::run_squash(&jj, &workspace, file, revision).map_err(lsp_err)?;
+                let (file, revision) = resolve_file_scoped_args(
+                    params.arguments.first(),
+                    params.arguments.get(1),
+                    &documents,
+                )?;
+                let uri =
+                    commands::run_squash(&jj, &workspace, &file, &revision).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.unsquash" => {
-                let file = params
-                    .arguments
-                    .first()
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let revision = params
-                    .arguments
-                    .get(1)
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let (file, revision) = resolve_file_scoped_args(
+                    params.arguments.first(),
+                    params.arguments.get(1),
+                    &documents,
+                )?;
                 let uri =
-                    commands::run_unsquash(&jj, &workspace, file, revision).map_err(lsp_err)?;
+                    commands::run_unsquash(&jj, &workspace, &file, &revision).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.toggleStat" => {
