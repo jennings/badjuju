@@ -397,6 +397,98 @@ fn lsp_execute_squash_legacy_form_still_works() {
     );
 }
 
+/// Find the 0-indexed line of the first `JJ: <Label>: <revset>` shortcut line
+/// in the log buffer, returning (line, revset).
+fn first_log_shortcut(content: &str) -> Option<(usize, String)> {
+    for (i, line) in content.lines().enumerate() {
+        if !line.starts_with("JJ:") {
+            continue;
+        }
+        let after = line.strip_prefix("JJ:")?.trim_start();
+        let colon = after.find(':')?;
+        let revset = after[colon + 1..].trim();
+        if !revset.is_empty() {
+            return Some((i, revset.to_string()));
+        }
+    }
+    None
+}
+
+#[test]
+fn lsp_execute_log_with_cursor_form_on_shortcut_applies_revset() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let log_uri = session.execute_command("badjuju.log");
+    let log_content = read_file(&log_uri);
+    let (line, expected_revset) = first_log_shortcut(&log_content)
+        .unwrap_or_else(|| panic!("no log shortcut line found:\n{log_content}"));
+
+    session.did_open(&log_uri, "jujutsu", &log_content);
+
+    let resp = session.execute_command_with_args(
+        "badjuju.log",
+        serde_json::json!([{ "cursor": { "uri": log_uri, "line": line } }]),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "log with cursor form returned error: {resp}"
+    );
+    let new_log_uri = resp["result"].as_str().unwrap();
+    let new_log = read_file(new_log_uri);
+    assert!(
+        new_log.starts_with(&format!("REVSET: {expected_revset}")),
+        "expected REVSET header `{expected_revset}`, got:\n{new_log}"
+    );
+}
+
+#[test]
+fn lsp_execute_log_with_cursor_form_on_non_shortcut_returns_error() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let log_uri = session.execute_command("badjuju.log");
+    let log_content = read_file(&log_uri);
+    // The REVSET: line itself (line 0) isn't a shortcut.
+    session.did_open(&log_uri, "jujutsu", &log_content);
+
+    let resp = session.execute_command_with_args(
+        "badjuju.log",
+        serde_json::json!([{ "cursor": { "uri": log_uri, "line": 0 } }]),
+    );
+    assert!(
+        resp.get("error").is_some(),
+        "expected error for non-shortcut line, got: {resp}"
+    );
+}
+
+#[test]
+fn lsp_execute_log_legacy_string_form_still_works() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let resp = session.execute_command_with_args("badjuju.log", serde_json::json!(["@"]));
+    assert!(
+        resp.get("error").is_none(),
+        "log with legacy form returned error: {resp}"
+    );
+    let uri = resp["result"].as_str().unwrap();
+    let content = read_file(uri);
+    assert!(content.starts_with("REVSET: @"));
+}
+
 #[test]
 fn lsp_execute_cursor_form_invalid_buffer_returns_error() {
     let dir = tempfile::tempdir().unwrap();

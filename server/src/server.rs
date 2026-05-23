@@ -358,12 +358,19 @@ impl LanguageServer for Backend {
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.log" => {
-                let revset = params
-                    .arguments
-                    .first()
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let uri = commands::run_log(&jj, &workspace, revset).map_err(lsp_err)?;
+                let arg = params.arguments.first();
+                // Cursor-form: read log.jujutsu and pull the revset off a
+                // `JJ: <Label>: <revset>` shortcut line under the cursor.
+                let cursor_revset = commands::resolve_log_shortcut_arg(arg, |uri| {
+                    documents
+                        .get(uri)
+                        .cloned()
+                        .or_else(|| read_uri_from_disk(uri))
+                })
+                .map_err(lsp_err)?;
+                let revset = cursor_revset
+                    .unwrap_or_else(|| arg.and_then(|v| v.as_str()).unwrap_or("").to_string());
+                let uri = commands::run_log(&jj, &workspace, &revset).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.describe" => {
