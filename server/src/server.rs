@@ -213,10 +213,15 @@ impl LanguageServer for Backend {
                     commands: COMMANDS.iter().map(|s| s.to_string()).collect(),
                     work_done_progress_options: Default::default(),
                 }),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 ..Default::default()
             },
             ..Default::default()
         })
+    }
+
+    async fn code_action(&self, _params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        Ok(Some(vec![]))
     }
 
     async fn initialized(&self, _: InitializedParams) {

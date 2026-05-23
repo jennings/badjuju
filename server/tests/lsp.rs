@@ -83,7 +83,7 @@ impl LspSession {
         }));
     }
 
-    fn initialize(&mut self, root_uri: &str) {
+    fn initialize(&mut self, root_uri: &str) -> serde_json::Value {
         let resp = self.request(
             "initialize",
             serde_json::json!({
@@ -94,6 +94,7 @@ impl LspSession {
         );
         assert!(resp.get("result").is_some(), "initialize failed: {resp}");
         self.notify("initialized", serde_json::json!({}));
+        resp
     }
 
     fn execute_command(&mut self, command: &str) -> String {
@@ -487,6 +488,51 @@ fn lsp_execute_log_legacy_string_form_still_works() {
     let uri = resp["result"].as_str().unwrap();
     let content = read_file(uri);
     assert!(content.starts_with("REVSET: @"));
+}
+
+#[test]
+fn lsp_advertises_code_action_provider_capability() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    let init = session.initialize(&root_uri);
+    let cap = &init["result"]["capabilities"]["codeActionProvider"];
+    assert!(
+        !cap.is_null(),
+        "expected codeActionProvider in capabilities, got: {init}"
+    );
+}
+
+#[test]
+fn lsp_code_action_returns_empty_list() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let log_uri = session.execute_command("badjuju.log");
+    let resp = session.request(
+        "textDocument/codeAction",
+        serde_json::json!({
+            "textDocument": { "uri": log_uri },
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end":   { "line": 0, "character": 0 }
+            },
+            "context": { "diagnostics": [] }
+        }),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "code action returned error: {resp}"
+    );
+    let result = &resp["result"];
+    assert!(result.is_array(), "expected array, got: {result}");
+    assert_eq!(result.as_array().unwrap().len(), 0);
 }
 
 #[test]
