@@ -196,6 +196,29 @@ async function openServerResult(
   await window.showTextDocument(doc, showOpts);
 }
 
+/**
+ * Build a `[{cursor: {uri, line}}]` argument array from the active editor's
+ * cursor when it sits in a status or log buffer. Returns `undefined` if no
+ * such editor — callers should fall through to a default (empty arguments,
+ * server defaults to `@`).
+ */
+function cursorArgsForActiveEditor():
+  | [{ cursor: { uri: string; line: number } }]
+  | undefined {
+  const editor = window.activeTextEditor;
+  if (!editor) return undefined;
+  const uri = editor.document.uri;
+  if (!isStatusFile(uri) && !isLogFile(uri)) return undefined;
+  return [
+    {
+      cursor: {
+        uri: uri.toString(),
+        line: editor.selection.active.line,
+      },
+    },
+  ];
+}
+
 async function runFileScopedStatusCommand(
   serverCommand: string,
 ): Promise<void> {
@@ -341,37 +364,22 @@ export async function activate(context: ExtensionContext) {
       await openServerResult(result as string);
     }),
     commands.registerCommand("badjuju.describe.open", async () => {
-      const editor = window.activeTextEditor;
-      let revision = "";
-      if (editor) {
-        const uri = editor.document.uri;
-        const lines: string[] = [];
-        for (let i = 0; i < editor.document.lineCount; i++) {
-          lines.push(editor.document.lineAt(i).text);
-        }
-        const cursorLine = editor.selection.active.line;
-        if (isStatusFile(uri)) {
-          revision = findRevisionForLine(lines, cursorLine);
-        } else if (isLogFile(uri)) {
-          const found = findLogRevision(lines, cursorLine);
-          if (!found) {
-            window.showInformationMessage(
-              "describe: place cursor on a commit line",
-            );
-            return;
-          }
-          revision = found;
-        }
+      const args = cursorArgsForActiveEditor() ?? [];
+      try {
+        const result = await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.describe",
+          arguments: args,
+        });
+        const doc = await workspace.openTextDocument(
+          Uri.parse(result as string),
+        );
+        await window.showTextDocument(doc, {
+          preview: false,
+          preserveFocus: false,
+        });
+      } catch (e) {
+        window.showInformationMessage(`describe: ${(e as Error).message}`);
       }
-      const result = await client.sendRequest("workspace/executeCommand", {
-        command: "badjuju.describe",
-        arguments: revision ? [revision] : [],
-      });
-      const doc = await workspace.openTextDocument(Uri.parse(result as string));
-      await window.showTextDocument(doc, {
-        preview: false,
-        preserveFocus: false,
-      });
     }),
     commands.registerCommand("badjuju.log.open", async () => {
       const defaultRevset: string =
@@ -417,30 +425,19 @@ export async function activate(context: ExtensionContext) {
       updateLogShortcutContext(editor);
     }),
     commands.registerCommand("badjuju.new.open", async () => {
-      // When invoked from a status or log buffer, use the commit under the
-      // cursor as the new change's parent. Outside those buffers (or with the
-      // cursor not on a commit line in a log buffer), fall back to the server
+      // When invoked from a status or log buffer, ship the cursor so the server
+      // can resolve the commit under it; otherwise fall back to the server
       // default of creating a child of @.
-      const editor = window.activeTextEditor;
-      let parent = "";
-      if (editor) {
-        const uri = editor.document.uri;
-        const lines: string[] = [];
-        for (let i = 0; i < editor.document.lineCount; i++) {
-          lines.push(editor.document.lineAt(i).text);
-        }
-        const cursorLine = editor.selection.active.line;
-        if (isStatusFile(uri)) {
-          parent = findRevisionForLine(lines, cursorLine);
-        } else if (isLogFile(uri)) {
-          parent = findLogRevision(lines, cursorLine) ?? "";
-        }
+      const args = cursorArgsForActiveEditor() ?? [];
+      try {
+        const result = await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.new",
+          arguments: args,
+        });
+        await openServerResult(result as string);
+      } catch (e) {
+        window.showInformationMessage(`new: ${(e as Error).message}`);
       }
-      const result = await client.sendRequest("workspace/executeCommand", {
-        command: "badjuju.new",
-        arguments: parent ? [parent] : [],
-      });
-      await openServerResult(result as string);
     }),
     commands.registerCommand("badjuju.next.open", async () => {
       const result = await client.sendRequest("workspace/executeCommand", {
@@ -503,33 +500,16 @@ export async function activate(context: ExtensionContext) {
       await openServerResult(result as string);
     }),
     commands.registerCommand("badjuju.diff.cursor", async () => {
-      const editor = window.activeTextEditor;
-      let revision = "@";
-      if (editor) {
-        const uri = editor.document.uri;
-        const lines: string[] = [];
-        for (let i = 0; i < editor.document.lineCount; i++) {
-          lines.push(editor.document.lineAt(i).text);
-        }
-        const cursorLine = editor.selection.active.line;
-        if (isStatusFile(uri)) {
-          revision = findRevisionForLine(lines, cursorLine);
-        } else if (isLogFile(uri)) {
-          const found = findLogRevision(lines, cursorLine);
-          if (!found) {
-            window.showInformationMessage(
-              "diff: place cursor on a commit line",
-            );
-            return;
-          }
-          revision = found;
-        }
+      const args = cursorArgsForActiveEditor() ?? [];
+      try {
+        const result = await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.diff",
+          arguments: args,
+        });
+        await openServerResult(result as string, { aside: true });
+      } catch (e) {
+        window.showInformationMessage(`diff: ${(e as Error).message}`);
       }
-      const result = await client.sendRequest("workspace/executeCommand", {
-        command: "badjuju.diff",
-        arguments: [revision],
-      });
-      await openServerResult(result as string, { aside: true });
     }),
     commands.registerCommand("badjuju.describe.finalize", async () => {
       await commands.executeCommand("workbench.action.files.save");
@@ -631,63 +611,36 @@ export async function activate(context: ExtensionContext) {
       await openServerResult(result as string);
     }),
     commands.registerCommand("badjuju.edit.cursor", async () => {
-      const editor = window.activeTextEditor;
-      let revision = "@";
-      if (editor) {
-        const uri = editor.document.uri;
-        const lines: string[] = [];
-        for (let i = 0; i < editor.document.lineCount; i++) {
-          lines.push(editor.document.lineAt(i).text);
-        }
-        const cursorLine = editor.selection.active.line;
-        if (isStatusFile(uri)) {
-          revision = findRevisionForLine(lines, cursorLine);
-        } else if (isLogFile(uri)) {
-          const found = findLogRevision(lines, cursorLine);
-          if (!found) {
-            window.showInformationMessage(
-              "edit: place cursor on a commit line",
-            );
-            return;
-          }
-          revision = found;
-        }
+      const args = cursorArgsForActiveEditor() ?? [];
+      try {
+        const result = await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.edit",
+          arguments: args,
+        });
+        await openServerResult(result as string);
+      } catch (e) {
+        window.showInformationMessage(`edit: ${(e as Error).message}`);
       }
-      const result = await client.sendRequest("workspace/executeCommand", {
-        command: "badjuju.edit",
-        arguments: [revision],
-      });
-      await openServerResult(result as string);
     }),
     commands.registerCommand("badjuju.abandon.cursor", async () => {
+      // Capture whether we're in a log buffer before the abandon, so we can
+      // stay there afterward (refresh log) instead of jumping to status.
       const editor = window.activeTextEditor;
-      let revision = "@";
-      let logUri: string | null = null;
-      if (editor) {
-        const uri = editor.document.uri;
-        const lines: string[] = [];
-        for (let i = 0; i < editor.document.lineCount; i++) {
-          lines.push(editor.document.lineAt(i).text);
-        }
-        const cursorLine = editor.selection.active.line;
-        if (isStatusFile(uri)) {
-          revision = findRevisionForLine(lines, cursorLine);
-        } else if (isLogFile(uri)) {
-          const found = findLogRevision(lines, cursorLine);
-          if (!found) {
-            window.showInformationMessage(
-              "abandon: place cursor on a commit line",
-            );
-            return;
-          }
-          revision = found;
-          logUri = uri.toString();
-        }
+      const logUri =
+        editor && isLogFile(editor.document.uri)
+          ? editor.document.uri.toString()
+          : null;
+      const args = cursorArgsForActiveEditor() ?? [];
+      let result: unknown;
+      try {
+        result = await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.abandon",
+          arguments: args,
+        });
+      } catch (e) {
+        window.showInformationMessage(`abandon: ${(e as Error).message}`);
+        return;
       }
-      const result = await client.sendRequest("workspace/executeCommand", {
-        command: "badjuju.abandon",
-        arguments: [revision],
-      });
       if (logUri) {
         // Stay in the log view — refresh it instead of opening the returned status URI.
         const logResult = await client.sendRequest("workspace/executeCommand", {
