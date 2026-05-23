@@ -164,6 +164,37 @@ describe('revision-scoped hotkeys send cursor-form', function()
     )
   end
 
+  for _, case in ipairs({
+    { key = 's', server_command = 'badjuju.squash' },
+    { key = 'U', server_command = 'badjuju.unsquash' },
+  }) do
+    it(
+      'status.jujutsu ' .. case.key .. ' sends cursor-form for ' .. case.server_command,
+      function()
+        local captured, restore = capture_execute()
+        local buf = setup_buffer('.jj/badjuju/status.jujutsu', {
+          'STATUS:',
+          '',
+          'Working copy changes:',
+          'M src/main.rs',
+        })
+        -- Cursor on the M file line (line 4, 1-indexed).
+        vim.api.nvim_win_set_cursor(0, { 4, 0 })
+
+        local cb = find_callback(buf, case.key)
+        assert.is_not_nil(cb, 'expected callback for ' .. case.key)
+        cb()
+        restore()
+
+        assert.are.equal(1, #captured)
+        assert.are.equal(case.server_command, captured[1].command)
+        local arg = captured[1].args[1]
+        assert.are.equal(3, arg.cursor.line, 'cursor line is 0-indexed (row 4 -> 3)')
+        assert.is_truthy(arg.cursor.uri:match('/status%.jujutsu$'))
+      end
+    )
+  end
+
   it('status.jujutsu e sends cursor-form for badjuju.edit', function()
     local captured, restore = capture_execute()
     local buf = setup_buffer('.jj/badjuju/status.jujutsu', {
