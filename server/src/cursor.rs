@@ -155,7 +155,7 @@ const STAT_GRAPH_CHARS: &[char] = &[
 
 /// If `line` is a commit-header line (graph char + whitespace + change_id),
 /// return the change_id. Otherwise `None`.
-fn match_commit_header(line: &str) -> Option<&str> {
+pub(crate) fn match_commit_header(line: &str) -> Option<&str> {
     let first = line.chars().next()?;
     if !COMMIT_HEADER_CHARS.contains(&first) {
         return None;
@@ -183,7 +183,7 @@ fn match_commit_header(line: &str) -> Option<&str> {
 
 /// Parse a status-section header line: `M src/main.rs`, `A new.txt`, etc.
 /// Returns the path (with any rename arrow stripped to the destination).
-fn parse_status_header_line(line: &str) -> Option<String> {
+pub(crate) fn parse_status_header_line(line: &str) -> Option<String> {
     let mut chars = line.chars();
     let flag = chars.next()?;
     if !matches!(flag, 'M' | 'A' | 'D' | 'C' | 'R') {

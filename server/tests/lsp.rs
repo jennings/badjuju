@@ -1019,6 +1019,117 @@ fn lsp_code_action_on_log_shortcut_line_returns_apply_revset() {
 }
 
 #[test]
+fn lsp_advertises_semantic_tokens_provider_with_legend() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    let init = session.initialize(&root_uri);
+    let cap = &init["result"]["capabilities"]["semanticTokensProvider"];
+    assert!(
+        !cap.is_null(),
+        "expected semanticTokensProvider, got: {init}"
+    );
+    let types = cap["legend"]["tokenTypes"]
+        .as_array()
+        .expect("tokenTypes array");
+    let type_names: Vec<&str> = types.iter().map(|v| v.as_str().unwrap()).collect();
+    assert_eq!(
+        type_names,
+        vec![
+            "comment",
+            "keyword",
+            "string",
+            "type",
+            "enumMember",
+            "number",
+            "operator"
+        ]
+    );
+    let mods = cap["legend"]["tokenModifiers"]
+        .as_array()
+        .expect("tokenModifiers array");
+    let mod_names: Vec<&str> = mods.iter().map(|v| v.as_str().unwrap()).collect();
+    assert_eq!(mod_names, vec!["documentation"]);
+    assert_eq!(cap["full"].as_bool(), Some(true));
+}
+
+#[test]
+fn lsp_semantic_tokens_full_returns_expected_tokens() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    // didOpen a synthetic status.jujutsu so the assertions stay deterministic.
+    let uri = format!("file://{}/status.jujutsu", dir.path().display());
+    let content = "STATUS:\n\nM src/main.rs\n\n@  qpvuntsm 1234abcd\n";
+    session.did_open(&uri, "jujutsu", content);
+
+    let resp = session.request(
+        "textDocument/semanticTokens/full",
+        serde_json::json!({
+            "textDocument": { "uri": uri }
+        }),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "semanticTokens/full returned error: {resp}"
+    );
+    let data = resp["result"]["data"]
+        .as_array()
+        .expect("data array")
+        .iter()
+        .map(|v| v.as_u64().unwrap() as u32)
+        .collect::<Vec<_>>();
+    // Layout (delta-line, delta-start, length, type, mod):
+    //   STATUS:           line 0, col 0, len 7, type=1 (keyword)
+    //   M (file_status)   line 2, col 0, len 2, type=3 (type)
+    //   @ (graph)         line 4, col 0, len 1, type=6 (operator)
+    //   qpvuntsm (chgid)  line 4, col 3, len 8, type=5 (number)
+    //   1234abcd (ctmid)  line 4, col 12, len 8, type=5 (number)
+    assert_eq!(
+        data,
+        vec![
+            0, 0, 7, 1, 0, // STATUS:
+            2, 0, 2, 3, 0, // M
+            2, 0, 1, 6, 0, // @
+            0, 3, 8, 5, 0, // qpvuntsm
+            0, 9, 8, 5, 0, // 1234abcd (delta from previous: 12 - 3 = 9)
+        ]
+    );
+}
+
+#[test]
+fn lsp_semantic_tokens_full_unknown_buffer_uri_returns_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let uri = format!("file://{}/other.txt", dir.path().display());
+    session.did_open(&uri, "plaintext", "hello world\n");
+
+    let resp = session.request(
+        "textDocument/semanticTokens/full",
+        serde_json::json!({
+            "textDocument": { "uri": uri }
+        }),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "semanticTokens/full returned error: {resp}"
+    );
+    let data = resp["result"]["data"].as_array().expect("data array");
+    assert!(data.is_empty(), "expected empty tokens, got: {data:?}");
+}
+
+#[test]
 fn lsp_execute_cursor_form_invalid_buffer_returns_error() {
     let dir = tempfile::tempdir().unwrap();
     init_jj_repo(dir.path());

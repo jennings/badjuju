@@ -9,6 +9,7 @@ use tracing::{info, warn};
 
 use crate::commands::{self, CommandReference};
 use crate::cursor::{self, BufferKind};
+use crate::highlighting;
 use crate::jj::Jj;
 use crate::keymap::{self, KeymapProfile};
 use crate::workspace::find_workspace_root;
@@ -286,10 +287,55 @@ impl LanguageServer for Backend {
                     work_done_progress_options: Default::default(),
                 }),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: SemanticTokensLegend {
+                                token_types: highlighting::TOKEN_TYPES.to_vec(),
+                                token_modifiers: highlighting::TOKEN_MODIFIERS.to_vec(),
+                            },
+                            range: Some(false),
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            ..Default::default()
+                        },
+                    ),
+                ),
                 ..Default::default()
             },
             ..Default::default()
         })
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let uri = params.text_document.uri.to_string();
+        let Some(kind) = BufferKind::from_uri(&uri) else {
+            return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+                result_id: None,
+                data: vec![],
+            })));
+        };
+        let content = {
+            let state = self.state.read().await;
+            state
+                .documents
+                .get(&uri)
+                .cloned()
+                .or_else(|| read_uri_from_disk(&uri))
+        };
+        let Some(content) = content else {
+            return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+                result_id: None,
+                data: vec![],
+            })));
+        };
+        let data = highlighting::semantic_tokens(&content, kind);
+        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None,
+            data,
+        })))
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
