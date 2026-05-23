@@ -97,6 +97,11 @@
         "title": "Open log"
       },
       {
+        "command": "badjuju.log.prompt",
+        "category": "jj",
+        "title": "Open log with custom revset…"
+      },
+      {
         "command": "badjuju.new.open",
         "category": "jj",
         "title": "New commit"

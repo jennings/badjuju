@@ -65,11 +65,11 @@ function isDescribeFile(uri: Uri): boolean {
   return uri.path.endsWith("/describe.jujutsu");
 }
 
-// Generated buffers the server rewrites on every command must open through
-// the readonly scheme. log.jujutsu is intentionally excluded — its REVSET
-// header is editable and re-runs the query on save.
+// Generated buffers the server rewrites on every command always open through
+// the readonly scheme. Custom revsets are entered via the
+// `badjuju.log.prompt` command rather than by editing the REVSET header.
 function isReadonlyOutput(uri: Uri): boolean {
-  return isStatusFile(uri) || isDiffFile(uri);
+  return isStatusFile(uri) || isLogFile(uri) || isDiffFile(uri);
 }
 
 function waitForDocumentChange(
@@ -331,8 +331,23 @@ export async function activate(context: ExtensionContext) {
         command: "badjuju.log",
         arguments: defaultRevset ? [defaultRevset] : [],
       });
-      const doc = await workspace.openTextDocument(Uri.parse(result as string));
-      await window.showTextDocument(doc, { preserveFocus: false });
+      await openServerResult(result as string);
+    }),
+    commands.registerCommand("badjuju.log.prompt", async () => {
+      const revset = await window.showInputBox({
+        prompt: "Custom revset for log",
+        placeHolder: "e.g. main, @-, all(), trunk()::",
+      });
+      if (revset === undefined) return;
+      try {
+        const result = await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.log",
+          arguments: [revset],
+        });
+        await openServerResult(result as string);
+      } catch (e) {
+        window.showInformationMessage(`log: ${(e as Error).message}`);
+      }
     }),
     commands.registerCommand("badjuju.log.applyShortcut", async () => {
       const editor = window.activeTextEditor;
