@@ -320,12 +320,11 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'D', function() run_at_cursor_split('log', 'badjuju.diff', 'diff') end,
         'badjuju: diff commit at cursor in a split')
     end
-    nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
     nmap(bufnr, '<CR>', apply_log_shortcut, 'badjuju: apply revset shortcut under cursor')
     nmap(bufnr, '?', function() show_help('log') end, 'badjuju: show help')
   elseif name:match('/%.jj/badjuju/diff%.jujutsu$') then
     nmap(bufnr, 'g', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
-    nmap(bufnr, 'R', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
+    nmap(bufnr, 'r', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
     nmap(bufnr, '?', function() show_help('diff') end, 'badjuju: show help')
   elseif name:match('/%.jj/badjuju/describe%.jujutsu$') then
