@@ -138,12 +138,6 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
     },
     // All main windows
     KeymapEntry {
-        key: "g",
-        action: "badjuju.refresh",
-        description: "refresh",
-        windows: &["status", "log", "diff"],
-    },
-    KeymapEntry {
         key: "R",
         action: "badjuju.refresh",
         description: "refresh",
@@ -274,12 +268,6 @@ static VIM_ENTRIES: &[KeymapEntry] = &[
     },
     // All main windows
     KeymapEntry {
-        key: "g",
-        action: "badjuju.refresh",
-        description: "refresh",
-        windows: &["status", "log", "diff"],
-    },
-    KeymapEntry {
         key: "R",
         action: "badjuju.refresh",
         description: "refresh",
@@ -363,8 +351,8 @@ mod tests {
         let text = render_command_reference(&KeymapProfile::Magit, "status");
         assert!(text.starts_with("COMMAND REFERENCE:"));
         for key in [
-            "n", "L", "b", "r", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "=", "g", "R",
-            "q", "?",
+            "n", "L", "b", "r", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "=", "R", "q",
+            "?",
         ] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
@@ -384,7 +372,7 @@ mod tests {
             text.contains("shortcut line"),
             "missing shortcut hint in:\n{text}"
         );
-        for key in ["b", "r", "e", "d", "D", "a", "g", "R", "q", "?"] {
+        for key in ["b", "r", "e", "d", "D", "a", "R", "q", "?"] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in log:\n{text}"
@@ -393,9 +381,9 @@ mod tests {
     }
 
     #[test]
-    fn render_diff_has_g_r_q_help() {
+    fn render_diff_has_refresh_close_help() {
         let text = render_command_reference(&KeymapProfile::Magit, "diff");
-        for key in ["g", "R", "q", "?"] {
+        for key in ["R", "q", "?"] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in diff:\n{text}"
@@ -441,8 +429,8 @@ mod tests {
         let text = render_command_reference(&KeymapProfile::Vim, "status");
         assert!(text.starts_with("COMMAND REFERENCE:"));
         for key in [
-            "nn", "ll", "ff", "pp", "PP", "uu", "ss", "UU", "bb", "rr", "ee", "dd", "D", "aa", "g",
-            "R", "q", "?",
+            "nn", "ll", "ff", "pp", "PP", "uu", "ss", "UU", "bb", "rr", "ee", "dd", "D", "aa", "R",
+            "q", "?",
         ] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
@@ -454,7 +442,7 @@ mod tests {
     #[test]
     fn vim_profile_log_contains_two_letter_verbs() {
         let text = render_command_reference(&KeymapProfile::Vim, "log");
-        for key in ["bb", "rr", "ee", "dd", "D", "aa", "g", "R", "q", "?"] {
+        for key in ["bb", "rr", "ee", "dd", "D", "aa", "R", "q", "?"] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in vim log:\n{text}"

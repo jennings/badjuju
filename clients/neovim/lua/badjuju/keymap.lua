@@ -14,7 +14,6 @@ local function map_cmd(bufnr, key, ex_command, desc)
 end
 
 local STATUS_MAPS = {
-  { 'g', 'JJRefresh',    'badjuju: refresh' },
   { 'R', 'JJRefresh',    'badjuju: refresh' },
   { 'n', 'JJNew',        'badjuju: new change' },
   { 'L', 'JJLog',        'badjuju: open log' },
@@ -54,7 +53,6 @@ local function run_file_scoped(server_command)
 end
 
 local LOG_MAPS = {
-  { 'g', 'JJRefresh', 'badjuju: refresh' },
   { 'R', 'JJRefresh', 'badjuju: refresh' },
   { 'a', 'JJAbandon', 'badjuju: abandon revision' },
 }
@@ -294,8 +292,7 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'A', vim.lsp.buf.code_action, 'badjuju: code actions menu')
     end
   elseif name:match('/%.jj/badjuju/diff%.jujutsu$') then
-    nmap(bufnr, 'g', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
-    nmap(bufnr, 'r', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
+    nmap(bufnr, 'R', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
     nmap(bufnr, '?', function() show_help('diff') end, 'badjuju: show help')
   elseif name:match('/%.jj/badjuju/describe%.jujutsu$') then

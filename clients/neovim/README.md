@@ -190,7 +190,7 @@ Inspired by Magit/Lazygit conventions.
 
 | Key      | Action                                             |
 | -------- | -------------------------------------------------- |
-| `g`, `R` | Refresh                                            |
+| `R`      | Refresh                                            |
 | `n`      | New change (`:JJNew`)                              |
 | `L`      | Open log (`:JJLog`)                                |
 | `f`      | Git fetch                                          |
@@ -213,7 +213,7 @@ Inspired by Magit/Lazygit conventions.
 
 | Key      | Action                                                 |
 | -------- | ------------------------------------------------------ |
-| `g`, `R` | Refresh                                                |
+| `R`      | Refresh                                                |
 | `e`      | Edit commit at cursor (move @)                         |
 | `b`      | Bookmark                                               |
 | `r`      | Rebase commit at cursor to destination                 |
@@ -227,7 +227,7 @@ Inspired by Magit/Lazygit conventions.
 
 | Key      | Action                                            |
 | -------- | ------------------------------------------------- |
-| `g`, `R` | Refresh (re-runs `jj diff` for the same revision) |
+| `R`      | Refresh (re-runs `jj diff` for the same revision) |
 | `q`      | Close window                                      |
 | `?`      | Show key binding help                             |
 
@@ -279,7 +279,7 @@ require('badjuju').setup({ keymapProfile = 'vim' })
 
 | Key      | Action                                 |
 | -------- | -------------------------------------- |
-| `g`, `R` | Refresh                                |
+| `R`      | Refresh                                |
 | `ee`     | Edit commit at cursor (move @)         |
 | `bb`     | Bookmark                               |
 | `rr`     | Rebase commit at cursor to destination |

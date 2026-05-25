@@ -47,7 +47,7 @@ Inspired by Magit/Lazygit conventions.
 
 | Key             | Action                                             |
 | --------------- | -------------------------------------------------- |
-| `g`, `R`        | Refresh                                            |
+| `R`             | Refresh                                            |
 | `n`             | New commit                                         |
 | `L`             | Open log                                           |
 | `Ctrl+N`        | Move forward (`jj next`)                           |
@@ -74,7 +74,7 @@ Inspired by Magit/Lazygit conventions.
 
 | Key             | Action                                             |
 | --------------- | -------------------------------------------------- |
-| `g`, `R`        | Refresh                                            |
+| `R`             | Refresh                                            |
 | `n`             | New commit                                         |
 | `L`             | Open log                                           |
 | `Ctrl+N`        | Move forward (`jj next`)                           |
@@ -101,7 +101,7 @@ Inspired by Magit/Lazygit conventions.
 
 | Key      | Action                |
 | -------- | --------------------- |
-| `g`, `R` | Refresh               |
+| `R`      | Refresh               |
 | `q`      | Close window          |
 | `?`      | Show key binding help |
 
@@ -123,7 +123,7 @@ Inspired by Fugitive-style bindings. Most actions use doubled letters (`nn`, `dd
 
 | Key      | Action                                         |
 | -------- | ---------------------------------------------- |
-| `g`, `R` | Refresh                                        |
+| `R`      | Refresh                                        |
 | `nn`     | New commit                                     |
 | `ll`     | Open log                                       |
 | `ff`     | Git fetch                                      |
@@ -146,7 +146,7 @@ Inspired by Fugitive-style bindings. Most actions use doubled letters (`nn`, `dd
 
 | Key      | Action                                 |
 | -------- | -------------------------------------- |
-| `g`, `R` | Refresh                                |
+| `R`      | Refresh                                |
 | `ee`     | Edit commit at cursor (move @)         |
 | `bb`     | Bookmark                               |
 | `rr`     | Rebase commit at cursor to destination |

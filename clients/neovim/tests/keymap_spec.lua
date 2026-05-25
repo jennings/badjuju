@@ -23,20 +23,32 @@ local function has_buffer_map(bufnr, key)
 end
 
 describe('keymap.setup_for_buffer', function()
-  it('installs status.jujutsu maps including g/r/n/L/d/q/u/= and a', function()
+  it('installs status.jujutsu maps including R/r/n/L/d/q/u/= and a', function()
     local buf = open_named('.jj/badjuju/status.jujutsu')
-    for _, key in ipairs({ 'g', 'r', 'n', 'L', 'd', 'q', 'u', '=', 'a' }) do
+    for _, key in ipairs({ 'R', 'r', 'n', 'L', 'd', 'q', 'u', '=', 'a' }) do
       local found = has_buffer_map(buf, key)
       assert.is_true(found, 'expected status.jujutsu map for ' .. key)
     end
   end)
 
+  it('does NOT install g on status.jujutsu (would shadow gra code-action sequence)', function()
+    local buf = open_named('.jj/badjuju/status.jujutsu')
+    local found = has_buffer_map(buf, 'g')
+    assert.is_false(found, 'status.jujutsu should not bind g')
+  end)
+
   it('installs log.jujutsu maps for refresh, abandon, describe, and diff', function()
     local buf = open_named('.jj/badjuju/log.jujutsu')
-    for _, key in ipairs({ 'g', 'r', 'a', 'd', 'D' }) do
+    for _, key in ipairs({ 'R', 'r', 'a', 'd', 'D' }) do
       local found = has_buffer_map(buf, key)
       assert.is_true(found, 'expected log.jujutsu map for ' .. key)
     end
+  end)
+
+  it('does NOT install g on log.jujutsu (would shadow gra code-action sequence)', function()
+    local buf = open_named('.jj/badjuju/log.jujutsu')
+    local found = has_buffer_map(buf, 'g')
+    assert.is_false(found, 'log.jujutsu should not bind g')
   end)
 
   it('installs D for diff on status.jujutsu', function()
@@ -47,9 +59,17 @@ describe('keymap.setup_for_buffer', function()
 
   it('installs diff.jujutsu maps for refresh and close', function()
     local buf = open_named('.jj/badjuju/diff.jujutsu')
-    for _, key in ipairs({ 'g', 'r', 'q' }) do
+    for _, key in ipairs({ 'R', 'q' }) do
       local found = has_buffer_map(buf, key)
       assert.is_true(found, 'expected diff.jujutsu map for ' .. key)
+    end
+  end)
+
+  it('does NOT install g or r on diff.jujutsu (would shadow gra code-action sequence)', function()
+    local buf = open_named('.jj/badjuju/diff.jujutsu')
+    for _, key in ipairs({ 'g', 'r' }) do
+      local found = has_buffer_map(buf, key)
+      assert.is_false(found, 'diff.jujutsu should not bind ' .. key)
     end
   end)
 
@@ -93,7 +113,7 @@ describe('keymap.setup_for_buffer', function()
 
   it('does nothing for unrelated jujutsu buffers', function()
     local buf = open_named('describe.jujutsu')
-    for _, key in ipairs({ 'g', 'r', 'n', 'L', 'd', 'q', 'u', '=', 'a' }) do
+    for _, key in ipairs({ 'R', 'r', 'n', 'L', 'd', 'q', 'u', '=', 'a' }) do
       local found = has_buffer_map(buf, key)
       assert.is_false(found, 'unrelated buffer should not bind ' .. key)
     end

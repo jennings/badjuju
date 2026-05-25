@@ -850,8 +850,7 @@ mod tests {
         let content = std::fs::read_to_string(path).unwrap();
         // Every key in the magit status profile must appear at the start of a line.
         for key in [
-            "n", "L", "r", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "=", "g", "R", "q",
-            "?",
+            "n", "L", "r", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "=", "R", "q", "?",
         ] {
             assert!(
                 content.lines().any(|l| l.starts_with(key)),
