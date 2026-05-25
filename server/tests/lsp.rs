@@ -139,6 +139,17 @@ impl LspSession {
             }),
         );
     }
+
+    /// Read messages from the server until a server-initiated request with the given method
+    /// is found. Notifications and requests with other methods are silently skipped.
+    fn recv_server_request(&mut self, method: &str) -> serde_json::Value {
+        loop {
+            let msg = self.recv();
+            if msg.get("method").and_then(|v| v.as_str()) == Some(method) {
+                return msg;
+            }
+        }
+    }
 }
 
 impl Drop for LspSession {
@@ -1148,4 +1159,30 @@ fn lsp_execute_cursor_form_invalid_buffer_returns_error() {
         resp.get("error").is_some(),
         "expected error for unsupported buffer URI, got: {resp}"
     );
+}
+
+#[test]
+fn lsp_did_open_empty_status_jujutsu_auto_populates_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_path = dir.path().join(".jj").join("badjuju").join("status.jujutsu");
+    let status_uri = format!("file://{}", status_path.display());
+
+    session.did_open(&status_uri, "jujutsu", "");
+
+    // Server sends workspace/applyEdit after writing the file; receiving it confirms the write.
+    let req = session.recv_server_request("workspace/applyEdit");
+    session.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": req["id"],
+        "result": { "applied": true }
+    }));
+
+    let content = std::fs::read_to_string(&status_path).unwrap();
+    assert!(content.contains("STATUS:"), "status.jujutsu missing STATUS:");
+    assert!(content.contains("STACK:"), "status.jujutsu missing STACK:");
 }
