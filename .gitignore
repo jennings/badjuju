@@ -1,5 +1,6 @@
 target/
 .redo/
+*.did
 node_modules/
 clients/vscode/out/
 clients/vscode/dist/

@@ -82,6 +82,37 @@ Place the cursor on a shortcut line and press Enter to apply it.
 a     abandon commit at cursor
 ----
 
+== Editor Setup
+
+=== VS Code
+
+Install the extension from the marketplace or build it locally (see
+link:clients/vscode/README.md[]). Open a Jujutsu repo and run
+`Bad Juju: Open status window` from the command palette (`Ctrl+Shift+P` /
+`Cmd+Shift+P`).
+
+=== Neovim
+
+See link:clients/neovim/README.md[] for installation and configuration.
+Once the LSP is wired up, run:
+
+[source,viml]
+----
+:lua require('badjuju').execute('badjuju.status')
+----
+
+Or use the default keymap (`<leader>js` or whichever binding you configure).
+
+=== Helix
+
+See link:clients/helix/README.md[] for the `languages.toml` snippet. Once
+`badjuju` is on your PATH, open the status buffer with:
+
+[source,shell]
+----
+hx "$(badjuju status)"
+----
+
 == Prerequisites
 
 * https://www.rust-lang.org/tools/install[Rust toolchain] (edition 2024)
