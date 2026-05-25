@@ -92,8 +92,7 @@ fn cli_log_prints_absolute_path_to_log_jujutsu() {
         "expected absolute path, got: {path}"
     );
     assert!(
-        path.ends_with(".jj/badjuju/log.jujutsu")
-            || path.ends_with(".jj\\badjuju\\log.jujutsu"),
+        path.ends_with(".jj/badjuju/log.jujutsu") || path.ends_with(".jj\\badjuju\\log.jujutsu"),
         "expected path ending in .jj/badjuju/log.jujutsu, got: {path}"
     );
     assert!(
@@ -120,10 +119,7 @@ fn cli_log_with_revset_arg_succeeds() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(
-        !stdout.trim().is_empty(),
-        "expected non-empty output"
-    );
+    assert!(!stdout.trim().is_empty(), "expected non-empty output");
 }
 
 #[test]
@@ -151,8 +147,7 @@ fn cli_diff_prints_absolute_path_to_diff_jujutsu() {
         "expected absolute path, got: {path}"
     );
     assert!(
-        path.ends_with(".jj/badjuju/diff.jujutsu")
-            || path.ends_with(".jj\\badjuju\\diff.jujutsu"),
+        path.ends_with(".jj/badjuju/diff.jujutsu") || path.ends_with(".jj\\badjuju\\diff.jujutsu"),
         "expected path ending in .jj/badjuju/diff.jujutsu, got: {path}"
     );
     assert!(

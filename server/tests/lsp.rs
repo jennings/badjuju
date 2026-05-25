@@ -1169,7 +1169,11 @@ fn lsp_did_open_empty_status_jujutsu_auto_populates_disk() {
     let mut session = LspSession::start(dir.path());
     session.initialize(&root_uri);
 
-    let status_path = dir.path().join(".jj").join("badjuju").join("status.jujutsu");
+    let status_path = dir
+        .path()
+        .join(".jj")
+        .join("badjuju")
+        .join("status.jujutsu");
     let status_uri = format!("file://{}", status_path.display());
 
     session.did_open(&status_uri, "jujutsu", "");
@@ -1183,6 +1187,9 @@ fn lsp_did_open_empty_status_jujutsu_auto_populates_disk() {
     }));
 
     let content = std::fs::read_to_string(&status_path).unwrap();
-    assert!(content.contains("STATUS:"), "status.jujutsu missing STATUS:");
+    assert!(
+        content.contains("STATUS:"),
+        "status.jujutsu missing STATUS:"
+    );
     assert!(content.contains("STACK:"), "status.jujutsu missing STACK:");
 }

@@ -83,22 +83,20 @@ async fn main() {
         }
         Command::Log { revset } => {
             let (jj, workspace) = resolve_workspace();
-            let uri =
-                commands::run_log(&jj, &workspace, revset.as_deref().unwrap_or(""))
-                    .unwrap_or_else(|e| {
-                        eprintln!("badjuju: {e}");
-                        std::process::exit(1);
-                    });
+            let uri = commands::run_log(&jj, &workspace, revset.as_deref().unwrap_or(""))
+                .unwrap_or_else(|e| {
+                    eprintln!("badjuju: {e}");
+                    std::process::exit(1);
+                });
             print_path(&uri);
         }
         Command::Diff { revision } => {
             let (jj, workspace) = resolve_workspace();
-            let uri =
-                commands::run_diff(&jj, &workspace, revision.as_deref().unwrap_or("@"))
-                    .unwrap_or_else(|e| {
-                        eprintln!("badjuju: {e}");
-                        std::process::exit(1);
-                    });
+            let uri = commands::run_diff(&jj, &workspace, revision.as_deref().unwrap_or("@"))
+                .unwrap_or_else(|e| {
+                    eprintln!("badjuju: {e}");
+                    std::process::exit(1);
+                });
             print_path(&uri);
         }
     }

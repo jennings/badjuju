@@ -428,9 +428,7 @@ impl LanguageServer for Backend {
 
                 let result = match kind {
                     BufferKind::Status => commands::run_status(&jj, &workspace),
-                    BufferKind::Log => {
-                        commands::run_log(&jj, &workspace, "")
-                    }
+                    BufferKind::Log => commands::run_log(&jj, &workspace, ""),
                     BufferKind::Diff => commands::run_diff(&jj, &workspace, "@"),
                 };
 
