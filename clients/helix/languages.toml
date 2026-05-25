@@ -1,0 +1,10 @@
+[language-server.badjuju]
+command = "badjuju"
+args = ["lsp"]
+
+[[language]]
+name = "jujutsu"
+scope = "source.jujutsu"
+file-types = [{ glob = "*.jujutsu" }]
+roots = [".jj"]
+language-servers = ["badjuju"]
