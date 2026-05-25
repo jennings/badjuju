@@ -126,7 +126,7 @@ fn file_uri(path: &Path) -> String {
 /// Returns `None` for non-`file:` URIs or paths the URL crate can't decode
 /// (e.g. relative paths, missing Windows drive prefixes). Used by `run_refresh`
 /// to read the file the client just told us to regenerate.
-pub(crate) fn path_from_uri(uri: &str) -> Option<PathBuf> {
+pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
     Url::parse(uri).ok()?.to_file_path().ok()
 }
 
