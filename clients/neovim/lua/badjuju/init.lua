@@ -165,7 +165,7 @@ function M.execute(command, arguments, opts)
       -- in-progress commit message isn't discarded.
       local fname = vim.uri_to_fname(result)
       if not fname:match('/describe%.jujutsu$') then
-        pcall(vim.cmd, 'silent! edit!')
+        pcall(vim.cmd, 'checktime')
       end
       if opts and opts.after then
         opts.after(result)
