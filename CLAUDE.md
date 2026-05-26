@@ -122,7 +122,23 @@ clients/vscode/
 Key data flows:
 - **Command execution**: VS Code calls `workspace/executeCommand badjuju.status` → `server.rs::execute_command` → `commands::run_status` → writes `.jj/badjuju/status.jujutsu` → returns `file://` URI → VS Code opens the file.
 - **Save handling**: user edits `describe.jujutsu` → VS Code sends `textDocument/didSave` with full text → `server.rs::did_save` → `commands::on_describe_save` → strips `JJ:` lines → calls `jj describe -m`.
-- **State**: `Backend` holds `Arc<RwLock<State>>` containing `workspace_root`, `binary_path`, and open document text. Workspace root is discovered on `initialize` by walking up from `rootUri`.
+- **State**: `Backend` holds `Arc<RwLock<State>>` containing `workspace_root`, `binary_path`, open document text, open diff targets, and `virtual_diffs_enabled`. Workspace root is discovered on `initialize` by walking up from `rootUri`.
+
+### Diff delivery: two modes, two URI schemes
+
+Diff views come in two variants:
+
+- **Change diff** (`badjuju.diff`, hotkey `D`/`shift+d`): resolved to a stable **change-id**. Re-rendered after every mutating command (new/squash/describe/etc.) so the view reflects the latest amend.
+- **Commit diff** (`badjuju.diff.commit`, hotkey `ctrl+shift+d`): resolved to an immutable **commit-id**. Never refreshed — the view is pinned to that exact snapshot.
+
+Delivery varies by client capability:
+
+| Client | Delivery | File? |
+|--------|----------|-------|
+| VS Code / Neovim | Virtual URI `badjuju-diff:///change/<id>` or `badjuju-diff:///commit/<id>` | No file on disk |
+| Helix | Physical file `diff-change-<12char>.jujutsu` or `diff-commit-<12char>.jujutsu` | Yes, under `.jj/badjuju/` |
+
+The server detects capability via `initializationOptions.virtualDiffs: true` (VS Code and Neovim send this). Virtual-capable clients serve content via the custom `workspace/textDocumentContent` LSP 3.18 request. After mutations, the server sends `workspace/textDocumentContent/refresh` for each open change-diff URI; file-based clients get the file rewritten on disk instead.
 
 The server binary path defaults to `jj` on PATH but can be overridden via `initializationOptions.binaryPath` (matching the `badjuju.binaryPath` VS Code setting).
 

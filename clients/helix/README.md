@@ -44,12 +44,26 @@ The canonical one-liner opens the working-copy status view in Helix:
 hx "$(badjuju status)"
 ```
 
-Similarly for the log and diff views:
+Similarly for the log view, and for diff views:
 
 ```sh
 hx "$(badjuju log)"
-hx "$(badjuju diff)"
+hx "$(badjuju diff)"            # change diff for @ (updates on amend)
+hx "$(badjuju diff --revision abc123)"   # diff for a specific revision
 ```
+
+### Multiple diffs
+
+You can open multiple diffs simultaneously — each has a unique filename based on its revision id:
+
+```sh
+# Open two change diffs side by side (each updates independently on amend)
+hx "$(badjuju diff --revision abc)" "$(badjuju diff --revision def)"
+```
+
+Files are named `diff-change-<12char-id>.jujutsu` (for change diffs, which update
+when the change is amended) or `diff-commit-<12char-id>.jujutsu` (for commit diffs,
+pinned to a specific immutable commit that never changes).
 
 ## Navigation
 
@@ -60,7 +74,7 @@ cursor:
 - **Edit** — `jj edit <rev>`
 - **New child** — `jj new <rev>`
 - **Describe** — opens `describe.jujutsu` for editing the commit message
-- **Show diff** — writes `diff.jujutsu` for the commit
+- **Show diff** — writes `diff-change-<id>.jujutsu` (change mode, updates on amend)
 
 ## Syntax highlighting
 
@@ -73,8 +87,10 @@ After an action that produces a new buffer (e.g. Show diff), Helix does not
 auto-open the returned file path. Open it manually:
 
 ```
-:open .jj/badjuju/diff.jujutsu
+:open .jj/badjuju/diff-change-<id>.jujutsu
 ```
+
+(The exact filename is printed by `badjuju diff`.)
 
 Subsequent saves to `describe.jujutsu` are handled by `textDocument/didSave`
 and the buffer refreshes on disk, but Helix requires a manual `:reload` to
