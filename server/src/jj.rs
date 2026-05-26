@@ -76,6 +76,21 @@ impl Jj {
         // Pin the per-commit and graph-node templates so a user's
         // `templates.log` / `templates.log_node` overrides don't change the
         // shape of bad-juju's log buffers (which the clients parse).
+        // Use an explicit template instead of builtin_log_compact to avoid
+        // OSC 8 hyperlink escape codes that newer jj versions emit.
+        let template = concat!(
+            r#"separate("\n","#,
+            r#"  separate(" ","#,
+            r#"    change_id.shortest(8),"#,
+            r#"    commit_id.shortest(8),"#,
+            r#"    commit_timestamp(self),"#,
+            r#"    author.email(),"#,
+            r#"    bookmarks,"#,
+            r#"    tags,"#,
+            r#"  ),"#,
+            r#"  if(!description, "(empty)", description.first_line()),"#,
+            r#")"#,
+        );
         let mut args: Vec<&str> = vec![
             "--config",
             "templates.log_node=builtin_log_node",
@@ -83,7 +98,7 @@ impl Jj {
             "--revisions",
             revset,
             "--template",
-            "builtin_log_compact",
+            template,
         ];
         if stat {
             args.push("--stat");
@@ -370,7 +385,7 @@ mod tests {
 
     /// Verify that bad-juju's `jj log` output is unaffected by a user's
     /// `templates.log` / `templates.log_node` overrides — the clients parse
-    /// these buffers by regex and rely on the builtin_log_compact shape.
+    /// these buffers by regex and rely on the explicit template shape.
     #[test]
     fn log_pins_template_against_user_overrides() {
         let dir = tempfile::tempdir().unwrap();
