@@ -802,8 +802,12 @@ pub fn status_folding_ranges(content: &str) -> Vec<FoldingRange> {
     let mut current_header: Option<usize> = None;
     let mut last_nonempty: Option<usize> = None;
 
-    for i in (stack_start + 1)..stack_end {
-        let line = lines[i];
+    for (i, &line) in lines
+        .iter()
+        .enumerate()
+        .take(stack_end)
+        .skip(stack_start + 1)
+    {
         let is_commit = cursor::match_commit_header(line).is_some();
         let is_section = line.starts_with("COMMAND REFERENCE:")
             || line.starts_with("STATUS:")

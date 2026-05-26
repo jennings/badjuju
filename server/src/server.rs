@@ -603,80 +603,80 @@ impl LanguageServer for Backend {
             .documents
             .insert(uri.clone(), text.clone());
 
-        if text.trim().is_empty() {
-            if let Some(kind) = BufferKind::from_uri(&uri) {
-                let (jj, workspace) = {
-                    let state = self.state.read().await;
-                    match (state.jj(), state.workspace_root.clone()) {
-                        (Some(jj), Some(root)) => (jj, root),
-                        _ => {
-                            self.client
-                                .log_message(
-                                    MessageType::WARNING,
-                                    "did_open auto-populate: no jj workspace",
-                                )
-                                .await;
-                            return;
-                        }
-                    }
-                };
-
-                let virtual_diffs_enabled = self.state.read().await.virtual_diffs_enabled;
-                let result = match kind {
-                    BufferKind::Status => commands::run_status(&jj, &workspace),
-                    BufferKind::Log => commands::run_log(&jj, &workspace, ""),
-                    // In virtual-diff mode the client fetches content via workspace/textDocumentContent.
-                    // In file mode, regenerate the legacy diff.jujutsu only.
-                    BufferKind::Diff if !virtual_diffs_enabled => {
-                        commands::run_diff_change(&jj, &workspace, "@").map(|(uri, _)| uri)
-                    }
-                    BufferKind::Diff => return,
-                };
-
-                match result {
-                    Ok(_) => {
-                        let file_path = commands::path_from_uri(&uri);
-                        let content = file_path
-                            .and_then(|p| std::fs::read_to_string(p).ok())
-                            .unwrap_or_default();
-
-                        if !content.is_empty() {
-                            if let Ok(uri_url) = Url::parse(&uri) {
-                                let mut changes = HashMap::new();
-                                changes.insert(
-                                    uri_url,
-                                    vec![TextEdit {
-                                        range: Range {
-                                            start: Position {
-                                                line: 0,
-                                                character: 0,
-                                            },
-                                            end: Position {
-                                                line: 0,
-                                                character: 0,
-                                            },
-                                        },
-                                        new_text: content,
-                                    }],
-                                );
-                                let _ = self
-                                    .client
-                                    .apply_edit(WorkspaceEdit {
-                                        changes: Some(changes),
-                                        ..Default::default()
-                                    })
-                                    .await;
-                            }
-                        }
-                    }
-                    Err(e) => {
+        if text.trim().is_empty()
+            && let Some(kind) = BufferKind::from_uri(&uri)
+        {
+            let (jj, workspace) = {
+                let state = self.state.read().await;
+                match (state.jj(), state.workspace_root.clone()) {
+                    (Some(jj), Some(root)) => (jj, root),
+                    _ => {
                         self.client
                             .log_message(
                                 MessageType::WARNING,
-                                format!("did_open auto-populate failed: {e}"),
+                                "did_open auto-populate: no jj workspace",
                             )
                             .await;
+                        return;
                     }
+                }
+            };
+
+            let virtual_diffs_enabled = self.state.read().await.virtual_diffs_enabled;
+            let result = match kind {
+                BufferKind::Status => commands::run_status(&jj, &workspace),
+                BufferKind::Log => commands::run_log(&jj, &workspace, ""),
+                // In virtual-diff mode the client fetches content via workspace/textDocumentContent.
+                // In file mode, regenerate the legacy diff.jujutsu only.
+                BufferKind::Diff if !virtual_diffs_enabled => {
+                    commands::run_diff_change(&jj, &workspace, "@").map(|(uri, _)| uri)
+                }
+                BufferKind::Diff => return,
+            };
+
+            match result {
+                Ok(_) => {
+                    let file_path = commands::path_from_uri(&uri);
+                    let content = file_path
+                        .and_then(|p| std::fs::read_to_string(p).ok())
+                        .unwrap_or_default();
+
+                    if !content.is_empty()
+                        && let Ok(uri_url) = Url::parse(&uri)
+                    {
+                        let mut changes = HashMap::new();
+                        changes.insert(
+                            uri_url,
+                            vec![TextEdit {
+                                range: Range {
+                                    start: Position {
+                                        line: 0,
+                                        character: 0,
+                                    },
+                                    end: Position {
+                                        line: 0,
+                                        character: 0,
+                                    },
+                                },
+                                new_text: content,
+                            }],
+                        );
+                        let _ = self
+                            .client
+                            .apply_edit(WorkspaceEdit {
+                                changes: Some(changes),
+                                ..Default::default()
+                            })
+                            .await;
+                    }
+                }
+                Err(e) => {
+                    self.client
+                        .log_message(
+                            MessageType::WARNING,
+                            format!("did_open auto-populate failed: {e}"),
+                        )
+                        .await;
                 }
             }
         }
