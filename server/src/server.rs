@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::lsp_types::{Url, *};
@@ -118,6 +119,9 @@ struct State {
     /// When true, diffs are served as virtual `badjuju-diff://` URIs; otherwise
     /// the server writes physical `diff-{change,commit}-*.jujutsu` files.
     virtual_diffs_enabled: bool,
+    /// Op-ids produced by bad-juju's own mutations, with the time they were recorded.
+    /// Used by an op-head watcher to suppress double-refreshes.
+    self_caused_ops: HashMap<String, Instant>,
 }
 
 impl Default for State {
@@ -132,6 +136,7 @@ impl Default for State {
             open_log_uri: None,
             open_diffs: HashMap::new(),
             virtual_diffs_enabled: false,
+            self_caused_ops: HashMap::new(),
         }
     }
 }
@@ -143,6 +148,20 @@ impl State {
             Jj::with_binary_or_default(self.binary_path.as_deref(), root)
                 .with_command_reference(self.command_reference.clone()),
         )
+    }
+
+    fn record_self_caused_op(&mut self, op_id: String) {
+        let cutoff = Instant::now() - Duration::from_secs(10);
+        self.self_caused_ops.retain(|_, t| *t > cutoff);
+        self.self_caused_ops.insert(op_id, Instant::now());
+    }
+
+    // Called by the op-head watcher (bad-juju-zg1z, not yet implemented).
+    #[allow(dead_code)]
+    pub(crate) fn take_if_self_caused(&mut self, op_id: &str) -> bool {
+        let cutoff = Instant::now() - Duration::from_secs(10);
+        self.self_caused_ops.retain(|_, t| *t > cutoff);
+        self.self_caused_ops.remove(op_id).is_some()
     }
 }
 
@@ -157,6 +176,12 @@ impl Backend {
         Self {
             client,
             state: Arc::new(RwLock::new(State::default())),
+        }
+    }
+
+    async fn record_self_caused_op(&self, jj: &Jj) {
+        if let Ok(op) = jj.op_head_id() {
+            self.state.write().await.record_self_caused_op(op);
         }
     }
 
@@ -807,6 +832,7 @@ impl LanguageServer for Backend {
                         .log_message(MessageType::ERROR, format!("describe save failed: {e}"))
                         .await;
                 } else {
+                    self.record_self_caused_op(&jj).await;
                     self.refresh_open_diffs(&jj, &workspace).await;
                 }
             }
@@ -950,6 +976,7 @@ impl LanguageServer for Backend {
                 })
                 .map_err(lsp_err)?;
                 let uri = commands::run_new(&jj, &workspace, &parent).map_err(lsp_err)?;
+                self.record_self_caused_op(&jj).await;
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
@@ -960,6 +987,7 @@ impl LanguageServer for Backend {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 let uri = commands::run_next(&jj, &workspace, edit).map_err(lsp_err)?;
+                self.record_self_caused_op(&jj).await;
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
@@ -970,6 +998,7 @@ impl LanguageServer for Backend {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 let uri = commands::run_prev(&jj, &workspace, edit).map_err(lsp_err)?;
+                self.record_self_caused_op(&jj).await;
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
@@ -990,6 +1019,7 @@ impl LanguageServer for Backend {
                 )?;
                 let uri =
                     commands::run_squash(&jj, &workspace, &file, &revision).map_err(lsp_err)?;
+                self.record_self_caused_op(&jj).await;
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
@@ -1001,11 +1031,13 @@ impl LanguageServer for Backend {
                 )?;
                 let uri =
                     commands::run_unsquash(&jj, &workspace, &file, &revision).map_err(lsp_err)?;
+                self.record_self_caused_op(&jj).await;
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.undo" => {
                 let uri = commands::run_undo(&jj, &workspace).map_err(lsp_err)?;
+                self.record_self_caused_op(&jj).await;
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
@@ -1018,6 +1050,7 @@ impl LanguageServer for Backend {
                 })
                 .map_err(lsp_err)?;
                 let uri = commands::run_abandon(&jj, &workspace, &revision).map_err(lsp_err)?;
+                self.record_self_caused_op(&jj).await;
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
@@ -1030,11 +1063,13 @@ impl LanguageServer for Backend {
                 })
                 .map_err(lsp_err)?;
                 let uri = commands::run_edit(&jj, &workspace, &revision).map_err(lsp_err)?;
+                self.record_self_caused_op(&jj).await;
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.fetch" => {
                 let uri = commands::run_fetch(&jj, &workspace).map_err(lsp_err)?;
+                self.record_self_caused_op(&jj).await;
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
@@ -1046,6 +1081,7 @@ impl LanguageServer for Backend {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 let uri = commands::run_push(&jj, &workspace, force_with_lease).map_err(lsp_err)?;
+                self.record_self_caused_op(&jj).await;
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
@@ -1063,6 +1099,7 @@ impl LanguageServer for Backend {
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 let uri = commands::run_rebase(&jj, &workspace, &source, dest).map_err(lsp_err)?;
+                self.record_self_caused_op(&jj).await;
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
@@ -1086,6 +1123,7 @@ impl LanguageServer for Backend {
                 .map_err(lsp_err)?;
                 let uri = commands::run_bookmark(&jj, &workspace, sub_action, name, &revision)
                     .map_err(lsp_err)?;
+                self.record_self_caused_op(&jj).await;
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
@@ -1176,5 +1214,31 @@ mod tests {
         assert!(COMMANDS.contains(&"badjuju.fetch"));
         assert!(COMMANDS.contains(&"badjuju.push"));
         assert!(COMMANDS.contains(&"badjuju.rebase"));
+    }
+
+    #[test]
+    fn take_if_self_caused_returns_true_exactly_once() {
+        let mut state = State::default();
+        state.record_self_caused_op("abc123".to_string());
+        assert!(state.take_if_self_caused("abc123"), "first call should return true");
+        assert!(!state.take_if_self_caused("abc123"), "second call should return false");
+    }
+
+    #[test]
+    fn take_if_self_caused_unknown_op_returns_false() {
+        let mut state = State::default();
+        assert!(!state.take_if_self_caused("not-recorded"));
+    }
+
+    #[test]
+    fn record_self_caused_op_prunes_stale_entries() {
+        let mut state = State::default();
+        // Manually insert an entry with an Instant 11 seconds in the past.
+        let old_instant = Instant::now() - Duration::from_secs(11);
+        state.self_caused_ops.insert("stale".to_string(), old_instant);
+        // Recording a new op triggers pruning of stale entries.
+        state.record_self_caused_op("fresh".to_string());
+        assert!(!state.self_caused_ops.contains_key("stale"), "stale entry should be pruned");
+        assert!(state.self_caused_ops.contains_key("fresh"), "fresh entry should survive");
     }
 }
