@@ -17,6 +17,7 @@ export default defineConfig({
   files: "out/test/suite/**/*.test.js",
   extensionDevelopmentPath: ".",
   workspaceFolder: e2eWorkspace,
+  launchArgs: ["--headless", "--disable-gpu"],
   mocha: {
     ui: "tdd",
     timeout: 30_000,
