@@ -201,8 +201,10 @@ function M.setup_for_buffer(bufnr)
         'badjuju: edit commit at cursor (move @)')
       nmap(bufnr, 'dd', function() run_at_cursor_split('badjuju.describe') end,
         'badjuju: describe commit at cursor in a split')
-      nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff') end,
-        'badjuju: diff commit at cursor in a split')
+      nmap(bufnr, 'd', function() run_at_cursor_split('badjuju.diff') end,
+        'badjuju: show change diff at cursor (updates on amend)')
+      nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff.commit') end,
+        'badjuju: show commit diff at cursor (pinned, immutable)')
       nmap(bufnr, 'aa', '<Cmd>JJAbandon<CR>', 'badjuju: abandon revision')
     else
       for _, m in ipairs(STATUS_MAPS) do
@@ -216,7 +218,7 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'd', function() run_at_cursor_split('badjuju.describe') end,
         'badjuju: describe commit at cursor in a split')
       nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff') end,
-        'badjuju: diff commit at cursor in a split')
+        'badjuju: show change diff at cursor (updates on amend)')
       nmap(bufnr, 's', function() run_file_scoped('badjuju.squash') end,
         'badjuju: squash file at cursor into parent')
       nmap(bufnr, 'U', function() run_file_scoped('badjuju.unsquash') end,
@@ -263,8 +265,10 @@ function M.setup_for_buffer(bufnr)
         'badjuju: edit commit at cursor (move @)')
       nmap(bufnr, 'dd', function() run_at_cursor_split('badjuju.describe') end,
         'badjuju: describe commit at cursor in a split')
-      nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff') end,
-        'badjuju: diff commit at cursor in a split')
+      nmap(bufnr, 'd', function() run_at_cursor_split('badjuju.diff') end,
+        'badjuju: show change diff at cursor (updates on amend)')
+      nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff.commit') end,
+        'badjuju: show commit diff at cursor (pinned, immutable)')
       nmap(bufnr, 'aa', '<Cmd>JJAbandon<CR>', 'badjuju: abandon revision')
       for _, m in ipairs(LOG_MAPS) do
         if m[1] ~= 'a' then map_cmd(bufnr, m[1], m[2], m[3]) end
@@ -280,7 +284,7 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'd', function() run_at_cursor_split('badjuju.describe') end,
         'badjuju: describe commit at cursor in a split')
       nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff') end,
-        'badjuju: diff commit at cursor in a split')
+        'badjuju: show change diff at cursor (updates on amend)')
     end
     nmap(bufnr, '<CR>', apply_log_shortcut, 'badjuju: apply revset shortcut under cursor')
     nmap(bufnr, '?', function() show_help('log') end, 'badjuju: show help')
@@ -289,7 +293,8 @@ function M.setup_for_buffer(bufnr)
     else
       nmap(bufnr, 'A', vim.lsp.buf.code_action, 'badjuju: code actions menu')
     end
-  elseif name:match('/%.jj/badjuju/diff%.jujutsu$') then
+  elseif name:match('/%.jj/badjuju/diff%.jujutsu$')
+      or name:match('/%.jj/badjuju/diff%-[a-z]+%-[^/]+%.jujutsu$') then
     nmap(bufnr, 'R', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
     nmap(bufnr, '?', function() show_help('diff') end, 'badjuju: show help')

@@ -56,6 +56,11 @@ function M.register_all()
     badjuju.execute('badjuju.diff', revision and { revision } or {})
   end)
 
+  cmd('JJDiffCommit', { nargs = '?' }, function(args)
+    local revision = args.args ~= '' and args.args or nil
+    badjuju.execute('badjuju.diff.commit', revision and { revision } or {})
+  end)
+
   cmd('JJNew', {}, function()
     local arg = new_parent_cursor_arg()
     badjuju.execute('badjuju.new', arg and { arg } or {})

@@ -7,6 +7,7 @@ local name = vim.api.nvim_buf_get_name(0)
 if
   name:match('/%.jj/badjuju/status%.jujutsu$')
   or name:match('/%.jj/badjuju/diff%.jujutsu$')
+  or name:match('/%.jj/badjuju/diff%-[a-z]+%-[^/]+%.jujutsu$')
 then
   vim.bo.modifiable = false
   vim.bo.readonly = true

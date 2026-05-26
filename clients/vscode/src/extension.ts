@@ -58,7 +58,10 @@ function isLogFile(uri: Uri): boolean {
 }
 
 function isDiffFile(uri: Uri): boolean {
-  return uri.path.endsWith("/diff.jujutsu");
+  return (
+    uri.path.endsWith("/diff.jujutsu") ||
+    /\/diff-(change|commit)-[^/]+\.jujutsu$/.test(uri.path)
+  );
 }
 
 function isDescribeFile(uri: Uri): boolean {
@@ -457,6 +460,18 @@ export async function activate(context: ExtensionContext) {
         await openServerResult(result as string, { aside: true });
       } catch (e) {
         window.showInformationMessage(`diff: ${(e as Error).message}`);
+      }
+    }),
+    commands.registerCommand("badjuju.diff.cursor.commit", async () => {
+      const args = cursorArgsForActiveEditor() ?? [];
+      try {
+        const result = await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.diff.commit",
+          arguments: args,
+        });
+        await openServerResult(result as string, { aside: true });
+      } catch (e) {
+        window.showInformationMessage(`diff (commit): ${(e as Error).message}`);
       }
     }),
     commands.registerCommand("badjuju.describe.finalize", async () => {
