@@ -1,4 +1,3 @@
-#!/bin/sh
-set -e
-exec >&2
-redo-ifchange server/test clients/neovim/test
+redo server/test \
+	clients/neovim/test \
+	clients/vscode/test
