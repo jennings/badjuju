@@ -1220,8 +1220,14 @@ mod tests {
     fn take_if_self_caused_returns_true_exactly_once() {
         let mut state = State::default();
         state.record_self_caused_op("abc123".to_string());
-        assert!(state.take_if_self_caused("abc123"), "first call should return true");
-        assert!(!state.take_if_self_caused("abc123"), "second call should return false");
+        assert!(
+            state.take_if_self_caused("abc123"),
+            "first call should return true"
+        );
+        assert!(
+            !state.take_if_self_caused("abc123"),
+            "second call should return false"
+        );
     }
 
     #[test]
@@ -1235,10 +1241,18 @@ mod tests {
         let mut state = State::default();
         // Manually insert an entry with an Instant 11 seconds in the past.
         let old_instant = Instant::now() - Duration::from_secs(11);
-        state.self_caused_ops.insert("stale".to_string(), old_instant);
+        state
+            .self_caused_ops
+            .insert("stale".to_string(), old_instant);
         // Recording a new op triggers pruning of stale entries.
         state.record_self_caused_op("fresh".to_string());
-        assert!(!state.self_caused_ops.contains_key("stale"), "stale entry should be pruned");
-        assert!(state.self_caused_ops.contains_key("fresh"), "fresh entry should survive");
+        assert!(
+            !state.self_caused_ops.contains_key("stale"),
+            "stale entry should be pruned"
+        );
+        assert!(
+            state.self_caused_ops.contains_key("fresh"),
+            "fresh entry should survive"
+        );
     }
 }
