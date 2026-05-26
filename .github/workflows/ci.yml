@@ -111,11 +111,23 @@ jobs:
           git clone --depth 1 https://github.com/apenwarr/redo /tmp/redo
           cd /tmp/redo && sudo DESTDIR= ./do install
 
+      - name: Cache cargo bin
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-jj
+
+      - name: Install jj
+        run: command -v jj || cargo install jj-cli
+
       - name: Install dependencies
         run: pnpm install
 
       - name: Build VS Code extension
         run: redo clients/vscode/all
+
+      - name: Run VS Code tests
+        run: xvfb-run -a redo clients/vscode/test
 
       - name: Biome check
         run: pnpm biome check .
