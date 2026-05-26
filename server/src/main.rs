@@ -92,11 +92,12 @@ async fn main() {
         }
         Command::Diff { revision } => {
             let (jj, workspace) = resolve_workspace();
-            let uri = commands::run_diff(&jj, &workspace, revision.as_deref().unwrap_or("@"))
-                .unwrap_or_else(|e| {
-                    eprintln!("badjuju: {e}");
-                    std::process::exit(1);
-                });
+            let (uri, _) =
+                commands::run_diff_change(&jj, &workspace, revision.as_deref().unwrap_or("@"))
+                    .unwrap_or_else(|e| {
+                        eprintln!("badjuju: {e}");
+                        std::process::exit(1);
+                    });
             print_path(&uri);
         }
     }

@@ -147,8 +147,12 @@ fn cli_diff_prints_absolute_path_to_diff_jujutsu() {
         "expected absolute path, got: {path}"
     );
     assert!(
-        path.ends_with(".jj/badjuju/diff.jujutsu") || path.ends_with(".jj\\badjuju\\diff.jujutsu"),
-        "expected path ending in .jj/badjuju/diff.jujutsu, got: {path}"
+        path.contains(".jj/badjuju/diff-change-") || path.contains(".jj\\badjuju\\diff-change-"),
+        "expected path containing .jj/badjuju/diff-change-, got: {path}"
+    );
+    assert!(
+        path.ends_with(".jujutsu"),
+        "expected path ending in .jujutsu, got: {path}"
     );
     assert!(
         std::path::Path::new(path).exists(),

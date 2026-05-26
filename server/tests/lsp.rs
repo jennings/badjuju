@@ -1228,8 +1228,8 @@ fn lsp_goto_definition_on_commit_line_opens_diff() {
     );
     let target_uri = result["uri"].as_str().unwrap_or("");
     assert!(
-        target_uri.ends_with("diff.jujutsu"),
-        "expected diff.jujutsu URI, got: {target_uri}"
+        target_uri.ends_with(".jujutsu") && target_uri.contains("/diff-"),
+        "expected diff URI (diff-change-*.jujutsu or diff-commit-*.jujutsu), got: {target_uri}"
     );
 }
 

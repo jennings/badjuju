@@ -21,18 +21,34 @@ pub enum BufferKind {
 
 impl BufferKind {
     /// Detect kind from a URI string by trailing filename. Returns `None` for
-    /// URIs that don't end in one of the three known buffer names.
+    /// URIs that don't end in one of the known buffer names.
     pub fn from_uri(uri: &str) -> Option<Self> {
         if uri.ends_with("status.jujutsu") {
             Some(Self::Status)
         } else if uri.ends_with("log.jujutsu") {
             Some(Self::Log)
-        } else if uri.ends_with("diff.jujutsu") {
+        } else if is_diff_uri(uri) {
             Some(Self::Diff)
         } else {
             None
         }
     }
+}
+
+fn is_diff_uri(uri: &str) -> bool {
+    let name = uri.rsplit('/').next().unwrap_or(uri);
+    if name == "diff.jujutsu" {
+        return true;
+    }
+    for prefix in ["diff-change-", "diff-commit-"] {
+        if let Some(rest) = name.strip_prefix(prefix)
+            && let Some(id) = rest.strip_suffix(".jujutsu")
+            && !id.is_empty()
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// A `JJ: <Label>: <revset>` shortcut line in `log.jujutsu`.
@@ -106,12 +122,17 @@ fn revision_at_line_log(content: &str, line: usize) -> Option<String> {
 
 fn revision_from_diff_header(content: &str) -> Option<String> {
     let first = content.lines().next()?;
-    let rest = first.strip_prefix("REVISION:")?.trim();
-    if rest.is_empty() {
-        None
-    } else {
-        Some(rest.to_string())
+    // Handle new-style CHANGE_ID: and COMMIT_ID: headers as well as the legacy
+    // REVISION: form. All three contain a jj-usable revision expression.
+    for prefix in ["CHANGE_ID:", "COMMIT_ID:", "REVISION:"] {
+        if let Some(rest) = first.strip_prefix(prefix) {
+            let id = rest.trim();
+            if !id.is_empty() {
+                return Some(id.to_string());
+            }
+        }
     }
+    None
 }
 
 /// Resolve the file path at a given 0-indexed line of a `status.jujutsu`
@@ -350,11 +371,24 @@ mod tests {
             BufferKind::from_uri("file:///x/log.jujutsu"),
             Some(BufferKind::Log)
         );
+        // Legacy diff.jujutsu
         assert_eq!(
             BufferKind::from_uri("file:///x/diff.jujutsu"),
             Some(BufferKind::Diff)
         );
+        // New per-revision filenames
+        assert_eq!(
+            BufferKind::from_uri("file:///x/.jj/badjuju/diff-change-abc123def456.jujutsu"),
+            Some(BufferKind::Diff)
+        );
+        assert_eq!(
+            BufferKind::from_uri("file:///x/.jj/badjuju/diff-commit-0123456789ab.jujutsu"),
+            Some(BufferKind::Diff)
+        );
         assert_eq!(BufferKind::from_uri("file:///x/other.txt"), None);
+        // Should not match partial names
+        assert_eq!(BufferKind::from_uri("file:///x/diff-change-.jujutsu"), None);
+        assert_eq!(BufferKind::from_uri("file:///x/diff-commit-.jujutsu"), None);
     }
 
     // --- revision_at_line: Status buffer ---
@@ -507,11 +541,29 @@ mod tests {
     // --- revision_at_line: Diff buffer ---
 
     #[test]
-    fn revision_at_line_diff_returns_header_revision() {
+    fn revision_at_line_diff_legacy_revision_header() {
         let content = "REVISION: abc123\n\nDIFF:\n\n@@ -1 +1 @@\n-foo\n+bar\n";
         assert_eq!(
             revision_at_line(content, 5, BufferKind::Diff).as_deref(),
             Some("abc123")
+        );
+    }
+
+    #[test]
+    fn revision_at_line_diff_change_id_header() {
+        let content = "CHANGE_ID: kkmpptxzrspxwutvuoqnzoqmsqrqkxpt\n\nDIFF:\n\n";
+        assert_eq!(
+            revision_at_line(content, 2, BufferKind::Diff).as_deref(),
+            Some("kkmpptxzrspxwutvuoqnzoqmsqrqkxpt")
+        );
+    }
+
+    #[test]
+    fn revision_at_line_diff_commit_id_header() {
+        let content = "COMMIT_ID: 0102030405060708090a0b0c0d0e0f10\n\nDIFF:\n";
+        assert_eq!(
+            revision_at_line(content, 1, BufferKind::Diff).as_deref(),
+            Some("0102030405060708090a0b0c0d0e0f10")
         );
     }
 
@@ -527,6 +579,10 @@ mod tests {
     fn revision_at_line_diff_blank_header_returns_none() {
         assert_eq!(
             revision_at_line("REVISION:   \n\nDIFF:\n", 2, BufferKind::Diff),
+            None
+        );
+        assert_eq!(
+            revision_at_line("CHANGE_ID:   \n\nDIFF:\n", 2, BufferKind::Diff),
             None
         );
     }

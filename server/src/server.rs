@@ -431,8 +431,8 @@ impl LanguageServer for Backend {
             }
         };
 
-        match commands::run_diff(&jj, &workspace, &revision) {
-            Ok(diff_uri) => {
+        match commands::run_diff_change(&jj, &workspace, &revision) {
+            Ok((diff_uri, _)) => {
                 let target_uri = Url::parse(&diff_uri).map_err(|_| lsp_err("bad diff URI"))?;
                 let location = Location {
                     uri: target_uri,
@@ -508,7 +508,9 @@ impl LanguageServer for Backend {
                 let result = match kind {
                     BufferKind::Status => commands::run_status(&jj, &workspace),
                     BufferKind::Log => commands::run_log(&jj, &workspace, ""),
-                    BufferKind::Diff => commands::run_diff(&jj, &workspace, "@"),
+                    BufferKind::Diff => {
+                        commands::run_diff_change(&jj, &workspace, "@").map(|(uri, _)| uri)
+                    }
                 };
 
                 match result {
@@ -716,7 +718,8 @@ impl LanguageServer for Backend {
                         .or_else(|| read_uri_from_disk(uri))
                 })
                 .map_err(lsp_err)?;
-                let uri = commands::run_diff(&jj, &workspace, &revision).map_err(lsp_err)?;
+                let (uri, _) =
+                    commands::run_diff_change(&jj, &workspace, &revision).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.new" => {

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::{FoldingRange, Url};
@@ -255,29 +256,133 @@ pub fn run_log(jj: &Jj, workspace: &Path, revset: &str) -> Result<String, Comman
     Ok(file_uri(&path))
 }
 
-/// Run `badjuju.diff`: write diff.jujutsu showing `jj diff -r REV` for the
-/// given revision (defaults to `@` when empty). Embeds a `REVISION:` header
-/// so refresh can re-run against the same commit.
-pub fn run_diff(jj: &Jj, workspace: &Path, revision: &str) -> Result<String, CommandError> {
-    let rev = revision_or_at(revision);
-    let output = jj.diff(rev)?;
+/// Which flavor of diff buffer was opened. Determines filename and refresh policy.
+#[derive(Debug, Clone)]
+pub enum DiffTarget {
+    /// Tracks a mutable change (identified by full change-id). Re-rendered
+    /// after every state-changing jj operation so the view stays current.
+    Change(String),
+    /// Pinned to an immutable commit (identified by full commit-id). Never
+    /// refreshed — commits are immutable by definition.
+    Commit(String),
+}
 
+/// First 12 characters of a full id, used for human-readable diff filenames.
+fn short_id(full: &str) -> &str {
+    &full[..full.len().min(12)]
+}
+
+/// Run `badjuju.diff` (change mode): write `diff-change-<id>.jujutsu` showing
+/// `jj diff -r <change-id>`. The revision is resolved to a stable change-id so
+/// the filename is stable across amends of the same change. Embeds a
+/// `CHANGE_ID:` header for refresh and code-action resolution.
+///
+/// Returns `(file_uri, DiffTarget::Change(<full_change_id>))`.
+pub fn run_diff_change(
+    jj: &Jj,
+    workspace: &Path,
+    revision: &str,
+) -> Result<(String, DiffTarget), CommandError> {
+    let rev = revision_or_at(revision);
+    let change_id = jj.change_id_of(rev)?;
+    let output = jj.diff(&change_id)?;
     let content = format!(
-        "REVISION: {}\n\nDIFF:\n\n{}\n\n{}",
-        rev,
+        "CHANGE_ID: {}\n\nDIFF:\n\n{}\n\n{}",
+        change_id,
         output.trim_end(),
         jj.command_reference().diff(),
     );
-
     let dir = badjuju_dir(workspace)?;
-    let path = dir.join("diff.jujutsu");
-    std::fs::write(&path, content)?;
-    Ok(file_uri(&path))
+    let path = dir.join(format!("diff-change-{}.jujutsu", short_id(&change_id)));
+    std::fs::write(&path, &content)?;
+    Ok((file_uri(&path), DiffTarget::Change(change_id)))
 }
 
-/// Extract the revision from the `REVISION:` header of diff.jujutsu. Used by
-/// `run_refresh` so refreshing a diff buffer re-runs against the same commit
-/// rather than falling back to status.
+/// Run `badjuju.diff.commit` (commit mode): write `diff-commit-<id>.jujutsu`
+/// pinned to the exact commit-id at call time. The file is never refreshed.
+///
+/// Returns `(file_uri, DiffTarget::Commit(<full_commit_id>))`.
+pub fn run_diff_commit(
+    jj: &Jj,
+    workspace: &Path,
+    revision: &str,
+) -> Result<(String, DiffTarget), CommandError> {
+    let rev = revision_or_at(revision);
+    let commit_id = jj.commit_id_of(rev)?;
+    let output = jj.diff(&commit_id)?;
+    let content = format!(
+        "COMMIT_ID: {}\n\nDIFF:\n\n{}\n\n{}",
+        commit_id,
+        output.trim_end(),
+        jj.command_reference().diff(),
+    );
+    let dir = badjuju_dir(workspace)?;
+    let path = dir.join(format!("diff-commit-{}.jujutsu", short_id(&commit_id)));
+    std::fs::write(&path, &content)?;
+    Ok((file_uri(&path), DiffTarget::Commit(commit_id)))
+}
+
+/// Extract the change-id encoded in the filename of a `diff-change-*.jujutsu`
+/// URI. Used by `did_open` auto-populate to re-run the diff for the right
+/// change when a user manually opens an existing diff file.
+pub fn parse_change_id_from_uri(uri: &str) -> Option<String> {
+    let name = uri.rsplit('/').next()?;
+    let after = name.strip_prefix("diff-change-")?;
+    let id = after.strip_suffix(".jujutsu")?;
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_string())
+    }
+}
+
+/// Extract the commit-id encoded in the filename of a `diff-commit-*.jujutsu`
+/// URI.
+pub fn parse_commit_id_from_uri(uri: &str) -> Option<String> {
+    let name = uri.rsplit('/').next()?;
+    let after = name.strip_prefix("diff-commit-")?;
+    let id = after.strip_suffix(".jujutsu")?;
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_string())
+    }
+}
+
+/// Re-render all open change-mode diff buffers. Called after any state-changing
+/// jj operation. Errors per diff are silently ignored so one stale diff doesn't
+/// block the others from refreshing.
+pub fn refresh_change_diffs(jj: &Jj, workspace: &Path, open_diffs: &HashMap<String, DiffTarget>) {
+    for target in open_diffs.values() {
+        if let DiffTarget::Change(change_id) = target {
+            let _ = run_diff_change(jj, workspace, change_id);
+        }
+    }
+}
+
+/// Remove stale `diff-change-*.jujutsu` and `diff-commit-*.jujutsu` files left
+/// over from a previous server session. Called during `initialize` before the
+/// server starts tracking new open diffs.
+pub fn sweep_stale_diff_files(workspace: &Path) {
+    let Ok(dir) = badjuju_dir(workspace) else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if (name.starts_with("diff-change-") || name.starts_with("diff-commit-"))
+            && name.ends_with(".jujutsu")
+        {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Extract the revision from the `REVISION:` header of the legacy diff.jujutsu
+/// format. Kept for backward-compatibility with the refresh path.
 pub fn parse_diff_revision(content: &str) -> Option<String> {
     let first = content.lines().next()?;
     let rest = first.strip_prefix("REVISION:")?.trim();
@@ -320,6 +425,7 @@ pub fn run_describe(jj: &Jj, workspace: &Path, revision: &str) -> Result<String,
 
 /// Run `badjuju.refresh`: regenerate the file identified by `uri`.
 /// For status.jujutsu → regenerate status. For log.jujutsu → re-run log with current REVSET header.
+/// For diff-change-*.jujutsu → re-run change diff. For diff-commit-*.jujutsu → re-run commit diff.
 /// Falls back to status when the URI doesn't decode to a known badjuju buffer.
 pub fn run_refresh(jj: &Jj, workspace: &Path, uri: &str) -> Result<String, CommandError> {
     let Some(path) = path_from_uri(uri) else {
@@ -330,19 +436,36 @@ pub fn run_refresh(jj: &Jj, workspace: &Path, uri: &str) -> Result<String, Comma
         .and_then(|n| n.to_str())
         .unwrap_or_default();
 
-    match filename {
-        "log.jujutsu" => {
-            let content = std::fs::read_to_string(&path)?;
-            let revset = parse_log_revset(&content).unwrap_or_else(|| "@".to_string());
-            run_log(jj, workspace, &revset)
-        }
-        "diff.jujutsu" => {
-            let content = std::fs::read_to_string(&path)?;
-            let revision = parse_diff_revision(&content).unwrap_or_else(|| "@".to_string());
-            run_diff(jj, workspace, &revision)
-        }
-        _ => run_status(jj, workspace),
+    if filename == "log.jujutsu" {
+        let content = std::fs::read_to_string(&path)?;
+        let revset = parse_log_revset(&content).unwrap_or_else(|| "@".to_string());
+        return run_log(jj, workspace, &revset);
     }
+
+    if filename.starts_with("diff-change-") && filename.ends_with(".jujutsu") {
+        let id = filename
+            .strip_prefix("diff-change-")
+            .and_then(|s| s.strip_suffix(".jujutsu"))
+            .unwrap_or("@");
+        return run_diff_change(jj, workspace, id).map(|(uri, _)| uri);
+    }
+
+    if filename.starts_with("diff-commit-") && filename.ends_with(".jujutsu") {
+        let id = filename
+            .strip_prefix("diff-commit-")
+            .and_then(|s| s.strip_suffix(".jujutsu"))
+            .unwrap_or("@");
+        return run_diff_commit(jj, workspace, id).map(|(uri, _)| uri);
+    }
+
+    if filename == "diff.jujutsu" {
+        // Legacy format: re-run using the REVISION: header value.
+        let content = std::fs::read_to_string(&path)?;
+        let revision = parse_diff_revision(&content).unwrap_or_else(|| "@".to_string());
+        return run_diff_change(jj, workspace, &revision).map(|(uri, _)| uri);
+    }
+
+    run_status(jj, workspace)
 }
 
 /// Run `badjuju.new`: create a new change and regenerate status.jujutsu.
@@ -919,7 +1042,7 @@ mod tests {
             "expected log override in:\n{log_content}"
         );
 
-        let diff_uri = run_diff(&jj, dir.path(), "@").unwrap();
+        let (diff_uri, _) = run_diff_change(&jj, dir.path(), "@").unwrap();
         let diff_content =
             std::fs::read_to_string(diff_uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
@@ -1369,17 +1492,17 @@ mod tests {
     }
 
     #[test]
-    fn run_diff_writes_file_with_revision_header() {
+    fn run_diff_change_writes_file_with_change_id_header() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         std::fs::write(dir.path().join("readme.txt"), "hello\n").unwrap();
         jj.describe_set("@", "add readme").unwrap();
-        let uri = run_diff(&jj, dir.path(), "@").expect("run_diff failed");
+        let (uri, _) = run_diff_change(&jj, dir.path(), "@").expect("run_diff_change failed");
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         assert!(
-            content.starts_with("REVISION: @\n"),
-            "missing REVISION header:\n{content}"
+            content.starts_with("CHANGE_ID:"),
+            "missing CHANGE_ID header:\n{content}"
         );
         assert!(
             content.contains("DIFF:"),
@@ -1396,24 +1519,28 @@ mod tests {
     }
 
     #[test]
-    fn run_diff_with_empty_revision_defaults_to_at() {
+    fn run_diff_change_with_empty_revision_defaults_to_at() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
-        let uri = run_diff(&jj, dir.path(), "").expect("run_diff failed");
+        let (uri, _) = run_diff_change(&jj, dir.path(), "").expect("run_diff_change failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
-        assert!(content.starts_with("REVISION: @\n"));
+        assert!(
+            content.starts_with("CHANGE_ID:"),
+            "expected CHANGE_ID header:\n{content}"
+        );
     }
 
     #[test]
-    fn run_diff_writes_file_to_badjuju_dir() {
+    fn run_diff_change_writes_file_to_badjuju_dir() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
-        let uri = run_diff(&jj, dir.path(), "@").expect("run_diff failed");
+        let (uri, _) = run_diff_change(&jj, dir.path(), "@").expect("run_diff_change failed");
         let path = uri.strip_prefix("file://").unwrap();
         assert!(
-            path.ends_with(".jj/badjuju/diff.jujutsu"),
+            path.contains(".jj/badjuju/diff-change-"),
             "unexpected path: {path}"
         );
+        assert!(path.ends_with(".jujutsu"), "unexpected path: {path}");
     }
 
     #[test]
@@ -1438,10 +1565,13 @@ mod tests {
     fn run_refresh_with_diff_uri_regenerates_diff() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
-        let diff_uri = run_diff(&jj, dir.path(), "@").unwrap();
+        let (diff_uri, _) = run_diff_change(&jj, dir.path(), "@").unwrap();
         let refreshed = run_refresh(&jj, dir.path(), &diff_uri).expect("run_refresh failed");
         let content = std::fs::read_to_string(refreshed.strip_prefix("file://").unwrap()).unwrap();
-        assert!(content.starts_with("REVISION: @"));
+        assert!(
+            content.starts_with("CHANGE_ID:"),
+            "expected CHANGE_ID header:\n{content}"
+        );
     }
 
     #[test]
