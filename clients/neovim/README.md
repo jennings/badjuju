@@ -16,8 +16,8 @@ repository and pointing your plugin manager (or runtimepath) at
 `clients/neovim/`. The same directory provides:
 
 - `ftdetect/jujutsu.lua` — registers the `jujutsu` filetype for `*.jujutsu`
-- `plugin/badjuju.lua` — registers the `:JJ*` user commands on startup
-- `lsp/jujutsu.lua` — LSP server config consumed by `vim.lsp.enable`
+- `plugin/badjuju.lua` — registers the `:JJ*` user commands and enables the LSP on startup
+- `lsp/jujutsu.lua` — LSP server config (auto-enabled by `plugin/badjuju.lua`)
 
 You also need the `badjuju` server binary on your `PATH`. From a checkout
 of the bad-juju repo:
@@ -33,10 +33,9 @@ redo server/install   # installs to ~/.cargo/bin/badjuju
   dir = '/absolute/path/to/bad-juju/clients/neovim',
   name = 'bad-juju',
   ft = 'jujutsu',
-  config = function()
-    require('badjuju').setup({})
-    vim.lsp.enable('jujutsu')
-  end,
+  -- setup() is optional; only needed if you want to change defaults.
+  -- The LSP is enabled automatically by plugin/badjuju.lua.
+  opts = {},
 }
 ```
 
@@ -50,10 +49,8 @@ happens eagerly because `ftdetect/` is sourced at startup).
 ```lua
 use {
   '/absolute/path/to/bad-juju/clients/neovim',
-  config = function()
-    require('badjuju').setup({})
-    vim.lsp.enable('jujutsu')
-  end,
+  -- setup() is optional; only needed if you want to change defaults.
+  config = function() require('badjuju').setup({}) end,
 }
 ```
 
@@ -67,8 +64,8 @@ Plug 'jennings/bad-juju', { 'rtp': 'clients/neovim' }
 ```
 
 ```lua
+-- setup() is optional; only needed if you want to change defaults.
 require('badjuju').setup({})
-vim.lsp.enable('jujutsu')
 ```
 
 #### Option D — pathogen
@@ -81,8 +78,8 @@ ln -s /absolute/path/to/bad-juju/clients/neovim ~/.vim/bundle/bad-juju
 ```
 
 ```lua
+-- setup() is optional; only needed if you want to change defaults.
 require('badjuju').setup({})
-vim.lsp.enable('jujutsu')
 ```
 
 #### Option E — Vundle
@@ -97,8 +94,8 @@ set rtp+=~/.vim/bundle/bad-juju/clients/neovim
 ```
 
 ```lua
+-- setup() is optional; only needed if you want to change defaults.
 require('badjuju').setup({})
-vim.lsp.enable('jujutsu')
 ```
 
 #### Option F — Neovim built-in packages (`pack/*/start/`)
@@ -111,22 +108,21 @@ ln -s /absolute/path/to/bad-juju/clients/neovim \
 ```
 
 ```lua
+-- setup() is optional; only needed if you want to change defaults.
 require('badjuju').setup({})
-vim.lsp.enable('jujutsu')
 ```
 
 #### Option G — manual / no plugin manager
 
-Add the directory to `runtimepath` and call `setup` + `vim.lsp.enable`
-yourself:
+Add the directory to `runtimepath` and call `setup` yourself:
 
 ```lua
 vim.opt.rtp:prepend('/absolute/path/to/bad-juju/clients/neovim')
+-- setup() is optional; only needed if you want to change defaults.
 require('badjuju').setup({})
-vim.lsp.enable('jujutsu')
 ```
 
-### 2. Configure (optional) and enable the LSP
+### 2. Configure (optional)
 
 ```lua
 require('badjuju').setup({
@@ -138,12 +134,12 @@ require('badjuju').setup({
   -- ancestors(reachable(@, mutable()), 2).
   defaultLogRevset = nil,
 })
-vim.lsp.enable('jujutsu')
 ```
 
 `setup()` is optional — without it, the plugin behaves as if both values are
-unset. It must be called *before* `vim.lsp.enable('jujutsu')` because the LSP
-config table reads `require('badjuju').config` at enable time.
+unset. The LSP is enabled automatically by `plugin/badjuju.lua` on startup;
+`setup()` must be called before the first `*.jujutsu` buffer is opened when
+you want to change defaults like `binaryPath`.
 
 The LSP config uses Neovim 0.11's built-in `vim.lsp.enable` API with
 `root_markers = { '.jj' }` for automatic workspace detection. The server
