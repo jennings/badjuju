@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::{Url, *};
 use tower_lsp::{Client, LanguageServer};
 use tracing::{info, warn};
 
-use crate::commands::{self, CommandReference};
+use crate::commands::{self, CommandReference, DiffTarget};
 use crate::cursor::{self, BufferKind};
 use crate::highlighting;
 use crate::jj::Jj;
@@ -50,6 +50,9 @@ struct State {
     command_reference: CommandReference,
     /// Latest text content for open documents, keyed by URI string.
     documents: HashMap<String, String>,
+    /// Open diff buffers: URI → DiffTarget (Change or Commit). Used to refresh
+    /// change-mode diffs after mutations and to clean up files on close.
+    open_diffs: HashMap<String, DiffTarget>,
 }
 
 impl Default for State {
@@ -60,6 +63,7 @@ impl Default for State {
             keymap_profile: KeymapProfile::Magit,
             command_reference: CommandReference::default(),
             documents: HashMap::new(),
+            open_diffs: HashMap::new(),
         }
     }
 }
@@ -266,6 +270,7 @@ impl LanguageServer for Backend {
 
         if let Some(ref root) = workspace_root {
             info!(root = %root.display(), "found jj workspace");
+            commands::sweep_stale_diff_files(root);
         } else {
             warn!("no jj workspace found; commands will return errors until a workspace is opened");
         }
@@ -572,7 +577,14 @@ impl LanguageServer for Backend {
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
-        self.state.write().await.documents.remove(&uri);
+        let mut state = self.state.write().await;
+        state.documents.remove(&uri);
+        if state.open_diffs.remove(&uri).is_some() {
+            // Best-effort delete; ignore errors (file may already be gone).
+            if let Some(path) = commands::path_from_uri(&uri) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -719,8 +731,13 @@ impl LanguageServer for Backend {
                         .or_else(|| read_uri_from_disk(uri))
                 })
                 .map_err(lsp_err)?;
-                let (uri, _) =
+                let (uri, target) =
                     commands::run_diff_change(&jj, &workspace, &revision).map_err(lsp_err)?;
+                self.state
+                    .write()
+                    .await
+                    .open_diffs
+                    .insert(uri.clone(), target);
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.diff.commit" => {
@@ -731,8 +748,13 @@ impl LanguageServer for Backend {
                         .or_else(|| read_uri_from_disk(uri))
                 })
                 .map_err(lsp_err)?;
-                let (uri, _) =
+                let (uri, target) =
                     commands::run_diff_commit(&jj, &workspace, &revision).map_err(lsp_err)?;
+                self.state
+                    .write()
+                    .await
+                    .open_diffs
+                    .insert(uri.clone(), target);
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.new" => {
