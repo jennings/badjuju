@@ -6,12 +6,6 @@ exec >&2
 # `code --install-extension`. Useful for local "smoke test" iteration —
 # `redo clients/vscode/install` rebuilds only when sources change.
 
-if ! command -v code >/dev/null 2>&1; then
-  echo "ERROR: 'code' CLI not found on PATH." >&2
-  echo "       In VS Code: Cmd/Ctrl+Shift+P → 'Shell Command: Install code command in PATH'." >&2
-  exit 1
-fi
-
 os=$(uname -s)
 arch=$(uname -m)
 
@@ -39,6 +33,6 @@ case "$os" in
 esac
 
 vsix="badjuju-vcs-$platform.vsix"
-redo-ifchange "$vsix"
+redo-ifchange code "$vsix"
 
-code --install-extension "$vsix" --force
+./code --install-extension "$vsix" --force
