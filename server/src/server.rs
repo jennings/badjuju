@@ -286,6 +286,7 @@ impl LanguageServer for Backend {
                     work_done_progress_options: Default::default(),
                 }),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
@@ -385,6 +386,61 @@ impl LanguageServer for Backend {
         }
 
         Ok(Some(actions))
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let line = params.text_document_position_params.position.line as usize;
+
+        let Some(kind) = BufferKind::from_uri(&uri) else {
+            return Ok(None);
+        };
+        if matches!(kind, BufferKind::Diff) {
+            return Ok(None);
+        }
+
+        let content = {
+            let state = self.state.read().await;
+            state
+                .documents
+                .get(&uri)
+                .cloned()
+                .or_else(|| read_uri_from_disk(&uri))
+        };
+        let Some(content) = content else {
+            return Ok(None);
+        };
+
+        let Some(revision) = cursor::revision_at_line(&content, line, kind) else {
+            return Ok(None);
+        };
+
+        let (jj, workspace) = {
+            let state = self.state.read().await;
+            match (state.jj(), state.workspace_root.clone()) {
+                (Some(jj), Some(root)) => (jj, root),
+                _ => return Ok(None),
+            }
+        };
+
+        match commands::run_diff(&jj, &workspace, &revision) {
+            Ok(diff_uri) => {
+                let target_uri = Url::parse(&diff_uri).map_err(|_| lsp_err("bad diff URI"))?;
+                let location = Location {
+                    uri: target_uri,
+                    range: Range::default(),
+                };
+                Ok(Some(GotoDefinitionResponse::Scalar(location)))
+            }
+            Err(_) => Ok(None),
+        }
     }
 
     async fn initialized(&self, _: InitializedParams) {

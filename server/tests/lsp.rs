@@ -1193,3 +1193,42 @@ fn lsp_did_open_empty_status_jujutsu_auto_populates_disk() {
     );
     assert!(content.contains("STACK:"), "status.jujutsu missing STACK:");
 }
+
+#[test]
+fn lsp_goto_definition_on_commit_line_opens_diff() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+    let (commit_line, _) = first_commit_line(&status_content)
+        .unwrap_or_else(|| panic!("no commit line in status buffer:\n{status_content}"));
+
+    session.did_open(&status_uri, "jujutsu", &status_content);
+
+    let resp = session.request(
+        "textDocument/definition",
+        serde_json::json!({
+            "textDocument": { "uri": status_uri },
+            "position": { "line": commit_line, "character": 0 }
+        }),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "goto_definition returned error: {resp}"
+    );
+    let result = &resp["result"];
+    assert!(
+        !result.is_null(),
+        "goto_definition should return a location, got null"
+    );
+    let target_uri = result["uri"].as_str().unwrap_or("");
+    assert!(
+        target_uri.ends_with("diff.jujutsu"),
+        "expected diff.jujutsu URI, got: {target_uri}"
+    );
+}
