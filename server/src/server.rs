@@ -343,9 +343,12 @@ impl LanguageServer for Backend {
 
         let workspace_root = search_start.as_deref().and_then(find_workspace_root);
 
-        // Detect LSP 3.18 workspace/textDocumentContent client capability via raw JSON,
-        // since lsp-types 0.94 predates this field.
-        let virtual_diffs_enabled = serde_json::to_value(&params.capabilities)
+        // Detect LSP 3.18 workspace/textDocumentContent client capability.
+        // Check both `params.capabilities.workspace.textDocumentContent` (spec-compliant,
+        // for clients with native support) and `initializationOptions.virtualDiffs`
+        // (escape hatch for clients like VS Code that use vscode-languageclient 9
+        // and need to opt in via initializationOptions instead).
+        let via_capabilities = serde_json::to_value(&params.capabilities)
             .ok()
             .and_then(|v| {
                 v.get("workspace")
@@ -353,6 +356,13 @@ impl LanguageServer for Backend {
                     .map(|f| !f.is_null())
             })
             .unwrap_or(false);
+        let via_options = params
+            .initialization_options
+            .as_ref()
+            .and_then(|o| o.get("virtualDiffs"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let virtual_diffs_enabled = via_capabilities || via_options;
 
         {
             let mut state = self.state.write().await;

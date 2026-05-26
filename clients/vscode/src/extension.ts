@@ -49,6 +49,31 @@ class StatusContentProvider implements TextDocumentContentProvider {
 
 const statusProvider = new StatusContentProvider();
 
+const DIFF_SCHEME = "badjuju-diff";
+
+class DiffContentProvider implements TextDocumentContentProvider {
+  private readonly _onDidChange = new EventEmitter<Uri>();
+  readonly onDidChange = this._onDidChange.event;
+
+  async provideTextDocumentContent(uri: Uri): Promise<string> {
+    try {
+      const result = await client.sendRequest<{ text: string }>(
+        "workspace/textDocumentContent",
+        { uri: uri.toString() },
+      );
+      return result?.text ?? "";
+    } catch {
+      return "";
+    }
+  }
+
+  refresh(uri: Uri): void {
+    this._onDidChange.fire(uri);
+  }
+}
+
+const diffProvider = new DiffContentProvider();
+
 function isStatusFile(uri: Uri): boolean {
   return uri.path.endsWith("/status.jujutsu");
 }
@@ -59,6 +84,7 @@ function isLogFile(uri: Uri): boolean {
 
 function isDiffFile(uri: Uri): boolean {
   return (
+    uri.scheme === DIFF_SCHEME ||
     uri.path.endsWith("/diff.jujutsu") ||
     /\/diff-(change|commit)-[^/]+\.jujutsu$/.test(uri.path)
   );
@@ -112,6 +138,14 @@ async function openServerResult(
     preserveFocus: false,
     viewColumn: opts.aside ? -2 : undefined, // -2 = ViewColumn.Beside
   };
+  if (parsed.scheme === DIFF_SCHEME) {
+    // Virtual diff: served via DiffContentProvider (no file on disk).
+    diffProvider.refresh(parsed);
+    const doc = await workspace.openTextDocument(parsed);
+    await languages.setTextDocumentLanguage(doc, "jujutsu");
+    await window.showTextDocument(doc, showOpts);
+    return;
+  }
   if (parsed.scheme === "file" && isReadonlyOutput(parsed)) {
     const readonlyUri = toReadonlyUri(parsed);
     statusProvider.refresh(readonlyUri);
@@ -253,7 +287,12 @@ export async function activate(context: ExtensionContext) {
   const config = workspace.getConfiguration("badjuju");
   const binaryPath: string | undefined = config.get("binaryPath");
   const keymapProfile: string = config.get("keymapProfile") ?? "magit";
-  const initializationOptions: Record<string, unknown> = { keymapProfile };
+  // Signal to the server that this client supports workspace/textDocumentContent
+  // so it returns virtual badjuju-diff: URIs instead of writing files to disk.
+  const initializationOptions: Record<string, unknown> = {
+    keymapProfile,
+    virtualDiffs: true,
+  };
   if (binaryPath) initializationOptions.binaryPath = binaryPath;
 
   // Set context keys so package.json keybindings can be gated by profile.
@@ -270,6 +309,7 @@ export async function activate(context: ExtensionContext) {
     documentSelector: [
       { scheme: "file", language: "jujutsu" },
       { scheme: READONLY_SCHEME, language: "jujutsu" },
+      { scheme: DIFF_SCHEME, language: "jujutsu" },
     ],
     synchronize: {
       fileEvents: workspace.createFileSystemWatcher("**/.jj/**"),
@@ -302,6 +342,7 @@ export async function activate(context: ExtensionContext) {
       READONLY_SCHEME,
       statusProvider,
     ),
+    workspace.registerTextDocumentContentProvider(DIFF_SCHEME, diffProvider),
     commands.registerCommand("badjuju.status.open", async () => {
       const result = await client.sendRequest("workspace/executeCommand", {
         command: "badjuju.status",
@@ -667,6 +708,19 @@ export async function activate(context: ExtensionContext) {
     clientOptions,
   );
   client.start();
+
+  // Subscribe to server-sent workspace/textDocumentContent/refresh.
+  // The server fires this for each open change-mode diff when the underlying
+  // change is mutated (describe save, squash, etc.).
+  context.subscriptions.push(
+    client.onNotification(
+      "workspace/textDocumentContent/refresh",
+      (params: { uri: string }) => {
+        const uri = Uri.parse(params.uri);
+        diffProvider.refresh(uri);
+      },
+    ),
+  );
 }
 
 export function deactivate(): Thenable<void> | undefined {
