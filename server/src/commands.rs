@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use tower_lsp::lsp_types::Url;
+use tower_lsp::lsp_types::{FoldingRange, Url};
 
 use crate::cursor::{self, BufferKind};
 use crate::jj::{Jj, JjError};
@@ -605,6 +605,72 @@ fn regenerate_log_if_present(jj: &Jj, workspace: &Path) -> Result<(), CommandErr
 pub fn on_log_save(jj: &Jj, workspace: &Path, content: &str) -> Result<String, CommandError> {
     let revset = parse_log_revset(content).unwrap_or_else(|| "@".to_string());
     run_log(jj, workspace, &revset)
+}
+
+/// Return folding ranges for the STACK section of a status.jujutsu buffer.
+///
+/// Each commit's stat file list is foldable: the fold starts at the commit
+/// header line and ends at the last non-empty line before the next commit
+/// header or section break. Callers (e.g. the LSP server) use these to let
+/// editors collapse per-commit file lists.
+pub fn status_folding_ranges(content: &str) -> Vec<FoldingRange> {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut ranges = Vec::new();
+
+    let Some(stack_start) = lines.iter().position(|l| l.starts_with("STACK:")) else {
+        return ranges;
+    };
+
+    let stack_end = lines[stack_start..]
+        .iter()
+        .position(|l| l.starts_with("COMMAND REFERENCE:"))
+        .map(|i| stack_start + i)
+        .unwrap_or(lines.len());
+
+    let mut current_header: Option<usize> = None;
+    let mut last_nonempty: Option<usize> = None;
+
+    for i in (stack_start + 1)..stack_end {
+        let line = lines[i];
+        let is_commit = cursor::match_commit_header(line).is_some();
+        let is_section = line.starts_with("COMMAND REFERENCE:")
+            || line.starts_with("STATUS:")
+            || line.starts_with("STACK:");
+
+        if is_commit || is_section {
+            if let (Some(header), Some(last)) = (current_header, last_nonempty)
+                && last > header
+            {
+                ranges.push(FoldingRange {
+                    start_line: header as u32,
+                    end_line: last as u32,
+                    start_character: None,
+                    end_character: None,
+                    kind: None,
+                    collapsed_text: None,
+                });
+            }
+            current_header = if is_commit { Some(i) } else { None };
+            last_nonempty = None;
+        } else if !line.trim().is_empty() && current_header.is_some() {
+            last_nonempty = Some(i);
+        }
+    }
+
+    if let (Some(header), Some(last)) = (current_header, last_nonempty)
+        && last > header
+    {
+        ranges.push(FoldingRange {
+            start_line: header as u32,
+            end_line: last as u32,
+            start_character: None,
+            end_character: None,
+            kind: None,
+            collapsed_text: None,
+        });
+    }
+
+    ranges
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -2055,5 +2121,57 @@ mod tests {
         });
         let err = resolve_log_shortcut_arg(Some(&arg), |_| Some(String::new())).unwrap_err();
         assert!(matches!(err, CursorResolveError::UnsupportedBuffer(_)));
+    }
+
+    #[test]
+    fn status_folding_ranges_returns_empty_without_stack_section() {
+        let content = "STATUS:\n\nsome status\n\nCOMMAND REFERENCE:\nkeys";
+        let ranges = status_folding_ranges(content);
+        assert!(ranges.is_empty(), "expected no ranges: {ranges:?}");
+    }
+
+    #[test]
+    fn status_folding_ranges_returns_range_per_commit() {
+        let content = concat!(
+            "STATUS:\n\nWorking copy clean\n\n",
+            "STACK: ancestors(@, 2)\n\n",
+            "○  abcdefgh first commit\n",
+            "│  M src/a.rs\n",
+            "│  M src/b.rs\n",
+            "@  qrstuvwx second commit\n",
+            "   M src/c.rs\n",
+            "\nCOMMAND REFERENCE:\nkeys",
+        );
+        let ranges = status_folding_ranges(content);
+        assert_eq!(ranges.len(), 2, "expected 2 ranges, got: {ranges:?}");
+        let first = &ranges[0];
+        let second = &ranges[1];
+        assert!(
+            first.end_line > first.start_line,
+            "first range should span multiple lines: {first:?}"
+        );
+        assert!(
+            second.end_line > second.start_line,
+            "second range should span multiple lines: {second:?}"
+        );
+        assert!(
+            second.start_line > first.end_line,
+            "ranges must not overlap: {first:?} vs {second:?}"
+        );
+    }
+
+    #[test]
+    fn status_folding_ranges_skips_commits_with_no_stat_lines() {
+        let content = concat!(
+            "STATUS:\n\nWorking copy clean\n\n",
+            "STACK: ancestors(@, 2)\n\n",
+            "@  abcdefgh commit with no files\n",
+            "\nCOMMAND REFERENCE:\nkeys",
+        );
+        let ranges = status_folding_ranges(content);
+        assert!(
+            ranges.is_empty(),
+            "commit with no stat lines should produce no range: {ranges:?}"
+        );
     }
 }

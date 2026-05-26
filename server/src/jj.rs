@@ -114,6 +114,50 @@ impl Jj {
         self.run(&["diff", "--revisions", revision])
     }
 
+    /// Resolve a revision expression to its full change ID (32-char z-base-32).
+    pub fn change_id_of(&self, rev: &str) -> Result<String, JjError> {
+        let out = self.run(&[
+            "log",
+            "--revisions",
+            rev,
+            "--no-graph",
+            "--template",
+            "change_id",
+            "--limit",
+            "1",
+        ])?;
+        let id = out.trim().to_string();
+        if id.is_empty() {
+            return Err(JjError::JjFailed {
+                exit_code: 1,
+                stderr: format!("no commit matched revision {rev:?}"),
+            });
+        }
+        Ok(id)
+    }
+
+    /// Resolve a revision expression to its full commit ID (hex hash).
+    pub fn commit_id_of(&self, rev: &str) -> Result<String, JjError> {
+        let out = self.run(&[
+            "log",
+            "--revisions",
+            rev,
+            "--no-graph",
+            "--template",
+            "commit_id",
+            "--limit",
+            "1",
+        ])?;
+        let id = out.trim().to_string();
+        if id.is_empty() {
+            return Err(JjError::JjFailed {
+                exit_code: 1,
+                stderr: format!("no commit matched revision {rev:?}"),
+            });
+        }
+        Ok(id)
+    }
+
     /// Create a new change. When `parent` is empty, behaves like `jj new`
     /// (child of `@`). When non-empty, behaves like `jj new <REV>` so the new
     /// change becomes a child of the given commit and @ moves to it.
@@ -704,6 +748,63 @@ mod tests {
         let jj = init_jj_repo(dir.path());
         let result = jj.next_change(false);
         assert!(matches!(result, Err(JjError::JjFailed { .. })));
+    }
+
+    #[test]
+    fn change_id_of_returns_full_id_for_at() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let id = jj.change_id_of("@").expect("change_id_of failed");
+        assert!(!id.is_empty(), "expected non-empty change_id");
+        assert_eq!(id, id.to_lowercase(), "change_id should be lowercase");
+    }
+
+    #[test]
+    fn commit_id_of_returns_full_id_for_at() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let id = jj.commit_id_of("@").expect("commit_id_of failed");
+        assert!(!id.is_empty(), "expected non-empty commit_id");
+        assert!(
+            id.chars().all(|c| c.is_ascii_hexdigit()),
+            "commit_id should be hex; got: {id}"
+        );
+    }
+
+    #[test]
+    fn change_id_of_invalid_revision_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let result = jj.change_id_of("not-a-real-rev");
+        assert!(matches!(result, Err(JjError::JjFailed { .. })));
+    }
+
+    #[test]
+    fn commit_id_of_invalid_revision_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let result = jj.commit_id_of("not-a-real-rev");
+        assert!(matches!(result, Err(JjError::JjFailed { .. })));
+    }
+
+    #[test]
+    fn change_id_of_amend_preserves_change_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let before = jj.change_id_of("@").expect("change_id_of before failed");
+        jj.describe_set("@", "amended").unwrap();
+        let after = jj.change_id_of("@").expect("change_id_of after failed");
+        assert_eq!(before, after, "change-id should survive describe/amend");
+    }
+
+    #[test]
+    fn commit_id_of_amend_changes_commit_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let before = jj.commit_id_of("@").expect("commit_id_of before failed");
+        jj.describe_set("@", "amended").unwrap();
+        let after = jj.commit_id_of("@").expect("commit_id_of after failed");
+        assert_ne!(before, after, "commit-id should change after amend");
     }
 
     #[test]

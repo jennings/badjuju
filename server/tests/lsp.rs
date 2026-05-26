@@ -1232,3 +1232,36 @@ fn lsp_goto_definition_on_commit_line_opens_diff() {
         "expected diff.jujutsu URI, got: {target_uri}"
     );
 }
+
+#[test]
+fn lsp_folding_range_returns_ranges_for_commits_in_stack() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+
+    session.did_open(&status_uri, "jujutsu", &status_content);
+
+    let resp = session.request(
+        "textDocument/foldingRange",
+        serde_json::json!({
+            "textDocument": { "uri": status_uri }
+        }),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "foldingRange returned error: {resp}"
+    );
+    let ranges = resp["result"].as_array().expect("expected array result");
+    for range in ranges {
+        assert!(
+            range["startLine"].as_u64() < range["endLine"].as_u64(),
+            "each folding range must span multiple lines: {range}"
+        );
+    }
+}

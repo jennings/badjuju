@@ -287,6 +287,7 @@ impl LanguageServer for Backend {
                 }),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
@@ -441,6 +442,29 @@ impl LanguageServer for Backend {
             }
             Err(_) => Ok(None),
         }
+    }
+
+    async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        let uri = params.text_document.uri.to_string();
+
+        let Some(BufferKind::Status) = BufferKind::from_uri(&uri) else {
+            return Ok(None);
+        };
+
+        let content = {
+            let state = self.state.read().await;
+            state
+                .documents
+                .get(&uri)
+                .cloned()
+                .or_else(|| read_uri_from_disk(&uri))
+        };
+        let Some(content) = content else {
+            return Ok(None);
+        };
+
+        let ranges = commands::status_folding_ranges(&content);
+        Ok(Some(ranges))
     }
 
     async fn initialized(&self, _: InitializedParams) {
