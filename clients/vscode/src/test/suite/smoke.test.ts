@@ -21,9 +21,7 @@ suite("Smoke", () => {
   });
 
   suiteTeardown(async () => {
-    await vscode.commands.executeCommand(
-      "workbench.action.closeAllEditors",
-    );
+    await vscode.commands.executeCommand("workbench.action.closeAllEditors");
     if (existsSync(tmpFile)) rmSync(tmpFile);
   });
 
@@ -34,7 +32,10 @@ suite("Smoke", () => {
 
   test("Extension activates on jujutsu file", () => {
     const ext = vscode.extensions.getExtension(EXT_ID);
-    assert.ok(ext?.isActive, `Extension should be active after opening a .jujutsu file`);
+    assert.ok(
+      ext?.isActive,
+      `Extension should be active after opening a .jujutsu file`,
+    );
   });
 
   test("Commands are registered", async () => {

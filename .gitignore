@@ -4,6 +4,7 @@ target/
 node_modules/
 clients/vscode/out/
 clients/vscode/dist/
+clients/vscode/.vscode-test/
 clients/neovim/.test-deps/
 /configuration
 *.vsix
