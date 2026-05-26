@@ -322,6 +322,30 @@ pub fn run_diff_commit(
     Ok((file_uri(&path), DiffTarget::Commit(commit_id)))
 }
 
+/// Generate the text content of a change-mode diff without writing to disk.
+/// Used by the `workspace/textDocumentContent` handler for `badjuju-diff:` URIs.
+pub fn diff_content_for_change(jj: &Jj, change_id: &str) -> Result<String, CommandError> {
+    let output = jj.diff(change_id)?;
+    Ok(format!(
+        "CHANGE_ID: {}\n\nDIFF:\n\n{}\n\n{}",
+        change_id,
+        output.trim_end(),
+        jj.command_reference().diff(),
+    ))
+}
+
+/// Generate the text content of a commit-mode diff without writing to disk.
+/// Used by the `workspace/textDocumentContent` handler for `badjuju-diff:` URIs.
+pub fn diff_content_for_commit(jj: &Jj, commit_id: &str) -> Result<String, CommandError> {
+    let output = jj.diff(commit_id)?;
+    Ok(format!(
+        "COMMIT_ID: {}\n\nDIFF:\n\n{}\n\n{}",
+        commit_id,
+        output.trim_end(),
+        jj.command_reference().diff(),
+    ))
+}
+
 /// Extract the change-id encoded in the filename of a `diff-change-*.jujutsu`
 /// URI. Used by `did_open` auto-populate to re-run the diff for the right
 /// change when a user manually opens an existing diff file.
@@ -1541,6 +1565,38 @@ mod tests {
             "unexpected path: {path}"
         );
         assert!(path.ends_with(".jujutsu"), "unexpected path: {path}");
+    }
+
+    #[test]
+    fn diff_content_for_change_returns_change_id_header() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let change_id = jj.change_id_of("@").unwrap();
+        let content = diff_content_for_change(&jj, &change_id).expect("should generate content");
+        assert!(
+            content.starts_with("CHANGE_ID:"),
+            "expected CHANGE_ID header:\n{content}"
+        );
+        assert!(
+            content.contains("DIFF:"),
+            "expected DIFF section:\n{content}"
+        );
+    }
+
+    #[test]
+    fn diff_content_for_commit_returns_commit_id_header() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let commit_id = jj.commit_id_of("@").unwrap();
+        let content = diff_content_for_commit(&jj, &commit_id).expect("should generate content");
+        assert!(
+            content.starts_with("COMMIT_ID:"),
+            "expected COMMIT_ID header:\n{content}"
+        );
+        assert!(
+            content.contains("DIFF:"),
+            "expected DIFF section:\n{content}"
+        );
     }
 
     #[test]

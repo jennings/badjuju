@@ -70,7 +70,12 @@ async fn main() {
         Command::Lsp => {
             let stdin = tokio::io::stdin();
             let stdout = tokio::io::stdout();
-            let (service, socket) = LspService::new(Backend::new);
+            let (service, socket) = LspService::build(Backend::new)
+                .custom_method(
+                    "workspace/textDocumentContent",
+                    Backend::text_document_content,
+                )
+                .finish();
             Server::new(stdin, stdout, socket).serve(service).await;
         }
         Command::Status => {

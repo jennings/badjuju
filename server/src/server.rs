@@ -7,6 +7,18 @@ use tower_lsp::lsp_types::{Url, *};
 use tower_lsp::{Client, LanguageServer};
 use tracing::{info, warn};
 
+/// LSP 3.18 `workspace/textDocumentContent` request params (lsp-types 0.94 predates this).
+#[derive(serde::Deserialize)]
+pub struct TextDocumentContentParams {
+    uri: String,
+}
+
+/// LSP 3.18 `workspace/textDocumentContent` response.
+#[derive(serde::Serialize)]
+pub struct TextDocumentContentResult {
+    text: String,
+}
+
 use crate::commands::{self, CommandReference, DiffTarget};
 use crate::cursor::{self, BufferKind};
 use crate::highlighting;
@@ -95,6 +107,39 @@ impl Backend {
     async fn refresh_open_diffs(&self, jj: &Jj, workspace: &std::path::Path) {
         let open_diffs = self.state.read().await.open_diffs.clone();
         commands::refresh_change_diffs(jj, workspace, &open_diffs);
+    }
+
+    /// Handler for `workspace/textDocumentContent` (LSP 3.18).
+    /// Serves content for `badjuju-diff:///change/<id>` and `badjuju-diff:///commit/<id>` URIs.
+    pub async fn text_document_content(
+        &self,
+        params: TextDocumentContentParams,
+    ) -> Result<TextDocumentContentResult> {
+        let uri = &params.uri;
+        let state = self.state.read().await;
+        let jj = state.jj().ok_or_else(Error::invalid_request)?;
+        drop(state);
+
+        // Parse: badjuju-diff:///change/<id> or badjuju-diff:///commit/<id>
+        let path = uri
+            .strip_prefix("badjuju-diff:///")
+            .ok_or_else(|| lsp_err(format!("unsupported URI scheme: {uri}")))?;
+
+        let text = if let Some(id) = path.strip_prefix("change/") {
+            if id.is_empty() {
+                return Err(lsp_err("empty change-id in URI"));
+            }
+            commands::diff_content_for_change(&jj, id).map_err(lsp_err)?
+        } else if let Some(id) = path.strip_prefix("commit/") {
+            if id.is_empty() {
+                return Err(lsp_err("empty commit-id in URI"));
+            }
+            commands::diff_content_for_commit(&jj, id).map_err(lsp_err)?
+        } else {
+            return Err(lsp_err(format!("unrecognized badjuju-diff path: {path}")));
+        };
+
+        Ok(TextDocumentContentResult { text })
     }
 }
 
