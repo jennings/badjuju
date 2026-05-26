@@ -19,6 +19,7 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.log",
     "badjuju.describe",
     "badjuju.diff",
+    "badjuju.diff.commit",
     "badjuju.new",
     "badjuju.next",
     "badjuju.prev",
@@ -722,6 +723,18 @@ impl LanguageServer for Backend {
                     commands::run_diff_change(&jj, &workspace, &revision).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
+            "badjuju.diff.commit" => {
+                let revision = commands::resolve_revision_arg(params.arguments.first(), |uri| {
+                    documents
+                        .get(uri)
+                        .cloned()
+                        .or_else(|| read_uri_from_disk(uri))
+                })
+                .map_err(lsp_err)?;
+                let (uri, _) =
+                    commands::run_diff_commit(&jj, &workspace, &revision).map_err(lsp_err)?;
+                Ok(Some(serde_json::Value::String(uri)))
+            }
             "badjuju.new" => {
                 let parent = commands::resolve_revision_arg(params.arguments.first(), |uri| {
                     documents
@@ -878,6 +891,7 @@ mod tests {
         assert!(COMMANDS.contains(&"badjuju.log"));
         assert!(COMMANDS.contains(&"badjuju.describe"));
         assert!(COMMANDS.contains(&"badjuju.diff"));
+        assert!(COMMANDS.contains(&"badjuju.diff.commit"));
         assert!(COMMANDS.contains(&"badjuju.new"));
         assert!(COMMANDS.contains(&"badjuju.next"));
         assert!(COMMANDS.contains(&"badjuju.prev"));
