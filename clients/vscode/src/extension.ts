@@ -1,5 +1,4 @@
 import { existsSync, promises as fs } from "node:fs";
-import * as path from "node:path";
 import {
   commands,
   type Disposable,
@@ -22,13 +21,21 @@ import {
   type LanguageClientOptions,
   type ServerOptions,
 } from "vscode-languageclient/node";
+import { restoreCursor } from "./lib/clamp";
+import { resolveServerCommand } from "./lib/serverPath";
+import {
+  DIFF_SCHEME,
+  isLogFile,
+  isReadonlyOutput,
+  isStatusFile,
+  READONLY_SCHEME,
+} from "./lib/uri";
+import { windowTypeForUri } from "./lib/windowType";
 
 declare const __BADJUJU_COMMIT__: string;
 declare const __BADJUJU_VERSION__: string;
 
 let client: LanguageClient;
-
-const READONLY_SCHEME = "badjuju-status";
 
 class StatusContentProvider implements TextDocumentContentProvider {
   private readonly _onDidChange = new EventEmitter<Uri>();
@@ -48,8 +55,6 @@ class StatusContentProvider implements TextDocumentContentProvider {
 }
 
 const statusProvider = new StatusContentProvider();
-
-const DIFF_SCHEME = "badjuju-diff";
 
 class DiffContentProvider implements TextDocumentContentProvider {
   private readonly _onDidChange = new EventEmitter<Uri>();
@@ -73,33 +78,6 @@ class DiffContentProvider implements TextDocumentContentProvider {
 }
 
 const diffProvider = new DiffContentProvider();
-
-function isStatusFile(uri: Uri): boolean {
-  return uri.path.endsWith("/status.jujutsu");
-}
-
-function isLogFile(uri: Uri): boolean {
-  return uri.path.endsWith("/log.jujutsu");
-}
-
-function isDiffFile(uri: Uri): boolean {
-  return (
-    uri.scheme === DIFF_SCHEME ||
-    uri.path.endsWith("/diff.jujutsu") ||
-    /\/diff-(change|commit)-[^/]+\.jujutsu$/.test(uri.path)
-  );
-}
-
-function isDescribeFile(uri: Uri): boolean {
-  return uri.path.endsWith("/describe.jujutsu");
-}
-
-// Generated buffers the server rewrites on every command always open through
-// the readonly scheme. Custom revsets are entered via the
-// `badjuju.log.prompt` command rather than by editing the REVSET header.
-function isReadonlyOutput(uri: Uri): boolean {
-  return isStatusFile(uri) || isLogFile(uri) || isDiffFile(uri);
-}
 
 function waitForDocumentChange(
   doc: TextDocument,
@@ -259,19 +237,16 @@ async function runFileScopedStatusCommand(
   }
 }
 
-function resolveServerCommand(context: ExtensionContext): string {
-  if (process.env.SERVER_PATH) return process.env.SERVER_PATH;
-  const binaryName = process.platform === "win32" ? "badjuju.exe" : "badjuju";
-  const bundled = path.join(context.extensionPath, "out", "bin", binaryName);
-  if (existsSync(bundled)) return bundled;
-  return "badjuju";
-}
-
 export async function activate(context: ExtensionContext) {
   const traceOutputChannel = window.createOutputChannel(
     "Bad Juju - Jujutsu VCS",
   );
-  const command = resolveServerCommand(context);
+  const command = resolveServerCommand({
+    envServerPath: process.env.SERVER_PATH,
+    extensionPath: context.extensionPath,
+    platform: process.platform,
+    existsSync,
+  });
   const run: Executable = {
     command,
     args: ["lsp"],
@@ -414,11 +389,12 @@ export async function activate(context: ExtensionContext) {
       }
       await reloaded;
 
-      const restoredLine = Math.min(cursorLine, doc.lineCount - 1);
-      const restoredChar = Math.min(
+      const { line: restoredLine, char: restoredChar } = restoreCursor({
+        cursorLine,
         cursorChar,
-        doc.lineAt(restoredLine).text.length,
-      );
+        lineCount: doc.lineCount,
+        lineLength: (i) => doc.lineAt(i).text.length,
+      });
       const pos = new Position(restoredLine, restoredChar);
       editor.selection = new Selection(pos, pos);
       editor.revealRange(new Range(pos, pos), TextEditorRevealType.Default);
@@ -534,13 +510,7 @@ export async function activate(context: ExtensionContext) {
     }),
     commands.registerCommand("badjuju.help.open", async () => {
       const editor = window.activeTextEditor;
-      let windowType = "status";
-      if (editor) {
-        const uri = editor.document.uri;
-        if (isLogFile(uri)) windowType = "log";
-        else if (isDiffFile(uri)) windowType = "diff";
-        else if (isDescribeFile(uri)) windowType = "describe";
-      }
+      const windowType = windowTypeForUri(editor?.document.uri);
       const result = await client.sendRequest("workspace/executeCommand", {
         command: "badjuju.help",
         arguments: [windowType],
