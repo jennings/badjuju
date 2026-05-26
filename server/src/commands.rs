@@ -130,43 +130,15 @@ pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
     Url::parse(uri).ok()?.to_file_path().ok()
 }
 
-/// Run `badjuju.status`: write status.jujutsu (preserving any current STATS toggle) and return its URI.
+/// Run `badjuju.status`: write status.jujutsu and return its URI.
 pub fn run_status(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
-    let stat = read_current_stat(workspace);
-    write_status(jj, workspace, None, stat)
-}
-
-/// Toggle the STATS state and re-render.
-pub fn run_toggle_stat(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
-    let next = !read_current_stat(workspace);
-    write_status(jj, workspace, None, next)
-}
-
-/// Read the persisted STATS state from the sidecar file. Defaults to `false`.
-fn read_current_stat(workspace: &Path) -> bool {
-    let Ok(dir) = badjuju_dir(workspace) else {
-        return false;
-    };
-    match std::fs::read_to_string(dir.join("stats")) {
-        Ok(s) => s.trim() == "on",
-        Err(_) => false,
-    }
-}
-
-fn write_stat_state(workspace: &Path, stat: bool) -> std::io::Result<()> {
-    let dir = badjuju_dir(workspace)?;
-    std::fs::write(dir.join("stats"), if stat { "on\n" } else { "off\n" })
+    write_status(jj, workspace, None)
 }
 
 /// Write status.jujutsu, optionally prepending a MESSAGE: block. Returns the URI.
-fn write_status(
-    jj: &Jj,
-    workspace: &Path,
-    message: Option<&str>,
-    stat: bool,
-) -> Result<String, CommandError> {
+fn write_status(jj: &Jj, workspace: &Path, message: Option<&str>) -> Result<String, CommandError> {
     let status = jj.status()?;
-    let stack = jj.log_with_stat(STATUS_REVSET, stat)?;
+    let stack = jj.log_with_stat(STATUS_REVSET, true)?;
 
     let prelude = match message {
         Some(m) => format!("MESSAGE: {}\n\n", m.trim()),
@@ -185,7 +157,6 @@ fn write_status(
     let dir = badjuju_dir(workspace)?;
     let path = dir.join("status.jujutsu");
     std::fs::write(&path, content)?;
-    write_stat_state(workspace, stat)?;
     Ok(file_uri(&path))
 }
 
@@ -203,10 +174,9 @@ pub fn run_squash(
     file: &str,
     revision: &str,
 ) -> Result<String, CommandError> {
-    let stat = read_current_stat(workspace);
     let rev = revision_or_at(revision);
     if file.is_empty() {
-        return write_status(jj, workspace, Some("squash: no file selected"), stat);
+        return write_status(jj, workspace, Some("squash: no file selected"));
     }
     let parents = jj.change_ids(&format!("parents({rev})"))?;
     if parents.len() != 1 {
@@ -217,7 +187,6 @@ pub fn run_squash(
                 "squash {file} from {rev}: revision has {} parents (need exactly 1)",
                 parents.len()
             )),
-            stat,
         );
     }
     match jj.squash_file_into_parent(rev, file) {
@@ -226,7 +195,6 @@ pub fn run_squash(
             jj,
             workspace,
             Some(&format!("squash {file} from {rev} failed: {e}")),
-            stat,
         ),
     }
 }
@@ -239,10 +207,9 @@ pub fn run_unsquash(
     file: &str,
     revision: &str,
 ) -> Result<String, CommandError> {
-    let stat = read_current_stat(workspace);
     let rev = revision_or_at(revision);
     if file.is_empty() {
-        return write_status(jj, workspace, Some("unsquash: no file selected"), stat);
+        return write_status(jj, workspace, Some("unsquash: no file selected"));
     }
     let children = jj.change_ids(&format!("({rev})+"))?;
     if children.len() != 1 {
@@ -253,7 +220,6 @@ pub fn run_unsquash(
                 "unsquash {file} from {rev}: revision has {} children (need exactly 1)",
                 children.len()
             )),
-            stat,
         );
     }
     match jj.squash_file_into(rev, &children[0], file) {
@@ -262,7 +228,6 @@ pub fn run_unsquash(
             jj,
             workspace,
             Some(&format!("unsquash {file} from {rev} failed: {e}")),
-            stat,
         ),
     }
 }
@@ -274,7 +239,7 @@ pub fn run_log(jj: &Jj, workspace: &Path, revset: &str) -> Result<String, Comman
     } else {
         revset
     };
-    let output = jj.log(revset)?;
+    let output = jj.log_with_stat(revset, true)?;
 
     let content = format!(
         "REVSET: {}\n{}\n\nOUTPUT:\n\n{}\n\n{}",
@@ -395,12 +360,11 @@ pub fn run_new(jj: &Jj, workspace: &Path, parent: &str) -> Result<String, Comman
 /// optionally with `--edit`. On failure, surface the error as a MESSAGE prelude
 /// in the status buffer (typical when @ has no descendants).
 pub fn run_next(jj: &Jj, workspace: &Path, edit: bool) -> Result<String, CommandError> {
-    let stat = read_current_stat(workspace);
     match jj.next_change(edit) {
         Ok(()) => run_status(jj, workspace),
         Err(e) => {
             let label = if edit { "next --edit" } else { "next" };
-            write_status(jj, workspace, Some(&format!("{label} failed: {e}")), stat)
+            write_status(jj, workspace, Some(&format!("{label} failed: {e}")))
         }
     }
 }
@@ -409,12 +373,11 @@ pub fn run_next(jj: &Jj, workspace: &Path, edit: bool) -> Result<String, Command
 /// optionally with `--edit`. On failure, surface the error as a MESSAGE prelude
 /// in the status buffer.
 pub fn run_prev(jj: &Jj, workspace: &Path, edit: bool) -> Result<String, CommandError> {
-    let stat = read_current_stat(workspace);
     match jj.prev_change(edit) {
         Ok(()) => run_status(jj, workspace),
         Err(e) => {
             let label = if edit { "prev --edit" } else { "prev" };
-            write_status(jj, workspace, Some(&format!("{label} failed: {e}")), stat)
+            write_status(jj, workspace, Some(&format!("{label} failed: {e}")))
         }
     }
 }
@@ -422,10 +385,9 @@ pub fn run_prev(jj: &Jj, workspace: &Path, edit: bool) -> Result<String, Command
 /// Run `badjuju.undo`: revert the last operation with `jj undo`, then refresh status.
 /// Surfaces failures as a MESSAGE: prelude in the status buffer.
 pub fn run_undo(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
-    let stat = read_current_stat(workspace);
     match jj.undo() {
         Ok(()) => run_status(jj, workspace),
-        Err(e) => write_status(jj, workspace, Some(&format!("undo failed: {e}")), stat),
+        Err(e) => write_status(jj, workspace, Some(&format!("undo failed: {e}"))),
     }
 }
 
@@ -438,14 +400,8 @@ pub fn run_rebase(
     source: &str,
     dest: &str,
 ) -> Result<String, CommandError> {
-    let stat = read_current_stat(workspace);
     if dest.is_empty() {
-        return write_status(
-            jj,
-            workspace,
-            Some("rebase: destination revision required"),
-            stat,
-        );
+        return write_status(jj, workspace, Some("rebase: destination revision required"));
     }
     let src = revision_or_at(source);
     match jj.rebase(src, dest) {
@@ -457,7 +413,6 @@ pub fn run_rebase(
             jj,
             workspace,
             Some(&format!("rebase {src} to {dest} failed: {e}")),
-            stat,
         ),
     }
 }
@@ -471,55 +426,41 @@ pub fn run_push(
     workspace: &Path,
     _force_with_lease: bool,
 ) -> Result<String, CommandError> {
-    let stat = read_current_stat(workspace);
     match jj.git_push() {
         Ok(_) => run_status(jj, workspace),
-        Err(e) => write_status(jj, workspace, Some(&format!("push failed: {e}")), stat),
+        Err(e) => write_status(jj, workspace, Some(&format!("push failed: {e}"))),
     }
 }
 
 /// Run `badjuju.fetch`: run `jj git fetch`, then refresh status.
 /// Surfaces failures as a MESSAGE prelude.
 pub fn run_fetch(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
-    let stat = read_current_stat(workspace);
     match jj.git_fetch() {
         Ok(_) => run_status(jj, workspace),
-        Err(e) => write_status(jj, workspace, Some(&format!("fetch failed: {e}")), stat),
+        Err(e) => write_status(jj, workspace, Some(&format!("fetch failed: {e}"))),
     }
 }
 
 /// Run `badjuju.edit`: move @ to `revision` (`jj edit REV`), then refresh status
 /// and log (if log file exists). Surfaces failures as a MESSAGE prelude.
 pub fn run_edit(jj: &Jj, workspace: &Path, revision: &str) -> Result<String, CommandError> {
-    let stat = read_current_stat(workspace);
     let rev = revision_or_at(revision);
     match jj.edit(rev) {
         Ok(()) => {
             regenerate_log_if_present(jj, workspace)?;
             run_status(jj, workspace)
         }
-        Err(e) => write_status(
-            jj,
-            workspace,
-            Some(&format!("edit {rev} failed: {e}")),
-            stat,
-        ),
+        Err(e) => write_status(jj, workspace, Some(&format!("edit {rev} failed: {e}"))),
     }
 }
 
 /// Run `badjuju.abandon`: abandon `revision` (defaults to `@`) and refresh status.
 /// Surfaces failures as a MESSAGE: prelude in the status buffer.
 pub fn run_abandon(jj: &Jj, workspace: &Path, revision: &str) -> Result<String, CommandError> {
-    let stat = read_current_stat(workspace);
     let rev = revision_or_at(revision);
     match jj.abandon(rev) {
         Ok(()) => run_status(jj, workspace),
-        Err(e) => write_status(
-            jj,
-            workspace,
-            Some(&format!("abandon {rev} failed: {e}")),
-            stat,
-        ),
+        Err(e) => write_status(jj, workspace, Some(&format!("abandon {rev} failed: {e}"))),
     }
 }
 
@@ -535,9 +476,8 @@ pub fn run_bookmark(
     name: &str,
     revision: &str,
 ) -> Result<String, CommandError> {
-    let stat = read_current_stat(workspace);
     if name.is_empty() {
-        return write_status(jj, workspace, Some("bookmark: name is required"), stat);
+        return write_status(jj, workspace, Some("bookmark: name is required"));
     }
     let result = match sub_action {
         "create" => jj.bookmark_create(name, revision),
@@ -550,7 +490,6 @@ pub fn run_bookmark(
                 jj,
                 workspace,
                 Some(&format!("bookmark: unknown sub-action '{other}'")),
-                stat,
             );
         }
     };
@@ -563,7 +502,6 @@ pub fn run_bookmark(
             jj,
             workspace,
             Some(&format!("bookmark {sub_action} failed: {e}")),
-            stat,
         ),
     }
 }
@@ -850,7 +788,7 @@ mod tests {
         let content = std::fs::read_to_string(path).unwrap();
         // Every key in the magit status profile must appear at the start of a line.
         for key in [
-            "n", "L", "r", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "=", "R", "q", "?",
+            "n", "L", "r", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "R", "q", "?",
         ] {
             assert!(
                 content.lines().any(|l| l.starts_with(key)),
@@ -1535,9 +1473,10 @@ mod tests {
         let uri = run_squash(&jj, dir.path(), "readme.txt", "").expect("run_squash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(content.starts_with("STATUS:"));
+        let status_section = content.split("STACK:").next().unwrap_or("");
         assert!(
-            !content.contains("readme.txt"),
-            "expected file squashed away"
+            !status_section.contains("readme.txt"),
+            "expected readme.txt absent from working-copy STATUS section:\n{status_section}"
         );
     }
 
@@ -1794,98 +1733,6 @@ mod tests {
     }
 
     #[test]
-    fn run_abandon_preserves_stat_state() {
-        let dir = tempdir().unwrap();
-        let jj = init_repo(dir.path());
-        run_toggle_stat(&jj, dir.path()).unwrap();
-        jj.describe_set("@", "to abandon").unwrap();
-        let uri = run_abandon(&jj, dir.path(), "@").expect("run_abandon failed");
-        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
-        assert!(
-            read_current_stat(dir.path()),
-            "abandon should preserve stat=on"
-        );
-        assert!(
-            !content.contains("STATS:"),
-            "status buffer must not leak STATS marker:\n{content}"
-        );
-    }
-
-    #[test]
-    fn run_undo_preserves_stat_state() {
-        let dir = tempdir().unwrap();
-        let jj = init_repo(dir.path());
-        run_toggle_stat(&jj, dir.path()).unwrap();
-        jj.describe_set("@", "a description").unwrap();
-        run_undo(&jj, dir.path()).expect("run_undo failed");
-        assert!(
-            read_current_stat(dir.path()),
-            "undo should preserve stat=on"
-        );
-    }
-
-    #[test]
-    fn run_status_defaults_to_stat_off() {
-        let dir = tempdir().unwrap();
-        let jj = init_repo(dir.path());
-        let uri = run_status(&jj, dir.path()).unwrap();
-        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
-        assert!(
-            !read_current_stat(dir.path()),
-            "expected stat off by default"
-        );
-        assert!(
-            !content.contains("STATS:"),
-            "status buffer must not contain STATS marker:\n{content}"
-        );
-    }
-
-    #[test]
-    fn toggle_stat_flips_state() {
-        let dir = tempdir().unwrap();
-        let jj = init_repo(dir.path());
-        run_status(&jj, dir.path()).unwrap();
-        run_toggle_stat(&jj, dir.path()).unwrap();
-        assert!(
-            read_current_stat(dir.path()),
-            "expected stat=on after toggle"
-        );
-        run_toggle_stat(&jj, dir.path()).unwrap();
-        assert!(
-            !read_current_stat(dir.path()),
-            "expected stat=off after second toggle"
-        );
-    }
-
-    #[test]
-    fn run_status_preserves_stat_across_calls() {
-        let dir = tempdir().unwrap();
-        let jj = init_repo(dir.path());
-        run_toggle_stat(&jj, dir.path()).unwrap(); // stat on
-        run_status(&jj, dir.path()).unwrap();
-        assert!(
-            read_current_stat(dir.path()),
-            "stat should be preserved across status calls"
-        );
-    }
-
-    #[test]
-    fn squash_preserves_stat_state() {
-        let dir = tempdir().unwrap();
-        let jj = init_repo(dir.path());
-        std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
-        jj.describe_set("@", "parent").unwrap();
-        jj.new_change("").unwrap();
-        std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
-        run_toggle_stat(&jj, dir.path()).unwrap(); // stat on
-        run_squash(&jj, dir.path(), "readme.txt", "").unwrap();
-        assert!(
-            read_current_stat(dir.path()),
-            "squash should preserve stat=on"
-        );
-    }
-
-    #[test]
     fn run_next_with_no_descendants_reports_error_in_status() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
@@ -1926,20 +1773,6 @@ mod tests {
         assert!(
             desc.contains("parent"),
             "expected @ on parent after prev --edit; got: {desc}"
-        );
-    }
-
-    #[test]
-    fn run_next_preserves_stat_state_on_failure() {
-        let dir = tempdir().unwrap();
-        let jj = init_repo(dir.path());
-        run_toggle_stat(&jj, dir.path()).unwrap(); // stat on
-        // Fresh repo's @ has no descendants → next fails → status is rendered
-        // with stat preserved.
-        run_next(&jj, dir.path(), false).expect("run_next failed");
-        assert!(
-            read_current_stat(dir.path()),
-            "next failure should preserve stat=on"
         );
     }
 

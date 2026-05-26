@@ -147,11 +147,6 @@
         "title": "Unsquash file at cursor from parent into child"
       },
       {
-        "command": "badjuju.toggleStat.open",
-        "category": "jj",
-        "title": "Toggle --stat on the status window's stack log"
-      },
-      {
         "command": "badjuju.undo.open",
         "category": "jj",
         "title": "Undo last operation (jj undo)"
@@ -314,11 +309,6 @@
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
-        "command": "badjuju.toggleStat.open",
-        "key": "=",
-        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
-      },
-      {
         "command": "badjuju.log.applyShortcut",
         "key": "enter",
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
@@ -451,11 +441,6 @@
       {
         "command": "badjuju.undo.open",
         "key": "u u",
-        "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
-      },
-      {
-        "command": "badjuju.toggleStat.open",
-        "key": "=",
         "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {

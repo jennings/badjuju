@@ -94,12 +94,6 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         windows: &["status"],
     },
     KeymapEntry {
-        key: "=",
-        action: "badjuju.toggleStat",
-        description: "toggle --stat on the stack log",
-        windows: &["status"],
-    },
-    KeymapEntry {
         key: "b",
         action: "badjuju.bookmark",
         description: "bookmark (create / move / delete / track / forget)",
@@ -221,12 +215,6 @@ static VIM_ENTRIES: &[KeymapEntry] = &[
         key: "uu",
         action: "badjuju.undo",
         description: "jj undo",
-        windows: &["status"],
-    },
-    KeymapEntry {
-        key: "=",
-        action: "badjuju.toggleStat",
-        description: "toggle --stat on the stack log",
         windows: &["status"],
     },
     // Status + log
@@ -351,8 +339,7 @@ mod tests {
         let text = render_command_reference(&KeymapProfile::Magit, "status");
         assert!(text.starts_with("COMMAND REFERENCE:"));
         for key in [
-            "n", "L", "b", "r", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "=", "R", "q",
-            "?",
+            "n", "L", "b", "r", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "R", "q", "?",
         ] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),

@@ -25,7 +25,6 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.refresh",
     "badjuju.squash",
     "badjuju.unsquash",
-    "badjuju.toggleStat",
     "badjuju.undo",
     "badjuju.abandon",
     "badjuju.keymap",
@@ -698,10 +697,6 @@ impl LanguageServer for Backend {
                     commands::run_unsquash(&jj, &workspace, &file, &revision).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
             }
-            "badjuju.toggleStat" => {
-                let uri = commands::run_toggle_stat(&jj, &workspace).map_err(lsp_err)?;
-                Ok(Some(serde_json::Value::String(uri)))
-            }
             "badjuju.undo" => {
                 let uri = commands::run_undo(&jj, &workspace).map_err(lsp_err)?;
                 Ok(Some(serde_json::Value::String(uri)))
@@ -806,7 +801,6 @@ mod tests {
         assert!(COMMANDS.contains(&"badjuju.refresh"));
         assert!(COMMANDS.contains(&"badjuju.squash"));
         assert!(COMMANDS.contains(&"badjuju.unsquash"));
-        assert!(COMMANDS.contains(&"badjuju.toggleStat"));
         assert!(COMMANDS.contains(&"badjuju.undo"));
         assert!(COMMANDS.contains(&"badjuju.abandon"));
         assert!(COMMANDS.contains(&"badjuju.keymap"));

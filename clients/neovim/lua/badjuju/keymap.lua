@@ -19,9 +19,8 @@ local STATUS_MAPS = {
   { 'L', 'JJLog',        'badjuju: open log' },
   { 'f', 'JJFetch',      'badjuju: git fetch' },
   { 'p', 'JJPush',       'badjuju: git push' },
-  { 'u', 'JJUndo',       'badjuju: undo' },
-  { '=', 'JJToggleStat', 'badjuju: toggle --stat' },
-  { 'a', 'JJAbandon',    'badjuju: abandon revision' },
+  { 'u', 'JJUndo',    'badjuju: undo' },
+  { 'a', 'JJAbandon', 'badjuju: abandon revision' },
 }
 
 --- Build a `{cursor = {uri, line}}` argument the server can resolve to a
@@ -196,7 +195,6 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'pp', '<Cmd>JJPush<CR>', 'badjuju: git push')
       nmap(bufnr, 'PP', '<Cmd>JJPush!<CR>', 'badjuju: git push --force-with-lease')
       nmap(bufnr, 'uu', '<Cmd>JJUndo<CR>', 'badjuju: undo')
-      nmap(bufnr, '=', '<Cmd>JJToggleStat<CR>', 'badjuju: toggle --stat')
       nmap(bufnr, 'bb', status_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
       nmap(bufnr, 'rr', status_rebase, 'badjuju: rebase commit at cursor to destination')
       nmap(bufnr, 'ee', function() run_at_cursor_split('badjuju.edit') end,

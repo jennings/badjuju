@@ -440,13 +440,6 @@ export async function activate(context: ExtensionContext) {
     commands.registerCommand("badjuju.unsquash.file", async () => {
       await runFileScopedStatusCommand("badjuju.unsquash");
     }),
-    commands.registerCommand("badjuju.toggleStat.open", async () => {
-      const result = await client.sendRequest("workspace/executeCommand", {
-        command: "badjuju.toggleStat",
-        arguments: [],
-      });
-      await openServerResult(result as string);
-    }),
     commands.registerCommand("badjuju.undo.open", async () => {
       const result = await client.sendRequest("workspace/executeCommand", {
         command: "badjuju.undo",

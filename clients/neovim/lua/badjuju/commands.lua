@@ -74,10 +74,6 @@ function M.register_all()
     badjuju.execute('badjuju.unsquash', args.fargs)
   end)
 
-  cmd('JJToggleStat', {}, function()
-    badjuju.execute('badjuju.toggleStat')
-  end)
-
   cmd('JJUndo', {}, function()
     badjuju.execute('badjuju.undo')
   end)
