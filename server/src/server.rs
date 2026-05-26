@@ -91,6 +91,11 @@ impl Backend {
             state: Arc::new(RwLock::new(State::default())),
         }
     }
+
+    async fn refresh_open_diffs(&self, jj: &Jj, workspace: &std::path::Path) {
+        let open_diffs = self.state.read().await.open_diffs.clone();
+        commands::refresh_change_diffs(jj, workspace, &open_diffs);
+    }
 }
 
 fn lsp_err(msg: impl ToString) -> Error {
@@ -631,6 +636,8 @@ impl LanguageServer for Backend {
                     self.client
                         .log_message(MessageType::ERROR, format!("describe save failed: {e}"))
                         .await;
+                } else {
+                    self.refresh_open_diffs(&jj, &workspace).await;
                 }
             }
             Some("log.jujutsu") => {
@@ -766,6 +773,7 @@ impl LanguageServer for Backend {
                 })
                 .map_err(lsp_err)?;
                 let uri = commands::run_new(&jj, &workspace, &parent).map_err(lsp_err)?;
+                self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.next" => {
@@ -775,6 +783,7 @@ impl LanguageServer for Backend {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 let uri = commands::run_next(&jj, &workspace, edit).map_err(lsp_err)?;
+                self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.prev" => {
@@ -784,6 +793,7 @@ impl LanguageServer for Backend {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 let uri = commands::run_prev(&jj, &workspace, edit).map_err(lsp_err)?;
+                self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.refresh" => {
@@ -803,6 +813,7 @@ impl LanguageServer for Backend {
                 )?;
                 let uri =
                     commands::run_squash(&jj, &workspace, &file, &revision).map_err(lsp_err)?;
+                self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.unsquash" => {
@@ -813,10 +824,12 @@ impl LanguageServer for Backend {
                 )?;
                 let uri =
                     commands::run_unsquash(&jj, &workspace, &file, &revision).map_err(lsp_err)?;
+                self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.undo" => {
                 let uri = commands::run_undo(&jj, &workspace).map_err(lsp_err)?;
+                self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.abandon" => {
@@ -828,6 +841,7 @@ impl LanguageServer for Backend {
                 })
                 .map_err(lsp_err)?;
                 let uri = commands::run_abandon(&jj, &workspace, &revision).map_err(lsp_err)?;
+                self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.edit" => {
@@ -839,10 +853,12 @@ impl LanguageServer for Backend {
                 })
                 .map_err(lsp_err)?;
                 let uri = commands::run_edit(&jj, &workspace, &revision).map_err(lsp_err)?;
+                self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.fetch" => {
                 let uri = commands::run_fetch(&jj, &workspace).map_err(lsp_err)?;
+                self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.push" => {
@@ -853,6 +869,7 @@ impl LanguageServer for Backend {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 let uri = commands::run_push(&jj, &workspace, force_with_lease).map_err(lsp_err)?;
+                self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.rebase" => {
@@ -869,6 +886,7 @@ impl LanguageServer for Backend {
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 let uri = commands::run_rebase(&jj, &workspace, &source, dest).map_err(lsp_err)?;
+                self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.bookmark" => {
@@ -891,6 +909,7 @@ impl LanguageServer for Backend {
                 .map_err(lsp_err)?;
                 let uri = commands::run_bookmark(&jj, &workspace, sub_action, name, &revision)
                     .map_err(lsp_err)?;
+                self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             _ => Err(Error::method_not_found()),
