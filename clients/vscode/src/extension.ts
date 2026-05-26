@@ -149,10 +149,14 @@ function cursorArgsForActiveEditor():
   if (!editor) return undefined;
   const uri = editor.document.uri;
   if (!isStatusFile(uri) && !isLogFile(uri)) return undefined;
+  // The server resolves cursor URIs via disk read; convert readonly scheme to
+  // file:// so read_uri_from_disk can read the content without needing the
+  // LSP document cache (which may not yet have the virtual document).
+  const fileUri = uri.scheme === READONLY_SCHEME ? toFileUri(uri) : uri;
   return [
     {
       cursor: {
-        uri: uri.toString(),
+        uri: fileUri.toString(),
         line: editor.selection.active.line,
       },
     },

@@ -189,6 +189,12 @@ Hotkey profile applied to `status.jujutsu`, `log.jujutsu`, `diff.jujutsu`, and `
 - `"vim"` — two-letter verb chords inspired by Fugitive
 - `"none"` — disables all built-in hotkeys so you can define your own
 
+## Testing
+
+`redo clients/vscode/test` is the supported entry point. It builds the bundled extension (including the `badjuju` server binary) via `redo-ifchange all`, compiles the TypeScript test sources, and launches a headless VS Code with mocha. Running `pnpm vscode-test` directly will skip the build step and may run against a stale `badjuju` on `PATH` — leading to confusing failures (e.g. the extension falls back to the legacy `diff.jujutsu` format when the bundled binary supports virtual diffs).
+
+Unit tests for the pure helpers in `src/lib/` run inside the same Electron suite and finish in under a second.
+
 ## Building
 
 `redo clients/vscode/all` builds the extension with the server binary for the host platform.

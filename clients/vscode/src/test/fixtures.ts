@@ -65,7 +65,7 @@ export async function getRepoContext(): Promise<RepoContext> {
   return {
     repoPath,
     reset() {
-      jj(repoPath, ["op", "undo"]);
+      jj(repoPath, ["undo"]);
     },
     dispose() {
       // shared workspace — nothing to tear down here
@@ -98,7 +98,48 @@ export async function waitForActiveEditorUri(
     if (uri && predicate(uri)) return uri;
     await new Promise((r) => setTimeout(r, 150));
   }
-  return vscode.window.activeTextEditor?.document.uri;
+  return undefined;
+}
+
+/**
+ * Poll until any visible editor (including non-focused side-by-side columns)
+ * satisfies predicate. Useful for commands that open documents beside the
+ * current editor (ViewColumn.Beside) where focus may not always transfer.
+ */
+export async function waitForVisibleEditorUri(
+  predicate: (uri: vscode.Uri) => boolean,
+  timeoutMs = 10_000,
+): Promise<vscode.Uri | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const editor of vscode.window.visibleTextEditors) {
+      const uri = editor.document.uri;
+      if (predicate(uri)) return uri;
+    }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return undefined;
+}
+
+/**
+ * Poll the document content at `uri` until `predicate` returns true. The
+ * DiffContentProvider fetches content via an async LSP request and silently
+ * returns `""` on error/race — call this after opening a virtual diff URI to
+ * wait out the first-load race.
+ */
+export async function waitForDocContent(
+  uri: vscode.Uri,
+  predicate: (text: string) => boolean,
+  timeoutMs = 5_000,
+): Promise<string | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const doc = await vscode.workspace.openTextDocument(uri);
+    const text = doc.getText();
+    if (predicate(text)) return text;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return undefined;
 }
 
 /**

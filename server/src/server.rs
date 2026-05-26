@@ -25,6 +25,38 @@ struct TextDocumentContentRefreshParams {
     uri: String,
 }
 
+/// Parsed `badjuju-diff:` URI variant.
+#[derive(Debug, PartialEq, Eq)]
+enum DiffUriKind<'a> {
+    Change(&'a str),
+    Commit(&'a str),
+}
+
+/// Parse a `badjuju-diff:` URI. Accepts both the canonical three-slash form
+/// (`badjuju-diff:///change/<id>`) and the one-slash form
+/// (`badjuju-diff:/change/<id>`); VS Code's `Uri.toString()` normalizes
+/// empty-authority URIs to the latter, so the client may send either.
+fn parse_diff_uri(uri: &str) -> std::result::Result<DiffUriKind<'_>, String> {
+    let path = uri
+        .strip_prefix("badjuju-diff:///")
+        .or_else(|| uri.strip_prefix("badjuju-diff:/"))
+        .ok_or_else(|| format!("unsupported URI scheme: {uri}"))?;
+
+    if let Some(id) = path.strip_prefix("change/") {
+        if id.is_empty() {
+            return Err("empty change-id in URI".to_string());
+        }
+        Ok(DiffUriKind::Change(id))
+    } else if let Some(id) = path.strip_prefix("commit/") {
+        if id.is_empty() {
+            return Err("empty commit-id in URI".to_string());
+        }
+        Ok(DiffUriKind::Commit(id))
+    } else {
+        Err(format!("unrecognized badjuju-diff path: {path}"))
+    }
+}
+
 /// Custom notification: `workspace/textDocumentContent/refresh`.
 enum WorkspaceTextDocumentContentRefresh {}
 impl tower_lsp::lsp_types::notification::Notification for WorkspaceTextDocumentContentRefresh {
@@ -181,23 +213,14 @@ impl Backend {
         let jj = state.jj().ok_or_else(Error::invalid_request)?;
         drop(state);
 
-        // Parse: badjuju-diff:///change/<id> or badjuju-diff:///commit/<id>
-        let path = uri
-            .strip_prefix("badjuju-diff:///")
-            .ok_or_else(|| lsp_err(format!("unsupported URI scheme: {uri}")))?;
-
-        let text = if let Some(id) = path.strip_prefix("change/") {
-            if id.is_empty() {
-                return Err(lsp_err("empty change-id in URI"));
+        let kind = parse_diff_uri(uri).map_err(lsp_err)?;
+        let text = match kind {
+            DiffUriKind::Change(id) => {
+                commands::diff_content_for_change(&jj, id).map_err(lsp_err)?
             }
-            commands::diff_content_for_change(&jj, id).map_err(lsp_err)?
-        } else if let Some(id) = path.strip_prefix("commit/") {
-            if id.is_empty() {
-                return Err(lsp_err("empty commit-id in URI"));
+            DiffUriKind::Commit(id) => {
+                commands::diff_content_for_commit(&jj, id).map_err(lsp_err)?
             }
-            commands::diff_content_for_commit(&jj, id).map_err(lsp_err)?
-        } else {
-            return Err(lsp_err(format!("unrecognized badjuju-diff path: {path}")));
         };
 
         Ok(TextDocumentContentResult { text })
@@ -1078,6 +1101,57 @@ mod tests {
     #[test]
     fn commands_list_is_nonempty() {
         assert!(!COMMANDS.is_empty());
+    }
+
+    #[test]
+    fn parse_diff_uri_three_slash_change() {
+        assert_eq!(
+            parse_diff_uri("badjuju-diff:///change/abc123").unwrap(),
+            DiffUriKind::Change("abc123")
+        );
+    }
+
+    #[test]
+    fn parse_diff_uri_one_slash_change() {
+        // VS Code normalizes empty-authority URIs to `scheme:/path`.
+        assert_eq!(
+            parse_diff_uri("badjuju-diff:/change/abc123").unwrap(),
+            DiffUriKind::Change("abc123")
+        );
+    }
+
+    #[test]
+    fn parse_diff_uri_three_slash_commit() {
+        assert_eq!(
+            parse_diff_uri("badjuju-diff:///commit/deadbeef").unwrap(),
+            DiffUriKind::Commit("deadbeef")
+        );
+    }
+
+    #[test]
+    fn parse_diff_uri_one_slash_commit() {
+        assert_eq!(
+            parse_diff_uri("badjuju-diff:/commit/deadbeef").unwrap(),
+            DiffUriKind::Commit("deadbeef")
+        );
+    }
+
+    #[test]
+    fn parse_diff_uri_wrong_scheme_errors() {
+        assert!(parse_diff_uri("file:///foo").is_err());
+        assert!(parse_diff_uri("badjuju-status:///x").is_err());
+    }
+
+    #[test]
+    fn parse_diff_uri_empty_id_errors() {
+        assert!(parse_diff_uri("badjuju-diff:///change/").is_err());
+        assert!(parse_diff_uri("badjuju-diff:///commit/").is_err());
+        assert!(parse_diff_uri("badjuju-diff:/change/").is_err());
+    }
+
+    #[test]
+    fn parse_diff_uri_unknown_path_errors() {
+        assert!(parse_diff_uri("badjuju-diff:///foobar/x").is_err());
     }
 
     #[test]
