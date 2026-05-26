@@ -219,6 +219,8 @@ function M.setup_for_buffer(bufnr)
         'badjuju: describe commit at cursor in a split')
       nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: show change diff at cursor (updates on amend)')
+      nmap(bufnr, '=', function() run_at_cursor_split('badjuju.diff') end,
+        'badjuju: show change diff at cursor (updates on amend)')
       nmap(bufnr, 's', function() run_file_scoped('badjuju.squash') end,
         'badjuju: squash file at cursor into parent')
       nmap(bufnr, 'U', function() run_file_scoped('badjuju.unsquash') end,

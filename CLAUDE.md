@@ -75,7 +75,7 @@ redo check
 
 ## Testing
 
-**Run tests after every unit of work.** Before closing a beads issue, you MUST run `cargo test` and confirm all tests pass with no warnings. Never close an issue with a failing or skipped test.
+**Run tests after every unit of work.** Before closing a beads issue or committing, you MUST run `redo test` and `redo check`, and confirm all tests pass with no warnings. Never close an issue or commit with a failing or skipped test.
 
 ### Rust testing conventions
 
