@@ -158,6 +158,27 @@ impl Jj {
         Ok(id)
     }
 
+    /// Return the current operation head ID (128-char hex string).
+    pub fn op_head_id(&self) -> Result<String, JjError> {
+        let out = self.run(&[
+            "op",
+            "log",
+            "--no-graph",
+            "--template",
+            "id",
+            "--limit",
+            "1",
+        ])?;
+        let id = out.trim().to_string();
+        if id.is_empty() {
+            return Err(JjError::JjFailed {
+                exit_code: 1,
+                stderr: "op log returned empty output".to_string(),
+            });
+        }
+        Ok(id)
+    }
+
     /// Create a new change. When `parent` is empty, behaves like `jj new`
     /// (child of `@`). When non-empty, behaves like `jj new <REV>` so the new
     /// change becomes a child of the given commit and @ moves to it.
@@ -805,6 +826,26 @@ mod tests {
         jj.describe_set("@", "amended").unwrap();
         let after = jj.commit_id_of("@").expect("commit_id_of after failed");
         assert_ne!(before, after, "commit-id should change after amend");
+    }
+
+    #[test]
+    fn op_head_id_returns_128_char_hex() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let id = jj.op_head_id().expect("op_head_id failed");
+        assert_eq!(id.len(), 128, "expected 128-char hex; got len={}", id.len());
+        assert!(
+            id.chars().all(|c| c.is_ascii_hexdigit()),
+            "op_head_id should be hex; got: {id}"
+        );
+    }
+
+    #[test]
+    fn op_head_id_outside_repo_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = Jj::new("jj", dir.path());
+        let result = jj.op_head_id();
+        assert!(matches!(result, Err(JjError::JjFailed { .. })));
     }
 
     #[test]

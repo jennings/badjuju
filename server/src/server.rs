@@ -75,6 +75,10 @@ struct State {
     command_reference: CommandReference,
     /// Latest text content for open documents, keyed by URI string.
     documents: HashMap<String, String>,
+    /// URI of the open status.jujutsu buffer, if any. Set by did_open, cleared by did_close.
+    open_status_uri: Option<String>,
+    /// URI of the open log.jujutsu buffer, if any. Set by did_open, cleared by did_close.
+    open_log_uri: Option<String>,
     /// Open diff buffers: URI → DiffTarget (Change or Commit). Used to refresh
     /// change-mode diffs after mutations and to clean up files on close.
     open_diffs: HashMap<String, DiffTarget>,
@@ -92,6 +96,8 @@ impl Default for State {
             keymap_profile: KeymapProfile::Magit,
             command_reference: CommandReference::default(),
             documents: HashMap::new(),
+            open_status_uri: None,
+            open_log_uri: None,
             open_diffs: HashMap::new(),
             virtual_diffs_enabled: false,
         }
@@ -140,6 +146,28 @@ impl Backend {
         } else {
             commands::refresh_change_diffs(jj, workspace, &open_diffs);
         }
+    }
+
+    pub async fn refresh_open_artifacts(&self, jj: &Jj, workspace: &std::path::Path) {
+        let (open_status_uri, open_log_uri) = {
+            let state = self.state.read().await;
+            (state.open_status_uri.clone(), state.open_log_uri.clone())
+        };
+        if open_status_uri.is_some()
+            && let Err(e) = commands::run_status(jj, workspace)
+        {
+            self.client
+                .log_message(MessageType::WARNING, format!("refresh status failed: {e}"))
+                .await;
+        }
+        if open_log_uri.is_some()
+            && let Err(e) = commands::regenerate_log_if_present(jj, workspace)
+        {
+            self.client
+                .log_message(MessageType::WARNING, format!("refresh log failed: {e}"))
+                .await;
+        }
+        self.refresh_open_diffs(jj, workspace).await;
     }
 
     /// Handler for `workspace/textDocumentContent` (LSP 3.18).
@@ -597,11 +625,15 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
         let text = params.text_document.text;
-        self.state
-            .write()
-            .await
-            .documents
-            .insert(uri.clone(), text.clone());
+        {
+            let mut state = self.state.write().await;
+            state.documents.insert(uri.clone(), text.clone());
+            if uri.ends_with("/status.jujutsu") {
+                state.open_status_uri = Some(uri.clone());
+            } else if uri.ends_with("/log.jujutsu") {
+                state.open_log_uri = Some(uri.clone());
+            }
+        }
 
         if text.trim().is_empty()
             && let Some(kind) = BufferKind::from_uri(&uri)
@@ -693,6 +725,12 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let mut state = self.state.write().await;
         state.documents.remove(&uri);
+        if state.open_status_uri.as_deref() == Some(&uri) {
+            state.open_status_uri = None;
+        }
+        if state.open_log_uri.as_deref() == Some(&uri) {
+            state.open_log_uri = None;
+        }
         if state.open_diffs.remove(&uri).is_some() {
             // Best-effort delete; ignore errors (file may already be gone).
             if let Some(path) = commands::path_from_uri(&uri) {

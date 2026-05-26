@@ -762,7 +762,7 @@ pub fn on_describe_save(jj: &Jj, workspace: &Path, content: &str) -> Result<(), 
 /// Regenerate log.jujutsu when it already exists on disk (i.e. the log window
 /// has been opened in this workspace). Preserves the persisted REVSET header
 /// so the same query is re-run. No-op when the file is absent.
-fn regenerate_log_if_present(jj: &Jj, workspace: &Path) -> Result<(), CommandError> {
+pub fn regenerate_log_if_present(jj: &Jj, workspace: &Path) -> Result<(), CommandError> {
     let log_path = workspace.join(".jj").join("badjuju").join("log.jujutsu");
     if !log_path.exists() {
         return Ok(());
