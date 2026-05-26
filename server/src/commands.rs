@@ -322,6 +322,31 @@ pub fn run_diff_commit(
     Ok((file_uri(&path), DiffTarget::Commit(commit_id)))
 }
 
+/// Return a virtual `badjuju-diff:///change/<id>` URI for a change-mode diff
+/// without writing anything to disk. Used by capable clients (VS Code, Neovim
+/// with polyfill) that implement `workspace/textDocumentContent`.
+pub fn run_diff_change_virtual(
+    jj: &Jj,
+    revision: &str,
+) -> Result<(String, DiffTarget), CommandError> {
+    let rev = revision_or_at(revision);
+    let change_id = jj.change_id_of(rev)?;
+    let uri = format!("badjuju-diff:///change/{}", change_id);
+    Ok((uri, DiffTarget::Change(change_id)))
+}
+
+/// Return a virtual `badjuju-diff:///commit/<id>` URI for a commit-mode diff
+/// without writing anything to disk.
+pub fn run_diff_commit_virtual(
+    jj: &Jj,
+    revision: &str,
+) -> Result<(String, DiffTarget), CommandError> {
+    let rev = revision_or_at(revision);
+    let commit_id = jj.commit_id_of(rev)?;
+    let uri = format!("badjuju-diff:///commit/{}", commit_id);
+    Ok((uri, DiffTarget::Commit(commit_id)))
+}
+
 /// Generate the text content of a change-mode diff without writing to disk.
 /// Used by the `workspace/textDocumentContent` handler for `badjuju-diff:` URIs.
 pub fn diff_content_for_change(jj: &Jj, change_id: &str) -> Result<String, CommandError> {

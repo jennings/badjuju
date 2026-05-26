@@ -19,6 +19,19 @@ pub struct TextDocumentContentResult {
     text: String,
 }
 
+/// Params for `workspace/textDocumentContent/refresh` server→client notification.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct TextDocumentContentRefreshParams {
+    uri: String,
+}
+
+/// Custom notification: `workspace/textDocumentContent/refresh`.
+enum WorkspaceTextDocumentContentRefresh {}
+impl tower_lsp::lsp_types::notification::Notification for WorkspaceTextDocumentContentRefresh {
+    type Params = TextDocumentContentRefreshParams;
+    const METHOD: &'static str = "workspace/textDocumentContent/refresh";
+}
+
 use crate::commands::{self, CommandReference, DiffTarget};
 use crate::cursor::{self, BufferKind};
 use crate::highlighting;
@@ -65,6 +78,10 @@ struct State {
     /// Open diff buffers: URI → DiffTarget (Change or Commit). Used to refresh
     /// change-mode diffs after mutations and to clean up files on close.
     open_diffs: HashMap<String, DiffTarget>,
+    /// True when the client declared `workspace.textDocumentContent` capability.
+    /// When true, diffs are served as virtual `badjuju-diff://` URIs; otherwise
+    /// the server writes physical `diff-{change,commit}-*.jujutsu` files.
+    virtual_diffs_enabled: bool,
 }
 
 impl Default for State {
@@ -76,6 +93,7 @@ impl Default for State {
             command_reference: CommandReference::default(),
             documents: HashMap::new(),
             open_diffs: HashMap::new(),
+            virtual_diffs_enabled: false,
         }
     }
 }
@@ -105,8 +123,23 @@ impl Backend {
     }
 
     async fn refresh_open_diffs(&self, jj: &Jj, workspace: &std::path::Path) {
-        let open_diffs = self.state.read().await.open_diffs.clone();
-        commands::refresh_change_diffs(jj, workspace, &open_diffs);
+        let (open_diffs, virtual_diffs_enabled) = {
+            let state = self.state.read().await;
+            (state.open_diffs.clone(), state.virtual_diffs_enabled)
+        };
+        if virtual_diffs_enabled {
+            for (uri, target) in &open_diffs {
+                if matches!(target, DiffTarget::Change(_)) {
+                    self.client
+                        .send_notification::<WorkspaceTextDocumentContentRefresh>(
+                            TextDocumentContentRefreshParams { uri: uri.clone() },
+                        )
+                        .await;
+                }
+            }
+        } else {
+            commands::refresh_change_diffs(jj, workspace, &open_diffs);
+        }
     }
 
     /// Handler for `workspace/textDocumentContent` (LSP 3.18).
@@ -310,12 +343,24 @@ impl LanguageServer for Backend {
 
         let workspace_root = search_start.as_deref().and_then(find_workspace_root);
 
+        // Detect LSP 3.18 workspace/textDocumentContent client capability via raw JSON,
+        // since lsp-types 0.94 predates this field.
+        let virtual_diffs_enabled = serde_json::to_value(&params.capabilities)
+            .ok()
+            .and_then(|v| {
+                v.get("workspace")
+                    .and_then(|w| w.get("textDocumentContent"))
+                    .map(|f| !f.is_null())
+            })
+            .unwrap_or(false);
+
         {
             let mut state = self.state.write().await;
             state.binary_path = binary_path;
             state.keymap_profile = keymap_profile;
             state.command_reference = command_reference;
             state.workspace_root = workspace_root.clone();
+            state.virtual_diffs_enabled = virtual_diffs_enabled;
         }
 
         if let Some(ref root) = workspace_root {
@@ -479,15 +524,20 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let (jj, workspace) = {
+        let (jj, workspace, virtual_diffs_enabled) = {
             let state = self.state.read().await;
             match (state.jj(), state.workspace_root.clone()) {
-                (Some(jj), Some(root)) => (jj, root),
+                (Some(jj), Some(root)) => (jj, root, state.virtual_diffs_enabled),
                 _ => return Ok(None),
             }
         };
 
-        match commands::run_diff_change(&jj, &workspace, &revision) {
+        let result = if virtual_diffs_enabled {
+            commands::run_diff_change_virtual(&jj, &revision)
+        } else {
+            commands::run_diff_change(&jj, &workspace, &revision)
+        };
+        match result {
             Ok((diff_uri, _)) => {
                 let target_uri = Url::parse(&diff_uri).map_err(|_| lsp_err("bad diff URI"))?;
                 let location = Location {
@@ -561,12 +611,16 @@ impl LanguageServer for Backend {
                     }
                 };
 
+                let virtual_diffs_enabled = self.state.read().await.virtual_diffs_enabled;
                 let result = match kind {
                     BufferKind::Status => commands::run_status(&jj, &workspace),
                     BufferKind::Log => commands::run_log(&jj, &workspace, ""),
-                    BufferKind::Diff => {
+                    // In virtual-diff mode the client fetches content via workspace/textDocumentContent.
+                    // In file mode, regenerate the legacy diff.jujutsu only.
+                    BufferKind::Diff if !virtual_diffs_enabled => {
                         commands::run_diff_change(&jj, &workspace, "@").map(|(uri, _)| uri)
                     }
+                    BufferKind::Diff => return,
                 };
 
                 match result {
@@ -732,7 +786,7 @@ impl LanguageServer for Backend {
             })));
         }
 
-        let (jj, workspace, documents) = {
+        let (jj, workspace, documents, virtual_diffs_enabled) = {
             let state = self.state.read().await;
             let jj = state.jj().ok_or_else(Error::invalid_request)?;
             let workspace = state
@@ -740,7 +794,8 @@ impl LanguageServer for Backend {
                 .clone()
                 .ok_or_else(Error::invalid_request)?;
             let documents = state.documents.clone();
-            (jj, workspace, documents)
+            let virtual_diffs_enabled = state.virtual_diffs_enabled;
+            (jj, workspace, documents, virtual_diffs_enabled)
         };
 
         match params.command.as_str() {
@@ -783,8 +838,11 @@ impl LanguageServer for Backend {
                         .or_else(|| read_uri_from_disk(uri))
                 })
                 .map_err(lsp_err)?;
-                let (uri, target) =
-                    commands::run_diff_change(&jj, &workspace, &revision).map_err(lsp_err)?;
+                let (uri, target) = if virtual_diffs_enabled {
+                    commands::run_diff_change_virtual(&jj, &revision).map_err(lsp_err)?
+                } else {
+                    commands::run_diff_change(&jj, &workspace, &revision).map_err(lsp_err)?
+                };
                 self.state
                     .write()
                     .await
@@ -800,8 +858,11 @@ impl LanguageServer for Backend {
                         .or_else(|| read_uri_from_disk(uri))
                 })
                 .map_err(lsp_err)?;
-                let (uri, target) =
-                    commands::run_diff_commit(&jj, &workspace, &revision).map_err(lsp_err)?;
+                let (uri, target) = if virtual_diffs_enabled {
+                    commands::run_diff_commit_virtual(&jj, &revision).map_err(lsp_err)?
+                } else {
+                    commands::run_diff_commit(&jj, &workspace, &revision).map_err(lsp_err)?
+                };
                 self.state
                     .write()
                     .await
