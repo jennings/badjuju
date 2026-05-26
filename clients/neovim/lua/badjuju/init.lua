@@ -1,5 +1,28 @@
 local M = {}
 
+local DIFF_SCHEME = 'badjuju-diff'
+
+--- Populate a buffer with content fetched via workspace/textDocumentContent.
+---@param bufnr integer
+---@param uri string  full badjuju-diff:// URI
+local function populate_virtual_diff_buf(bufnr, uri)
+  local client = M.get_client()
+  if not client then return end
+  local result = client.request_sync('workspace/textDocumentContent', { uri = uri }, 5000, bufnr)
+  if not result or result.err or not result.result then return end
+  local text = (result.result.text or '')
+  local lines = vim.split(text, '\n', { plain = true })
+  vim.bo[bufnr].modifiable = true
+  vim.bo[bufnr].readonly = false
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  vim.bo[bufnr].buftype = 'nofile'
+  vim.bo[bufnr].bufhidden = 'wipe'
+  vim.bo[bufnr].modifiable = false
+  vim.bo[bufnr].readonly = true
+  vim.bo[bufnr].filetype = 'jujutsu'
+  vim.b[bufnr].badjuju_diff_uri = uri
+end
+
 --- Plugin configuration. Mutate via setup(); fields are nil until populated.
 ---@class badjuju.Config
 ---@field binary_path string?        Path to the jj binary (forwarded to the server).
@@ -38,6 +61,31 @@ function M.setup(opts)
   end
   if opts.keymap_profile ~= nil then
     M.config.keymap_profile = opts.keymap_profile
+  end
+
+  -- BufReadCmd polyfill for badjuju-diff:// virtual URIs.
+  -- Fires whenever Neovim tries to read a buffer whose name matches this scheme.
+  -- Fetches content from the server via workspace/textDocumentContent.
+  vim.api.nvim_create_autocmd('BufReadCmd', {
+    pattern = DIFF_SCHEME .. '://*',
+    callback = function(args)
+      local uri = args.file
+      local bufnr = args.buf
+      populate_virtual_diff_buf(bufnr, uri)
+    end,
+  })
+
+  -- Global handler for workspace/textDocumentContent/refresh (server → client).
+  -- The server sends this after each mutation for every open change-mode diff.
+  vim.lsp.handlers['workspace/textDocumentContent/refresh'] = function(_, params)
+    if type(params) ~= 'table' or type(params.uri) ~= 'string' then return end
+    local uri = params.uri
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_is_loaded(bufnr)
+          and vim.api.nvim_buf_get_name(bufnr) == uri then
+        populate_virtual_diff_buf(bufnr, uri)
+      end
+    end
   end
 end
 
@@ -153,6 +201,14 @@ function M.execute(command, arguments, opts)
         vim.cmd('split')
       elseif opts and opts.split == 'v' then
         vim.cmd('vsplit')
+      end
+      -- Virtual diff URIs: open as a nofile buffer populated via BufReadCmd.
+      if result:sub(1, #DIFF_SCHEME + 3) == DIFF_SCHEME .. '://' then
+        vim.cmd('edit ' .. vim.fn.fnameescape(result))
+        if opts and opts.after then
+          opts.after(result)
+        end
+        return
       end
       vim.lsp.util.show_document(
         { uri = result },
