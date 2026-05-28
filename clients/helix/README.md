@@ -92,6 +92,4 @@ auto-open the returned file path. Open it manually:
 
 (The exact filename is printed by `badjuju diff`.)
 
-Subsequent saves to `describe.jujutsu` are handled by `textDocument/didSave`
-and the buffer refreshes on disk, but Helix requires a manual `:reload` to
-pick up the change in the already-open status or log buffer.
+Bad Juju's LSP server now rewrites status, log, and diff files on disk when a `jj` operation occurs outside the editor. Helix does not auto-reload open buffers when the underlying file changes, so a manual `:reload` is still required to see the updated content. A fix for this is under investigation (see bad-juju-byvy).

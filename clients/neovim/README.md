@@ -297,6 +297,10 @@ Same bindings as the default profile (see above).
 Set `keymapProfile = "none"` in `setup()` to skip all hotkey registrations and
 define your own using the `:JJ*` commands listed above.
 
+## Auto-refresh
+
+Bad Juju automatically refreshes open status, log, and diff buffers when a `jj` operation runs outside Neovim (a terminal `jj new`, `jj describe`, etc.). There is no need to manually trigger a refresh after external mutations.
+
 ## Syntax highlighting
 
 Syntax highlighting for `.jujutsu` buffers is provided by the bad-juju LSP

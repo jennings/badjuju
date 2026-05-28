@@ -167,6 +167,10 @@ Same bindings as the `magit` profile (see above).
 
 Set `badjuju.keymapProfile` to `"none"` to disable all built-in hotkeys and define your own using the command IDs in the [Commands](#commands) table above.
 
+## Auto-refresh
+
+Bad Juju automatically refreshes open status, log, and diff buffers when a `jj` operation runs outside VS Code (a terminal `jj new`, `jj describe`, etc.). There is no need to manually trigger a refresh after external mutations.
+
 ## Settings
 
 ### `badjuju.binaryPath`
