@@ -183,7 +183,7 @@ fn lsp_execute_status_returns_uri_with_status_header() {
     let uri = session.execute_command("badjuju.status");
     assert!(uri.starts_with("file://"), "unexpected URI: {uri}");
     let content = read_file(&uri);
-    assert!(content.contains("STATUS:"));
+    assert!(content.contains("@  :"));
     assert!(content.contains("STACK:"));
     assert!(content.contains("COMMAND REFERENCE:"));
 }
@@ -230,7 +230,7 @@ fn lsp_execute_new_creates_change_and_returns_status_uri() {
     let uri = session.execute_command("badjuju.new");
     assert!(uri.starts_with("file://"), "unexpected URI: {uri}");
     let content = read_file(&uri);
-    assert!(content.contains("STATUS:"));
+    assert!(content.contains("@  :"));
 }
 
 /// Find the 0-indexed line in `content` that starts with one of the commit
@@ -400,7 +400,7 @@ fn lsp_execute_new_string_arg_succeeds() {
     );
     let uri = resp["result"].as_str().unwrap();
     let content = read_file(uri);
-    assert!(content.contains("STATUS:"));
+    assert!(content.contains("@  :"));
 }
 
 #[test]
@@ -459,13 +459,14 @@ fn lsp_execute_bookmark_string_args_succeed() {
 /// header line (`M path` etc.) for the given filename.
 fn status_file_line(content: &str, filename: &str) -> Option<usize> {
     for (i, line) in content.lines().enumerate() {
-        let Some(first) = line.chars().next() else {
-            continue;
-        };
-        if !matches!(first, 'M' | 'A' | 'D' | 'C' | 'R') {
-            continue;
+        // Old STATUS section bare form: "M readme.txt"
+        if matches!(line.chars().next(), Some('M' | 'A' | 'D' | 'C' | 'R')) {
+            if line[1..].trim() == filename {
+                return Some(i);
+            }
         }
-        if line[1..].trim() == filename {
+        // New STACK stat line form from jj log --stat: "│  readme.txt | N +"
+        if line.contains(filename) && line.contains(" | ") {
             return Some(i);
         }
     }
@@ -512,7 +513,7 @@ fn lsp_execute_squash_with_cursor_form_resolves_file_and_revision() {
     );
     let new_status_uri = resp["result"].as_str().unwrap();
     let new_status = read_file(new_status_uri);
-    assert!(new_status.contains("STATUS:"));
+    assert!(new_status.contains("@  :"));
     assert!(
         !new_status.contains("M readme.txt"),
         "expected readme.txt squashed away:\n{new_status}"
@@ -551,7 +552,7 @@ fn lsp_execute_squash_string_args_succeed() {
     );
     let new_status_uri = resp["result"].as_str().unwrap();
     let new_status = read_file(new_status_uri);
-    assert!(new_status.contains("STATUS:"));
+    assert!(new_status.contains("@  :"));
     assert!(
         !new_status.contains("M readme.txt"),
         "expected readme.txt squashed away:\n{new_status}"
@@ -588,7 +589,7 @@ fn lsp_execute_unsquash_string_args_succeed() {
     );
     let new_status_uri = resp["result"].as_str().unwrap();
     let new_status = read_file(new_status_uri);
-    assert!(new_status.contains("STATUS:"));
+    assert!(new_status.contains("@  :"));
     assert!(
         new_status.contains("readme.txt"),
         "expected readme.txt in working copy after unsquash:\n{new_status}"
@@ -942,7 +943,7 @@ fn lsp_code_action_on_status_blank_line_returns_empty() {
     let status_content = read_file(&status_uri);
     session.did_open(&status_uri, "jujutsu", &status_content);
 
-    // Find a blank line in the buffer (always present after STATUS: header).
+    // Find a blank line in the buffer (between the @/@- headers and STACK:).
     let blank_line = status_content
         .lines()
         .enumerate()
@@ -1188,8 +1189,8 @@ fn lsp_did_open_empty_status_jujutsu_auto_populates_disk() {
 
     let content = std::fs::read_to_string(&status_path).unwrap();
     assert!(
-        content.contains("STATUS:"),
-        "status.jujutsu missing STATUS:"
+        content.contains("@  :"),
+        "status.jujutsu missing @   header"
     );
     assert!(content.contains("STACK:"), "status.jujutsu missing STACK:");
 }

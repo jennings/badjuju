@@ -72,7 +72,7 @@
         "badjuju.defaultLogRevset": {
           "type": "string",
           "default": "",
-          "description": "Default revset for badjuju.log.open. Leave blank to match the status window's stack: ancestors(reachable(@, mutable()), 2)."
+          "description": "Default revset for badjuju.log.open. Leave blank to use the default: ancestors(mutable(), 2)."
         },
         "badjuju.keymapProfile": {
           "type": "string",

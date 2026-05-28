@@ -9,10 +9,8 @@ use crate::keymap::{self, KeymapProfile};
 
 const STATUS_REVSET: &str = "ancestors(reachable(@, mutable()), 2)";
 
-/// Default revset for the log window when the client passes no explicit
-/// revset. Matches STATUS_REVSET so an unconfigured log open mirrors the
-/// stack view shown in status.jujutsu.
-const DEFAULT_LOG_REVSET: &str = STATUS_REVSET;
+/// Default revset for the log window when the client passes no explicit revset.
+const DEFAULT_LOG_REVSET: &str = "ancestors(mutable(), 2)";
 
 /// In-buffer COMMAND REFERENCE text for each generated buffer type.
 ///
@@ -81,7 +79,8 @@ impl CommandReference {
 /// Pre-defined revset shortcuts shown in the log.jujutsu header.
 /// Each entry is (label, revset). The label is also used to align columns.
 const LOG_SHORTCUTS: &[(&str, &str)] = &[
-    ("Mutable", "ancestors(reachable(@, mutable()), 2)"),
+    ("Mutable", "ancestors(mutable(), 2)"),
+    ("Slice", "ancestors(reachable(@, mutable()), 2)"),
     ("Stack", "(immutable_heads()..@)::"),
 ];
 
@@ -136,9 +135,47 @@ pub fn run_status(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     write_status(jj, workspace, None)
 }
 
+/// Build a single `@  :` or `@- :` header line for the status buffer.
+///
+/// Bookmarks are formatted with angle brackets: `<main> <origin>`.
+/// Description is truncated to the first line; empty descriptions show `(empty)`.
+fn header_line_for(jj: &Jj, rev: &str, marker: &str) -> Result<String, CommandError> {
+    let desc_raw = jj.describe_get(rev)?;
+    let desc = desc_raw.trim();
+    let desc_display = if desc.is_empty() {
+        "(empty)".to_string()
+    } else {
+        desc.lines().next().unwrap_or("(empty)").to_string()
+    };
+
+    let bookmarks = jj.bookmarks_of(rev)?;
+    if bookmarks.is_empty() {
+        Ok(format!("{marker}: {desc_display}"))
+    } else {
+        let bk_str: String = bookmarks
+            .iter()
+            .map(|b| format!("<{b}>"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        Ok(format!("{marker}: {bk_str} {desc_display}"))
+    }
+}
+
 /// Write status.jujutsu, optionally prepending a MESSAGE: block. Returns the URI.
 fn write_status(jj: &Jj, workspace: &Path, message: Option<&str>) -> Result<String, CommandError> {
-    let status = jj.status()?;
+    let at_header = header_line_for(jj, "@", "@  ")?;
+
+    let parents = jj.change_ids("parents(@)")?;
+    let parent_headers = parents
+        .iter()
+        .map(|id| header_line_for(jj, id, "@- "))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let header_block = std::iter::once(at_header)
+        .chain(parent_headers)
+        .collect::<Vec<_>>()
+        .join("\n");
+
     let stack = jj.log_with_stat(STATUS_REVSET, true)?;
 
     let prelude = match message {
@@ -147,9 +184,9 @@ fn write_status(jj: &Jj, workspace: &Path, message: Option<&str>) -> Result<Stri
     };
 
     let content = format!(
-        "{}STATUS:\n\n{}\n\nSTACK: {}\n\n{}\n\n{}",
+        "{}{}\n\nSTACK: {}\n\n{}\n\n{}",
         prelude,
-        status.trim_end(),
+        header_block,
         STATUS_REVSET,
         stack.trim_end(),
         jj.command_reference().status(),
@@ -809,9 +846,7 @@ pub fn status_folding_ranges(content: &str) -> Vec<FoldingRange> {
         .skip(stack_start + 1)
     {
         let is_commit = cursor::match_commit_header(line).is_some();
-        let is_section = line.starts_with("COMMAND REFERENCE:")
-            || line.starts_with("STATUS:")
-            || line.starts_with("STACK:");
+        let is_section = line.starts_with("COMMAND REFERENCE:") || line.starts_with("STACK:");
 
         if is_commit || is_section {
             if let (Some(header), Some(last)) = (current_header, last_nonempty)
@@ -1016,9 +1051,72 @@ mod tests {
         assert!(uri.starts_with("file://"));
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
-        assert!(content.contains("STATUS:"));
+        assert!(content.contains("@  :"), "missing @   header:\n{content}");
+        assert!(content.contains("@- :"), "missing @-  header:\n{content}");
         assert!(content.contains("STACK:"));
         assert!(content.contains("COMMAND REFERENCE:"));
+    }
+
+    #[test]
+    fn write_status_emits_at_and_parent_header_lines() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        jj.describe_set("@", "my work").unwrap();
+        let uri = run_status(&jj, dir.path()).expect("run_status failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.lines().any(|l| l.starts_with("@  :")),
+            "missing @   header line:\n{content}"
+        );
+        assert!(
+            content.lines().any(|l| l.starts_with("@- :")),
+            "missing @-  header line:\n{content}"
+        );
+        assert!(
+            content.contains("my work"),
+            "description should appear in @   header:\n{content}"
+        );
+    }
+
+    #[test]
+    fn write_status_brackets_bookmarks_on_header_line() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        jj.describe_set("@", "parent").unwrap();
+        jj.bookmark_create("mymark", "@").unwrap();
+        jj.new_change("").unwrap();
+        let uri = run_status(&jj, dir.path()).expect("run_status failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.contains("<mymark>"),
+            "expected bookmark <mymark> in header:\n{content}"
+        );
+    }
+
+    #[test]
+    fn write_status_handles_merge_with_multiple_parent_lines() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        // Create two branches and merge them.
+        jj.describe_set("@", "branch-a").unwrap();
+        let a_id = jj.change_ids("@").unwrap().first().cloned().unwrap();
+        jj.new_change("").unwrap();
+        jj.describe_set("@", "branch-b").unwrap();
+        let b_id = jj.change_ids("@").unwrap().first().cloned().unwrap();
+        // Merge: jj new with two parents
+        std::process::Command::new("jj")
+            .args(["new", &a_id, &b_id])
+            .current_dir(dir.path())
+            .output()
+            .expect("jj new (merge) failed");
+        let uri = run_status(&jj, dir.path()).expect("run_status failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        let at_minus_lines: Vec<_> = content.lines().filter(|l| l.starts_with("@- :")).collect();
+        assert_eq!(
+            at_minus_lines.len(),
+            2,
+            "expected two @-  lines for a merge commit; got:\n{content}"
+        );
     }
 
     #[test]
@@ -1190,15 +1288,15 @@ mod tests {
     }
 
     #[test]
-    fn run_log_empty_revset_defaults_to_status_stack() {
+    fn run_log_empty_revset_defaults_to_mutable() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
         let uri = run_log(&jj, dir.path(), "").expect("run_log failed");
         let path = uri.strip_prefix("file://").unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         assert!(
-            content.starts_with("REVSET: ancestors(reachable(@, mutable()), 2)"),
-            "empty revset should default to the depth-2 mutable revset:\n{content}"
+            content.starts_with("REVSET: ancestors(mutable(), 2)"),
+            "empty revset should default to ancestors(mutable(), 2):\n{content}"
         );
     }
 
@@ -1215,8 +1313,16 @@ mod tests {
             "missing Mutable shortcut:\n{content}"
         );
         assert!(
-            content.contains("ancestors(reachable(@, mutable()), 2)"),
+            content.contains("ancestors(mutable(), 2)"),
             "missing Mutable revset:\n{content}"
+        );
+        assert!(
+            content.contains("JJ: Slice:"),
+            "missing Slice shortcut:\n{content}"
+        );
+        assert!(
+            content.contains("ancestors(reachable(@, mutable()), 2)"),
+            "missing Slice revset:\n{content}"
         );
         assert!(
             content.contains("JJ: Stack:"),
@@ -1235,9 +1341,17 @@ mod tests {
             .lines()
             .position(|l| l.starts_with("JJ: Mutable:"))
             .expect("Mutable shortcut line not found");
+        let slice_line_idx = content
+            .lines()
+            .position(|l| l.starts_with("JJ: Slice:"))
+            .expect("Slice shortcut line not found");
         assert!(
             mutable_line_idx > revset_line_idx,
             "Mutable shortcut should appear after REVSET line"
+        );
+        assert!(
+            slice_line_idx > mutable_line_idx,
+            "Slice shortcut should appear after Mutable"
         );
     }
 
@@ -1329,7 +1443,7 @@ mod tests {
         // fallback.
         let refreshed = run_refresh(&jj, dir.path(), "not a uri").unwrap();
         let content = std::fs::read_to_string(refreshed.strip_prefix("file://").unwrap()).unwrap();
-        assert!(content.contains("STATUS:"));
+        assert!(content.contains("@  :"));
     }
 
     #[test]
@@ -1667,7 +1781,7 @@ mod tests {
         let refreshed = run_refresh(&jj, dir.path(), &status_uri).expect("run_refresh failed");
         assert!(refreshed.starts_with("file://"));
         let content = std::fs::read_to_string(refreshed.strip_prefix("file://").unwrap()).unwrap();
-        assert!(content.contains("STATUS:"));
+        assert!(content.contains("@  :"));
     }
 
     #[test]
@@ -1687,7 +1801,7 @@ mod tests {
         let jj = init_repo(dir.path());
         let uri = run_refresh(&jj, dir.path(), "").expect("run_refresh failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
-        assert!(content.contains("STATUS:"));
+        assert!(content.contains("@  :"));
     }
 
     #[test]
@@ -1697,7 +1811,7 @@ mod tests {
         let uri = run_new(&jj, dir.path(), "").expect("run_new failed");
         assert!(uri.starts_with("file://"));
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
-        assert!(content.contains("STATUS:"));
+        assert!(content.contains("@  :"));
     }
 
     #[test]
@@ -1723,7 +1837,7 @@ mod tests {
         let parent_id = jj.change_ids("@-").unwrap().first().cloned().unwrap();
         let uri = run_new(&jj, dir.path(), &parent_id).expect("run_new failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
-        assert!(content.starts_with("STATUS:"));
+        assert!(content.starts_with("@  :"));
         let new_parent_ids = jj.change_ids("@-").unwrap();
         assert_eq!(
             new_parent_ids.first(),
@@ -1753,7 +1867,7 @@ mod tests {
         std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
         let uri = run_squash(&jj, dir.path(), "readme.txt", "").expect("run_squash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
-        assert!(content.starts_with("STATUS:"));
+        assert!(content.starts_with("@  :"));
         let status_section = content.split("STACK:").next().unwrap_or("");
         assert!(
             !status_section.contains("readme.txt"),
@@ -1815,7 +1929,7 @@ mod tests {
             .expect("jj edit failed");
         let uri = run_unsquash(&jj, dir.path(), "readme.txt", "").expect("run_unsquash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
-        assert!(content.starts_with("STATUS:"));
+        assert!(content.starts_with("@  :"));
     }
 
     #[test]
@@ -1832,7 +1946,7 @@ mod tests {
         let uri = run_unsquash(&jj, dir.path(), "readme.txt", "@-").expect("run_unsquash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
-            content.starts_with("STATUS:"),
+            content.starts_with("@  :"),
             "expected status (operation should have succeeded), got:\n{content}"
         );
         // After unsquash, @ now owns the file change rather than the parent.
@@ -1861,7 +1975,7 @@ mod tests {
         let uri = run_squash(&jj, dir.path(), "readme.txt", "@-").expect("run_squash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
-            content.starts_with("STATUS:"),
+            content.starts_with("@  :"),
             "expected status, got:\n{content}"
         );
     }
@@ -1887,8 +2001,8 @@ mod tests {
         let uri = run_push(&jj, dir.path(), false).expect("run_push failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
-            content.starts_with("STATUS:"),
-            "expected STATUS on successful no-op push, got:\n{content}"
+            content.starts_with("@  :"),
+            "expected @   header on successful no-op push, got:\n{content}"
         );
     }
 
@@ -1900,8 +2014,8 @@ mod tests {
         let uri = run_push(&jj, dir.path(), true).expect("run_push with force_flag failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
-            content.starts_with("STATUS:"),
-            "expected STATUS on push with force flag, got:\n{content}"
+            content.starts_with("@  :"),
+            "expected @   header on push with force flag, got:\n{content}"
         );
     }
 
@@ -1927,7 +2041,7 @@ mod tests {
         let parent_id = jj.change_ids("@-").unwrap().first().cloned().unwrap();
         let uri = run_edit(&jj, dir.path(), &parent_id).expect("run_edit failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
-        assert!(content.starts_with("STATUS:"));
+        assert!(content.starts_with("@  :"));
         let desc = jj.describe_get("@").unwrap();
         assert!(
             desc.contains("parent"),
@@ -1956,7 +2070,7 @@ mod tests {
         jj.describe_set("@", "second").unwrap();
         let uri = run_undo(&jj, dir.path()).expect("run_undo failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
-        assert!(content.starts_with("STATUS:"));
+        assert!(content.starts_with("@  :"));
         let desc = jj.describe_get("@").unwrap();
         assert!(
             desc.contains("first"),
@@ -1976,7 +2090,7 @@ mod tests {
         let middle_id = jj.change_ids("@-").unwrap().first().cloned().unwrap();
         let uri = run_abandon(&jj, dir.path(), &middle_id).expect("run_abandon failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
-        assert!(content.starts_with("STATUS:"));
+        assert!(content.starts_with("@  :"));
         let log = jj.log("::@").unwrap();
         assert!(
             !log.contains("middle to abandon"),
@@ -2004,7 +2118,7 @@ mod tests {
         jj.describe_set("@", "a description").unwrap();
         let uri = run_abandon(&jj, dir.path(), "").expect("run_abandon failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
-        assert!(content.starts_with("STATUS:"));
+        assert!(content.starts_with("@  :"));
         // After abandoning @, the new working copy should be empty (no description carried over).
         let desc = jj.describe_get("@").unwrap();
         assert!(
@@ -2037,7 +2151,7 @@ mod tests {
         let uri = run_prev(&jj, dir.path(), false).expect("run_prev failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
-            content.starts_with("STATUS:"),
+            content.starts_with("@  :"),
             "expected status, got:\n{content}"
         );
     }
@@ -2081,8 +2195,8 @@ mod tests {
         let uri = run_rebase(&jj, dir.path(), &b_id, &root_id).expect("run_rebase failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
-            content.starts_with("STATUS:"),
-            "expected STATUS: header, got:\n{content}"
+            content.starts_with("@  :"),
+            "expected @   header, got:\n{content}"
         );
     }
 
@@ -2120,8 +2234,8 @@ mod tests {
             .expect("run_bookmark create failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
-            content.starts_with("STATUS:"),
-            "expected STATUS: header, got:\n{content}"
+            content.starts_with("@  :"),
+            "expected @   header, got:\n{content}"
         );
     }
 
@@ -2160,8 +2274,8 @@ mod tests {
             .expect("run_bookmark delete failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
-            content.starts_with("STATUS:"),
-            "expected STATUS: header, got:\n{content}"
+            content.starts_with("@  :"),
+            "expected @   header, got:\n{content}"
         );
     }
 
@@ -2175,8 +2289,8 @@ mod tests {
             run_bookmark(&jj, dir.path(), "move", "moving", "@").expect("run_bookmark move failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
-            content.starts_with("STATUS:"),
-            "expected STATUS: header, got:\n{content}"
+            content.starts_with("@  :"),
+            "expected @   header, got:\n{content}"
         );
     }
 
@@ -2281,8 +2395,8 @@ mod tests {
     #[test]
     fn resolve_file_and_revision_arg_cursor_form_resolves_both() {
         let status = [
-            "STATUS:",
-            "",
+            "@  : (empty)",
+            "@- : (empty)",
             "M src/main.rs",
             "",
             "STACK: @",
@@ -2340,7 +2454,7 @@ mod tests {
 
     #[test]
     fn status_folding_ranges_returns_empty_without_stack_section() {
-        let content = "STATUS:\n\nsome status\n\nCOMMAND REFERENCE:\nkeys";
+        let content = "@  : (empty)\n@- : (empty)\n\nCOMMAND REFERENCE:\nkeys";
         let ranges = status_folding_ranges(content);
         assert!(ranges.is_empty(), "expected no ranges: {ranges:?}");
     }
@@ -2348,7 +2462,7 @@ mod tests {
     #[test]
     fn status_folding_ranges_returns_range_per_commit() {
         let content = concat!(
-            "STATUS:\n\nWorking copy clean\n\n",
+            "@  : (empty)\n@- : (empty)\n\n",
             "STACK: ancestors(@, 2)\n\n",
             "○  abcdefgh first commit\n",
             "│  M src/a.rs\n",
@@ -2378,7 +2492,7 @@ mod tests {
     #[test]
     fn status_folding_ranges_skips_commits_with_no_stat_lines() {
         let content = concat!(
-            "STATUS:\n\nWorking copy clean\n\n",
+            "@  : (empty)\n@- : (empty)\n\n",
             "STACK: ancestors(@, 2)\n\n",
             "@  abcdefgh commit with no files\n",
             "\nCOMMAND REFERENCE:\nkeys",

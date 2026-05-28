@@ -61,9 +61,9 @@ pub struct LogShortcut {
 /// Resolve the revision the cursor refers to, given the buffer's full text,
 /// a 0-indexed line, and which kind of buffer it is.
 ///
-/// - `Status`: STATUS-section file lines (`M src/main.rs` etc.) belong to the
-///   working copy. Otherwise walk upward looking for a commit header; if the
-///   walk hits the `STATUS:` section header first, fall back to `@`.
+/// - `Status`: stat-format file lines (`M src/main.rs` etc.) belong to the
+///   working copy. Otherwise walk upward looking for a commit header; if no
+///   commit header is found before the top of the buffer, fall back to `@`.
 /// - `Log`: walk upward looking for a commit header; return `None` if the
 ///   cursor is above every commit line (e.g., in the `REVSET:` header).
 /// - `Diff`: a diff buffer always represents a single revision named in its
@@ -94,9 +94,6 @@ fn revision_at_line_status(content: &str, line: usize) -> String {
         let text = lines[i];
         if let Some(change_id) = match_commit_header(text) {
             return change_id.to_string();
-        }
-        if text.starts_with("STATUS:") {
-            return "@".to_string();
         }
     }
     "@".to_string()
@@ -394,15 +391,11 @@ mod tests {
     // --- revision_at_line: Status buffer ---
 
     fn status_buffer() -> String {
-        // Mirrors the shape written by commands::write_status:
-        //   STATUS: header, status lines, blank line, STACK: line, log output.
+        // Mirrors the shape written by commands::write_status after bad-juju-zgnt:
+        //   @  : / @- : header lines, blank line, STACK: line, log output.
         [
-            "STATUS:",
-            "",
-            "Working copy changes:",
-            "M src/main.rs",
-            "A new.txt",
-            "R old.txt => renamed.txt",
+            "@  : my working copy change",
+            "@- : (empty)",
             "",
             "STACK: ancestors(reachable(@, mutable()), 2)",
             "",
@@ -416,22 +409,38 @@ mod tests {
     }
 
     #[test]
-    fn revision_at_line_status_returns_at_on_status_file_line() {
-        let s = status_buffer();
-        // Line 3 = "M src/main.rs"
+    fn revision_at_line_status_returns_at_on_stat_file_line() {
+        // Stat-format file lines in the STACK section belong to the commit
+        // whose header they appear under.
+        let s = [
+            "@  : my change",
+            "@- : parent",
+            "",
+            "STACK: @",
+            "",
+            "@  qpvuntsm 1234abcd",
+            "│  M src/main.rs",
+        ]
+        .join("\n");
+        // Line 6 = "│  M src/main.rs" → parse_status_header_line returns None
+        // (graph-prefix line), so walk up hits qpvuntsm at line 5.
+        // BUT line 6 is a file-stat line under the commit: revision is qpvuntsm.
+        // parse_status_header_line looks for "M …" without graph prefix;
+        // "│  M src/main.rs" has a graph prefix so it's handled by the walk.
         assert_eq!(
-            revision_at_line(&s, 3, BufferKind::Status).as_deref(),
-            Some("@")
+            revision_at_line(&s, 6, BufferKind::Status).as_deref(),
+            Some("qpvuntsm")
         );
     }
 
     #[test]
     fn revision_at_line_status_returns_at_when_above_any_commit() {
         let s = status_buffer();
-        // Line 2 = "Working copy changes:" — between STATUS: and the file lines.
-        // Walking up hits STATUS: → "@".
+        // Line 1 = "@- : (empty)" — not a commit header, not a stat line.
+        // Walking up hits only @  : / @- : lines which don't match
+        // match_commit_header → falls through to "@" default.
         assert_eq!(
-            revision_at_line(&s, 2, BufferKind::Status).as_deref(),
+            revision_at_line(&s, 1, BufferKind::Status).as_deref(),
             Some("@")
         );
     }
@@ -439,14 +448,14 @@ mod tests {
     #[test]
     fn revision_at_line_status_returns_change_id_on_commit_header() {
         let s = status_buffer();
-        // Line 9 = "@  qpvuntsm 1234abcd"
+        // Line 5 = "@  qpvuntsm 1234abcd"
         assert_eq!(
-            revision_at_line(&s, 9, BufferKind::Status).as_deref(),
+            revision_at_line(&s, 5, BufferKind::Status).as_deref(),
             Some("qpvuntsm")
         );
-        // Line 11 = "○  abcdwxyz e6f7e6f7"
+        // Line 7 = "○  abcdwxyz e6f7e6f7"
         assert_eq!(
-            revision_at_line(&s, 11, BufferKind::Status).as_deref(),
+            revision_at_line(&s, 7, BufferKind::Status).as_deref(),
             Some("abcdwxyz")
         );
     }
@@ -454,9 +463,9 @@ mod tests {
     #[test]
     fn revision_at_line_status_walks_up_to_nearest_commit() {
         let s = status_buffer();
-        // Line 12 = "│  another commit" — should walk up to abcdwxyz.
+        // Line 8 = "│  another commit" — should walk up to abcdwxyz.
         assert_eq!(
-            revision_at_line(&s, 12, BufferKind::Status).as_deref(),
+            revision_at_line(&s, 8, BufferKind::Status).as_deref(),
             Some("abcdwxyz")
         );
     }

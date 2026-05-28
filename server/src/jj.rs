@@ -325,6 +325,25 @@ impl Jj {
         Ok(())
     }
 
+    /// Return the bookmark names pointing at `revision`, one per element.
+    pub fn bookmarks_of(&self, revision: &str) -> Result<Vec<String>, JjError> {
+        let out = self.run(&[
+            "log",
+            "--revisions",
+            revision,
+            "--no-graph",
+            "--template",
+            r#"separate(" ", bookmarks)"#,
+            "--limit",
+            "1",
+        ])?;
+        Ok(out
+            .split_whitespace()
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect())
+    }
+
     /// List files changed by a revision (`jj diff --revisions REV --summary`).
     /// Parses M/A/D/R lines and returns destination paths.
     pub fn files_changed(&self, rev: &str) -> Result<Vec<String>, JjError> {
@@ -340,12 +359,16 @@ impl Jj {
                 }
                 let rest = line[flag.len_utf8()..].trim();
                 // Renames: "R old => new" — take the destination after "=> "
-                if flag == 'R' {
-                    if let Some(dest) = rest.split(" => ").nth(1) {
-                        return Some(dest.trim().to_string());
-                    }
+                if flag == 'R'
+                    && let Some(dest) = rest.split(" => ").nth(1)
+                {
+                    return Some(dest.trim().to_string());
                 }
-                if rest.is_empty() { None } else { Some(rest.to_string()) }
+                if rest.is_empty() {
+                    None
+                } else {
+                    Some(rest.to_string())
+                }
             })
             .collect();
         Ok(paths)
@@ -938,7 +961,9 @@ mod tests {
         let header = out.lines().next().expect("no output");
         let at_pos = header.find('@').expect("no @ in header");
         // email contains @, timestamp does not — find a digit sequence for timestamp
-        let ts_pos = header.find(|c: char| c.is_ascii_digit()).expect("no digit in header");
+        let ts_pos = header
+            .find(|c: char| c.is_ascii_digit())
+            .expect("no digit in header");
         assert!(
             at_pos < ts_pos,
             "expected email (@ sign) before timestamp (digit) in header: {header}"
@@ -1037,7 +1062,9 @@ mod tests {
         jj.describe_set("@", "add file").unwrap();
         jj.new_change("").unwrap();
         // @ has no changes to unchanged.txt.
-        let out = jj.diff_file("@", "unchanged.txt").expect("diff_file failed");
+        let out = jj
+            .diff_file("@", "unchanged.txt")
+            .expect("diff_file failed");
         assert!(
             out.is_empty(),
             "expected empty diff for unmodified file; got:\n{out}"
