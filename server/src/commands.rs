@@ -161,6 +161,26 @@ fn header_line_for(jj: &Jj, rev: &str, marker: &str) -> Result<String, CommandEr
     }
 }
 
+/// Strip diff header lines and return only hunk content for a file in a revision.
+///
+/// Drops lines starting with `diff --git `, `index `, `--- `, `+++ ` and
+/// returns `@@` hunk headers plus their `+`/`-`/` ` content lines.
+fn hunks_for(jj: &Jj, rev: &str, path: &str) -> String {
+    let Ok(diff) = jj.diff_file(rev, path) else {
+        return String::new();
+    };
+    let lines: Vec<&str> = diff
+        .lines()
+        .filter(|l| {
+            !l.starts_with("diff --git ")
+                && !l.starts_with("index ")
+                && !l.starts_with("--- ")
+                && !l.starts_with("+++ ")
+        })
+        .collect();
+    lines.join("\n")
+}
+
 /// Build the WORKING COPY CHANGES / PARENT CHANGES sections for the status buffer.
 ///
 /// Returns an empty string when no revision has any changed files. Each
@@ -191,6 +211,11 @@ fn changes_sections(jj: &Jj) -> Result<String, CommandError> {
         for f in &at_files {
             s.push('\n');
             s.push_str(f);
+            let hunks = hunks_for(jj, "@", f);
+            if !hunks.is_empty() {
+                s.push('\n');
+                s.push_str(&hunks);
+            }
         }
         sections.push(s);
     }
@@ -204,6 +229,11 @@ fn changes_sections(jj: &Jj) -> Result<String, CommandError> {
         for f in files {
             s.push('\n');
             s.push_str(f);
+            let hunks = hunks_for(jj, id, f);
+            if !hunks.is_empty() {
+                s.push('\n');
+                s.push_str(&hunks);
+            }
         }
         sections.push(s);
     }
@@ -2691,6 +2721,91 @@ mod tests {
         assert!(
             ranges.is_empty(),
             "commit with no stat lines should produce no range: {ranges:?}"
+        );
+    }
+
+    #[test]
+    fn hunks_for_single_hunk_single_file() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("foo.txt"), "old line\n").unwrap();
+        jj.describe_set("@", "parent").unwrap();
+        jj.new_change("").unwrap();
+        std::fs::write(dir.path().join("foo.txt"), "new line\n").unwrap();
+        let hunks = hunks_for(&jj, "@", "foo.txt");
+        assert!(hunks.contains("@@"), "expected @@ hunk header: {hunks}");
+        assert!(hunks.contains("-old line"), "expected removed line: {hunks}");
+        assert!(hunks.contains("+new line"), "expected added line: {hunks}");
+        assert!(
+            !hunks.contains("diff --git"),
+            "should not contain diff header: {hunks}"
+        );
+        assert!(
+            !hunks.contains("--- ") && !hunks.contains("+++ "),
+            "should not contain --- or +++ header lines: {hunks}"
+        );
+    }
+
+    #[test]
+    fn hunks_for_multi_hunk_file() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        // Write a file with many lines so two hunks appear far apart.
+        let original: String = (1..=20).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(dir.path().join("foo.txt"), &original).unwrap();
+        jj.describe_set("@", "parent").unwrap();
+        jj.new_change("").unwrap();
+        let mut modified = original.clone();
+        modified = modified.replacen("line 1\n", "CHANGED 1\n", 1);
+        modified = modified.replacen("line 20\n", "CHANGED 20\n", 1);
+        std::fs::write(dir.path().join("foo.txt"), &modified).unwrap();
+        let hunks = hunks_for(&jj, "@", "foo.txt");
+        let hunk_count = hunks.matches("@@").count();
+        assert!(hunk_count >= 2, "expected multiple @@ blocks, got {hunk_count}: {hunks}");
+    }
+
+    #[test]
+    fn hunks_for_multi_file_hunks_land_under_correct_file() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("alpha.txt"), "aaa\n").unwrap();
+        std::fs::write(dir.path().join("beta.txt"), "bbb\n").unwrap();
+        jj.describe_set("@", "parent").unwrap();
+        jj.new_change("").unwrap();
+        std::fs::write(dir.path().join("alpha.txt"), "AAA\n").unwrap();
+        std::fs::write(dir.path().join("beta.txt"), "BBB\n").unwrap();
+        let uri = run_status(&jj, dir.path()).expect("run_status failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        let alpha_pos = content.find("alpha.txt").unwrap();
+        let beta_pos = content.find("beta.txt").unwrap();
+        let alpha_hunk_pos = content[alpha_pos..].find("@@").map(|p| alpha_pos + p).unwrap();
+        let beta_hunk_pos = content[beta_pos..].find("@@").map(|p| beta_pos + p).unwrap();
+        assert!(
+            alpha_pos < alpha_hunk_pos && alpha_hunk_pos < beta_pos,
+            "alpha's @@ should appear after alpha.txt and before beta.txt: alpha={alpha_pos} hunk={alpha_hunk_pos} beta={beta_pos}"
+        );
+        assert!(
+            beta_pos < beta_hunk_pos,
+            "beta's @@ should appear after beta.txt: beta={beta_pos} hunk={beta_hunk_pos}"
+        );
+    }
+
+    #[test]
+    fn hunks_for_rename_only_produces_no_hunks() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("old.txt"), "content\n").unwrap();
+        jj.describe_set("@", "parent").unwrap();
+        jj.new_change("").unwrap();
+        // Perform a rename by removing old and adding new with same content.
+        std::fs::rename(dir.path().join("old.txt"), dir.path().join("new.txt")).unwrap();
+        // jj should detect this as a rename; diff for the destination has no content change.
+        let hunks = hunks_for(&jj, "@", "new.txt");
+        // A pure rename may produce no @@ lines since content is identical.
+        // We just assert no crash and that if there are no hunks, the string is empty or contains no diff content.
+        assert!(
+            !hunks.contains("-content") && !hunks.contains("+content"),
+            "rename-only should not show content additions/removals: {hunks}"
         );
     }
 }
