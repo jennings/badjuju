@@ -602,6 +602,16 @@
         "command": "badjuju.help.open",
         "key": "shift+/",
         "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'describe.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "editor.toggleFold",
+        "key": "tab",
+        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !editorHasSelection"
+      },
+      {
+        "command": "editor.toggleFold",
+        "key": "tab",
+        "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus && vim.mode == 'Normal'"
       }
     ]
   }

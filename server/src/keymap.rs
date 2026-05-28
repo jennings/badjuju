@@ -137,6 +137,13 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         description: "refresh",
         windows: &["status", "log", "diff"],
     },
+    // Fold toggle (status only)
+    KeymapEntry {
+        key: "Tab",
+        action: "(editor)",
+        description: "toggle fold at cursor",
+        windows: &["status"],
+    },
     // Close (all main windows)
     KeymapEntry {
         key: "q",
@@ -261,6 +268,13 @@ static VIM_ENTRIES: &[KeymapEntry] = &[
         description: "refresh",
         windows: &["status", "log", "diff"],
     },
+    // Fold toggle (status only)
+    KeymapEntry {
+        key: "Tab",
+        action: "(editor)",
+        description: "toggle fold at cursor",
+        windows: &["status"],
+    },
     // Close
     KeymapEntry {
         key: "q",
@@ -340,6 +354,7 @@ mod tests {
         assert!(text.starts_with("COMMAND REFERENCE:"));
         for key in [
             "n", "L", "b", "r", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "R", "q", "?",
+            "Tab",
         ] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
@@ -417,7 +432,7 @@ mod tests {
         assert!(text.starts_with("COMMAND REFERENCE:"));
         for key in [
             "nn", "ll", "ff", "pp", "PP", "uu", "ss", "UU", "bb", "rr", "ee", "dd", "D", "aa", "R",
-            "q", "?",
+            "q", "?", "Tab",
         ] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),

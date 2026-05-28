@@ -226,6 +226,7 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'U', function() run_file_scoped('badjuju.unsquash') end,
         'badjuju: unsquash file at cursor from parent into child')
     end
+    nmap(bufnr, '<Tab>', 'za', 'badjuju: toggle fold at cursor')
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
     nmap(bufnr, '?', function() show_help('status') end, 'badjuju: show help')
     -- Open the LSP code-action menu for the current cursor line. Server emits

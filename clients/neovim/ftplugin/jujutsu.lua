@@ -31,4 +31,14 @@ if name:match('/%.jj/badjuju/describe%.jujutsu$') then
   })
 end
 
+-- Enable LSP-driven folding for status buffers and start fully folded.
+if name:match('/%.jj/badjuju/status%.jujutsu$') then
+  vim.wo.foldmethod = 'expr'
+  vim.wo.foldexpr = 'v:lua.vim.lsp.foldexpr()'
+  vim.wo.foldlevel = 0
+  vim.defer_fn(function()
+    pcall(vim.cmd, 'normal! zM')
+  end, 100)
+end
+
 require('badjuju.keymap').setup_for_buffer(0)

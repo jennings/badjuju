@@ -317,6 +317,22 @@ export async function activate(context: ExtensionContext) {
 
   context.subscriptions.push(
     outputWatcher,
+    // Fold all regions when a status buffer is first shown.
+    // The delay lets the LSP publish its folding ranges before we collapse them.
+    workspace.onDidOpenTextDocument(async (doc) => {
+      if (!isStatusFile(doc.uri)) return;
+      await new Promise<void>((resolve) => setTimeout(resolve, 200));
+      const editor = window.visibleTextEditors.find(
+        (e) => e.document.uri.toString() === doc.uri.toString(),
+      );
+      if (editor) {
+        await window.showTextDocument(editor.document, {
+          preserveFocus: true,
+          viewColumn: editor.viewColumn,
+        });
+        await commands.executeCommand("editor.foldAll");
+      }
+    }),
     workspace.registerTextDocumentContentProvider(
       READONLY_SCHEME,
       statusProvider,
