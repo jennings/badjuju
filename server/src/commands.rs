@@ -987,38 +987,41 @@ fn changes_folding_ranges(lines: &[&str], stack_start: usize, ranges: &mut Vec<F
     let mut last_file_content: Option<usize> = None;
     let mut last_section_content: Option<usize> = None;
 
-    let flush_hunk =
-        |hunk_start: &mut Option<usize>, last_hunk_content: &mut Option<usize>, ranges: &mut Vec<FoldingRange>| {
-            if let (Some(hs), Some(hc)) = (*hunk_start, *last_hunk_content) {
-                if hc > hs {
-                    ranges.push(make_region(hs, hc));
-                }
-            }
-            *hunk_start = None;
-            *last_hunk_content = None;
-        };
+    let flush_hunk = |hunk_start: &mut Option<usize>,
+                      last_hunk_content: &mut Option<usize>,
+                      ranges: &mut Vec<FoldingRange>| {
+        if let (Some(hs), Some(hc)) = (*hunk_start, *last_hunk_content)
+            && hc > hs
+        {
+            ranges.push(make_region(hs, hc));
+        }
+        *hunk_start = None;
+        *last_hunk_content = None;
+    };
 
-    let flush_file =
-        |file_start: &mut Option<usize>, last_file_content: &mut Option<usize>, ranges: &mut Vec<FoldingRange>| {
-            if let (Some(fs), Some(fc)) = (*file_start, *last_file_content) {
-                if fc > fs {
-                    ranges.push(make_region(fs, fc));
-                }
-            }
-            *file_start = None;
-            *last_file_content = None;
-        };
+    let flush_file = |file_start: &mut Option<usize>,
+                      last_file_content: &mut Option<usize>,
+                      ranges: &mut Vec<FoldingRange>| {
+        if let (Some(fs), Some(fc)) = (*file_start, *last_file_content)
+            && fc > fs
+        {
+            ranges.push(make_region(fs, fc));
+        }
+        *file_start = None;
+        *last_file_content = None;
+    };
 
-    let flush_section =
-        |section_start: &mut Option<usize>, last_section_content: &mut Option<usize>, ranges: &mut Vec<FoldingRange>| {
-            if let (Some(ss), Some(sc)) = (*section_start, *last_section_content) {
-                if sc > ss {
-                    ranges.push(make_region(ss, sc));
-                }
-            }
-            *section_start = None;
-            *last_section_content = None;
-        };
+    let flush_section = |section_start: &mut Option<usize>,
+                         last_section_content: &mut Option<usize>,
+                         ranges: &mut Vec<FoldingRange>| {
+        if let (Some(ss), Some(sc)) = (*section_start, *last_section_content)
+            && sc > ss
+        {
+            ranges.push(make_region(ss, sc));
+        }
+        *section_start = None;
+        *last_section_content = None;
+    };
 
     for (i, &line) in lines.iter().enumerate().take(stack_start) {
         if line.starts_with("WORKING COPY CHANGES (") || line.starts_with("PARENT CHANGES (") {
@@ -2813,7 +2816,10 @@ mod tests {
         std::fs::write(dir.path().join("foo.txt"), "new line\n").unwrap();
         let hunks = hunks_for(&jj, "@", "foo.txt");
         assert!(hunks.contains("@@"), "expected @@ hunk header: {hunks}");
-        assert!(hunks.contains("-old line"), "expected removed line: {hunks}");
+        assert!(
+            hunks.contains("-old line"),
+            "expected removed line: {hunks}"
+        );
         assert!(hunks.contains("+new line"), "expected added line: {hunks}");
         assert!(
             !hunks.contains("diff --git"),
@@ -2840,7 +2846,10 @@ mod tests {
         std::fs::write(dir.path().join("foo.txt"), &modified).unwrap();
         let hunks = hunks_for(&jj, "@", "foo.txt");
         let hunk_count = hunks.matches("@@").count();
-        assert!(hunk_count >= 2, "expected multiple @@ blocks, got {hunk_count}: {hunks}");
+        assert!(
+            hunk_count >= 2,
+            "expected multiple @@ blocks, got {hunk_count}: {hunks}"
+        );
     }
 
     #[test]
@@ -2857,8 +2866,14 @@ mod tests {
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         let alpha_pos = content.find("alpha.txt").unwrap();
         let beta_pos = content.find("beta.txt").unwrap();
-        let alpha_hunk_pos = content[alpha_pos..].find("@@").map(|p| alpha_pos + p).unwrap();
-        let beta_hunk_pos = content[beta_pos..].find("@@").map(|p| beta_pos + p).unwrap();
+        let alpha_hunk_pos = content[alpha_pos..]
+            .find("@@")
+            .map(|p| alpha_pos + p)
+            .unwrap();
+        let beta_hunk_pos = content[beta_pos..]
+            .find("@@")
+            .map(|p| beta_pos + p)
+            .unwrap();
         assert!(
             alpha_pos < alpha_hunk_pos && alpha_hunk_pos < beta_pos,
             "alpha's @@ should appear after alpha.txt and before beta.txt: alpha={alpha_pos} hunk={alpha_hunk_pos} beta={beta_pos}"
@@ -2899,9 +2914,7 @@ mod tests {
         if hunks.is_empty() {
             format!("@  : (empty)\n@- : (empty)\n\n{section_header}\n{file}\n\n{stack}")
         } else {
-            format!(
-                "@  : (empty)\n@- : (empty)\n\n{section_header}\n{file}\n{hunks}\n\n{stack}"
-            )
+            format!("@  : (empty)\n@- : (empty)\n\n{section_header}\n{file}\n{hunks}\n\n{stack}")
         }
     }
 

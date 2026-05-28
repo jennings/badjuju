@@ -1351,3 +1351,98 @@ fn lsp_folding_range_returns_nested_ranges_for_changes_sections() {
         "hunk fold must be inside file fold: hunk={hunk_fold} file={file_fold}"
     );
 }
+
+#[test]
+fn lsp_status_merge_commit_emits_two_parent_changes_sections() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    // Build a merge commit: two parents each with a unique file.
+    std::fs::write(dir.path().join("from-a.txt"), "a\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "branch-a"])
+        .current_dir(dir.path())
+        .output()
+        .expect("jj describe failed");
+    let a_id = String::from_utf8(
+        Command::new("jj")
+            .args([
+                "log",
+                "--no-pager",
+                "-r",
+                "@",
+                "--no-graph",
+                "-T",
+                "change_id",
+            ])
+            .current_dir(dir.path())
+            .output()
+            .expect("jj log failed")
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+
+    Command::new("jj")
+        .args(["new"])
+        .current_dir(dir.path())
+        .output()
+        .expect("jj new failed");
+    std::fs::write(dir.path().join("from-b.txt"), "b\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "branch-b"])
+        .current_dir(dir.path())
+        .output()
+        .expect("jj describe failed");
+    let b_id = String::from_utf8(
+        Command::new("jj")
+            .args([
+                "log",
+                "--no-pager",
+                "-r",
+                "@",
+                "--no-graph",
+                "-T",
+                "change_id",
+            ])
+            .current_dir(dir.path())
+            .output()
+            .expect("jj log failed")
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+
+    Command::new("jj")
+        .args(["new", &a_id, &b_id])
+        .current_dir(dir.path())
+        .output()
+        .expect("jj new (merge) failed");
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+
+    let parent_sections: Vec<_> = status_content
+        .lines()
+        .filter(|l| l.starts_with("PARENT CHANGES ("))
+        .collect();
+    assert_eq!(
+        parent_sections.len(),
+        2,
+        "expected two PARENT CHANGES sections for merge commit:\n{status_content}"
+    );
+    assert!(
+        status_content.contains("from-a.txt"),
+        "expected from-a.txt:\n{status_content}"
+    );
+    assert!(
+        status_content.contains("from-b.txt"),
+        "expected from-b.txt:\n{status_content}"
+    );
+}
