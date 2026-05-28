@@ -95,6 +95,12 @@ fn revision_at_line_status(content: &str, line: usize) -> String {
         if let Some(change_id) = match_commit_header(text) {
             return change_id.to_string();
         }
+        if text.starts_with("WORKING COPY CHANGES (") {
+            return "@".to_string();
+        }
+        if let Some(parent_id) = parse_parent_changes_header(text) {
+            return parent_id.to_string();
+        }
     }
     "@".to_string()
 }
@@ -132,16 +138,94 @@ fn revision_from_diff_header(content: &str) -> Option<String> {
     None
 }
 
+/// Which section of a `status.jujutsu` buffer a cursor position resolves to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CursorTarget {
+    /// File in the WORKING COPY CHANGES block — belongs to `@`.
+    WorkingCopyFile { path: String },
+    /// File in a PARENT CHANGES block — belongs to the named parent change-id.
+    ParentFile { parent_id: String, path: String },
+    /// File in the STACK section — belongs to the named change-id from `jj log --stat`.
+    StackCommitFile { change_id: String, path: String },
+}
+
+/// Resolve the full cursor target (section + file) for a 0-indexed line in a
+/// `status.jujutsu` buffer. Returns `None` when the line does not resolve to a
+/// file (blank line, section header, description, etc.).
+pub fn cursor_target_at_line(content: &str, line: usize) -> Option<CursorTarget> {
+    let file = file_at_line(content, line)?;
+    let lines: Vec<&str> = content.lines().collect();
+    let start = line.min(lines.len().saturating_sub(1));
+    for i in (0..=start).rev() {
+        let text = lines[i];
+        if text.starts_with("WORKING COPY CHANGES (") {
+            return Some(CursorTarget::WorkingCopyFile { path: file });
+        }
+        if let Some(parent_id) = parse_parent_changes_header(text) {
+            return Some(CursorTarget::ParentFile {
+                parent_id: parent_id.to_string(),
+                path: file,
+            });
+        }
+        if let Some(change_id) = match_commit_header(text) {
+            return Some(CursorTarget::StackCommitFile {
+                change_id: change_id.to_string(),
+                path: file,
+            });
+        }
+        if text.starts_with("STACK:") || text.starts_with("COMMAND REFERENCE:") {
+            return None;
+        }
+    }
+    None
+}
+
 /// Resolve the file path at a given 0-indexed line of a `status.jujutsu`
-/// buffer. Handles both the STATUS-section header form (`M src/main.rs`) and
-/// the `jj log --stat` per-file form (`│  src/main.rs | 3 +++`). Renames
-/// rendered as `old => new` return only the destination path.
+/// buffer. Handles:
+/// - `M src/main.rs` style (status flag lines)
+/// - `│  src/main.rs | 3 +++` style (jj log --stat lines)
+/// - Flush-left plain paths inside WORKING COPY CHANGES / PARENT CHANGES sections
+/// - `@@` hunk headers and diff content lines: walks up to the enclosing plain
+///   path line within the same CHANGES section
 ///
-/// Returns `None` for blank lines, header lines, the `--stat` summary line
-/// (`5 files changed, ...`), or any line that doesn't match either form.
+/// Renames rendered as `old => new` return only the destination path.
+///
+/// Returns `None` for blank lines, section header lines, the stat summary
+/// line, and lines outside all recognisable file contexts.
 pub fn file_at_line(content: &str, line: usize) -> Option<String> {
-    let line_text = content.lines().nth(line)?;
-    parse_file_line(line_text)
+    let lines: Vec<&str> = content.lines().collect();
+    let line_text = lines.get(line).copied()?;
+
+    // Existing formats: M/A/D prefix and stat lines.
+    if let Some(p) = parse_file_line(line_text) {
+        return Some(p);
+    }
+
+    // Diff hunk lines (@@) or add/remove/context lines inside a CHANGES block:
+    // walk upward to the nearest plain path line in the same section, skipping
+    // hunk markers and diff context lines (space-prefixed unchanged lines).
+    if is_diff_hunk_line(line_text) {
+        for i in (0..line).rev() {
+            let text = lines[i];
+            if is_diff_hunk_line(text) || text.starts_with(' ') {
+                continue;
+            }
+            // Hit a plain path line?
+            if let Some(p) = parse_changes_file_line(text) {
+                return Some(p);
+            }
+            // Hit a section header or section boundary — stop.
+            break;
+        }
+        return None;
+    }
+
+    // Plain flush-left paths inside CHANGES sections.
+    if is_in_changes_section(&lines, line) {
+        return parse_changes_file_line(line_text);
+    }
+
+    None
 }
 
 /// Resolve a `JJ: <Label>: <revset>` shortcut at the given 0-indexed line of
@@ -315,6 +399,69 @@ fn strip_rename_arrow(path: &str) -> String {
         Some(idx) => path[idx + 4..].trim().to_string(),
         None => path.to_string(),
     }
+}
+
+/// Parse the `PARENT CHANGES (<id>):` section header line and return the
+/// change-id inside the parentheses.
+fn parse_parent_changes_header(line: &str) -> Option<&str> {
+    let after = line.strip_prefix("PARENT CHANGES (")?;
+    let end = after.find("):")?;
+    let id = &after[..end];
+    if id.is_empty() { None } else { Some(id) }
+}
+
+/// Return `true` when `lines[line]` falls inside a WORKING COPY CHANGES or
+/// PARENT CHANGES block. Walks upward looking for a section header.
+fn is_in_changes_section(lines: &[&str], line: usize) -> bool {
+    let start = line.min(lines.len().saturating_sub(1));
+    for i in (0..=start).rev() {
+        let text = lines[i];
+        if text.starts_with("WORKING COPY CHANGES (") || text.starts_with("PARENT CHANGES (") {
+            return true;
+        }
+        if text.starts_with("STACK:")
+            || text.starts_with("COMMAND REFERENCE:")
+            || match_commit_header(text).is_some()
+        {
+            return false;
+        }
+    }
+    false
+}
+
+/// Parse a plain flush-left file path from a CHANGES section line.
+/// Rejects blank lines, lines starting with whitespace, section headers,
+/// commit-header characters, and diff hunk markers.
+fn parse_changes_file_line(line: &str) -> Option<String> {
+    if line.is_empty() {
+        return None;
+    }
+    if line.starts_with([' ', '\t']) {
+        return None;
+    }
+    if line.starts_with("WORKING COPY CHANGES")
+        || line.starts_with("PARENT CHANGES")
+        || line.starts_with("STACK:")
+        || line.starts_with("COMMAND REFERENCE:")
+        || line.starts_with("MESSAGE:")
+        || line.starts_with("@  ")
+        || line.starts_with("@- ")
+    {
+        return None;
+    }
+    if match_commit_header(line).is_some() {
+        return None;
+    }
+    if is_diff_hunk_line(line) {
+        return None;
+    }
+    Some(line.trim_end().to_string())
+}
+
+/// Return `true` for lines that look like diff hunk markers (`@@`) or
+/// unified-diff content lines (`+` / `-`).
+fn is_diff_hunk_line(line: &str) -> bool {
+    line.starts_with("@@") || line.starts_with('+') || line.starts_with('-')
 }
 
 /// Parse a `JJ: <Label>: <revset>` log-shortcut line. Mirrors
@@ -718,6 +865,247 @@ mod tests {
     fn log_shortcut_at_line_rejects_missing_revset() {
         assert_eq!(log_shortcut_at_line("JJ: Foo:", 0), None);
         assert_eq!(log_shortcut_at_line("JJ: Foo:   ", 0), None);
+    }
+
+    // --- CHANGES section: revision_at_line ---
+
+    fn status_with_changes() -> String {
+        [
+            "@  : my working copy change",
+            "@- : parent",
+            "",
+            "WORKING COPY CHANGES (yyzmyynq):",
+            "foo.txt",
+            "bar.txt",
+            "",
+            "PARENT CHANGES (uqzpovpt):",
+            "baz.txt",
+            "",
+            "STACK: ancestors(reachable(@, mutable()), 2)",
+            "",
+            "@  qpvuntsm 1234abcd",
+            "│  description here",
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn revision_at_line_working_copy_section_returns_at() {
+        let s = status_with_changes();
+        // Line 3 = section header
+        assert_eq!(
+            revision_at_line(&s, 3, BufferKind::Status).as_deref(),
+            Some("@")
+        );
+        // Line 4 = foo.txt
+        assert_eq!(
+            revision_at_line(&s, 4, BufferKind::Status).as_deref(),
+            Some("@")
+        );
+        // Line 5 = bar.txt
+        assert_eq!(
+            revision_at_line(&s, 5, BufferKind::Status).as_deref(),
+            Some("@")
+        );
+    }
+
+    #[test]
+    fn revision_at_line_parent_changes_section_returns_parent_id() {
+        let s = status_with_changes();
+        // Line 7 = PARENT CHANGES header
+        assert_eq!(
+            revision_at_line(&s, 7, BufferKind::Status).as_deref(),
+            Some("uqzpovpt")
+        );
+        // Line 8 = baz.txt
+        assert_eq!(
+            revision_at_line(&s, 8, BufferKind::Status).as_deref(),
+            Some("uqzpovpt")
+        );
+    }
+
+    #[test]
+    fn revision_at_line_merge_two_parent_changes_each_returns_correct_id() {
+        let s = [
+            "@  : merge commit",
+            "@- : branch-a",
+            "@- : branch-b",
+            "",
+            "PARENT CHANGES (aaaabbbb):",
+            "from-a.txt",
+            "",
+            "PARENT CHANGES (ccccdddd):",
+            "from-b.txt",
+            "",
+            "STACK: @",
+        ]
+        .join("\n");
+        assert_eq!(
+            revision_at_line(&s, 5, BufferKind::Status).as_deref(),
+            Some("aaaabbbb")
+        );
+        assert_eq!(
+            revision_at_line(&s, 8, BufferKind::Status).as_deref(),
+            Some("ccccdddd")
+        );
+    }
+
+    #[test]
+    fn revision_at_line_stack_section_unchanged() {
+        let s = status_with_changes();
+        // Line 12 = @  qpvuntsm (commit header in STACK)
+        assert_eq!(
+            revision_at_line(&s, 12, BufferKind::Status).as_deref(),
+            Some("qpvuntsm")
+        );
+        // Line 13 = "│  description here" — walks up to qpvuntsm
+        assert_eq!(
+            revision_at_line(&s, 13, BufferKind::Status).as_deref(),
+            Some("qpvuntsm")
+        );
+    }
+
+    // --- CHANGES section: file_at_line ---
+
+    #[test]
+    fn file_at_line_plain_path_in_working_copy_changes() {
+        let s = status_with_changes();
+        // Line 4 = "foo.txt"
+        assert_eq!(file_at_line(&s, 4).as_deref(), Some("foo.txt"));
+        // Line 5 = "bar.txt"
+        assert_eq!(file_at_line(&s, 5).as_deref(), Some("bar.txt"));
+    }
+
+    #[test]
+    fn file_at_line_plain_path_in_parent_changes() {
+        let s = status_with_changes();
+        // Line 8 = "baz.txt"
+        assert_eq!(file_at_line(&s, 8).as_deref(), Some("baz.txt"));
+    }
+
+    #[test]
+    fn file_at_line_section_header_returns_none() {
+        let s = status_with_changes();
+        // Line 3 = "WORKING COPY CHANGES (yyzmyynq):"
+        assert_eq!(file_at_line(&s, 3), None);
+        // Line 7 = "PARENT CHANGES (uqzpovpt):"
+        assert_eq!(file_at_line(&s, 7), None);
+    }
+
+    #[test]
+    fn file_at_line_plain_path_outside_changes_section_returns_none() {
+        let s = status_with_changes();
+        // Line 0 = "@  : my working copy change" — not in a CHANGES section
+        assert_eq!(file_at_line(&s, 0), None);
+        // Line 10 = "STACK: ..." — not in a CHANGES section
+        assert_eq!(file_at_line(&s, 10), None);
+    }
+
+    #[test]
+    fn file_at_line_diff_hunk_walks_up_to_enclosing_file() {
+        let s = [
+            "@  : my change",
+            "@- : parent",
+            "",
+            "WORKING COPY CHANGES (yyzmyynq):",
+            "readme.txt",
+            "@@ -1,2 +1,3 @@",
+            " unchanged",
+            "+new line",
+            "-old line",
+            "",
+            "STACK: @",
+        ]
+        .join("\n");
+        // @@ hunk header on line 5 → walks up to readme.txt on line 4
+        assert_eq!(file_at_line(&s, 5).as_deref(), Some("readme.txt"));
+        // Diff context/add/remove lines also walk up
+        assert_eq!(file_at_line(&s, 6), None); // " unchanged" — space-prefixed, not a diff op
+        assert_eq!(file_at_line(&s, 7).as_deref(), Some("readme.txt")); // +new line
+        assert_eq!(file_at_line(&s, 8).as_deref(), Some("readme.txt")); // -old line
+    }
+
+    // --- cursor_target_at_line ---
+
+    #[test]
+    fn cursor_target_working_copy_file() {
+        let s = status_with_changes();
+        assert_eq!(
+            cursor_target_at_line(&s, 4),
+            Some(CursorTarget::WorkingCopyFile {
+                path: "foo.txt".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn cursor_target_parent_file() {
+        let s = status_with_changes();
+        assert_eq!(
+            cursor_target_at_line(&s, 8),
+            Some(CursorTarget::ParentFile {
+                parent_id: "uqzpovpt".to_string(),
+                path: "baz.txt".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn cursor_target_merge_second_parent() {
+        let s = [
+            "@  : merge",
+            "@- : branch-a",
+            "@- : branch-b",
+            "",
+            "PARENT CHANGES (aaaabbbb):",
+            "from-a.txt",
+            "",
+            "PARENT CHANGES (ccccdddd):",
+            "from-b.txt",
+            "",
+            "STACK: @",
+        ]
+        .join("\n");
+        assert_eq!(
+            cursor_target_at_line(&s, 8),
+            Some(CursorTarget::ParentFile {
+                parent_id: "ccccdddd".to_string(),
+                path: "from-b.txt".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn cursor_target_stack_commit_file() {
+        let s = [
+            "@  : my change",
+            "@- : parent",
+            "",
+            "STACK: @",
+            "",
+            "@  qpvuntsm 1234abcd",
+            "│  description here",
+            "│  src/main.rs | 3 +++",
+        ]
+        .join("\n");
+        assert_eq!(
+            cursor_target_at_line(&s, 7),
+            Some(CursorTarget::StackCommitFile {
+                change_id: "qpvuntsm".to_string(),
+                path: "src/main.rs".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn cursor_target_non_file_line_returns_none() {
+        let s = status_with_changes();
+        // Section header line
+        assert_eq!(cursor_target_at_line(&s, 3), None);
+        // Blank line
+        assert_eq!(cursor_target_at_line(&s, 2), None);
+        // @ header line
+        assert_eq!(cursor_target_at_line(&s, 0), None);
     }
 
     // --- commit_id_at_line ---
