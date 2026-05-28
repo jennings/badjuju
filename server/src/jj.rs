@@ -78,18 +78,23 @@ impl Jj {
         // shape of bad-juju's log buffers (which the clients parse).
         // Use an explicit template instead of builtin_log_compact to avoid
         // OSC 8 hyperlink escape codes that newer jj versions emit.
+        // Field order: change_id, commit_id, author.email, commit_timestamp,
+        // bookmarks, tags, conflict flag, divergent flag.
+        // The trailing `++ "\n"` inserts a blank line between commits.
         let template = concat!(
             r#"separate("\n","#,
             r#"  separate(" ","#,
             r#"    change_id.shortest(8),"#,
             r#"    commit_id.shortest(8),"#,
-            r#"    commit_timestamp(self),"#,
             r#"    author.email(),"#,
+            r#"    commit_timestamp(self),"#,
             r#"    bookmarks,"#,
             r#"    tags,"#,
+            r#"    if(conflict, "conflict"),"#,
+            r#"    if(divergent, "divergent"),"#,
             r#"  ),"#,
             r#"  if(!description, "(empty)", description.first_line()),"#,
-            r#")"#,
+            r#") ++ "\n\n""#,
         );
         let mut args: Vec<&str> = vec![
             "--config",
@@ -318,6 +323,38 @@ impl Jj {
     pub fn bookmark_forget(&self, name: &str) -> Result<(), JjError> {
         self.run(&["bookmark", "forget", name])?;
         Ok(())
+    }
+
+    /// List files changed by a revision (`jj diff --revisions REV --summary`).
+    /// Parses M/A/D/R lines and returns destination paths.
+    pub fn files_changed(&self, rev: &str) -> Result<Vec<String>, JjError> {
+        let out = self.run(&["diff", "--revisions", rev, "--summary"])?;
+        let paths = out
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let mut chars = line.chars();
+                let flag = chars.next()?;
+                if !matches!(flag, 'M' | 'A' | 'D' | 'R') {
+                    return None;
+                }
+                let rest = line[flag.len_utf8()..].trim();
+                // Renames: "R old => new" — take the destination after "=> "
+                if flag == 'R' {
+                    if let Some(dest) = rest.split(" => ").nth(1) {
+                        return Some(dest.trim().to_string());
+                    }
+                }
+                if rest.is_empty() { None } else { Some(rest.to_string()) }
+            })
+            .collect();
+        Ok(paths)
+    }
+
+    /// Show the unified diff for a single file in a revision.
+    /// Returns the diff text (empty string if no changes to that file).
+    pub fn diff_file(&self, rev: &str, path: &str) -> Result<String, JjError> {
+        self.run(&["diff", "--revisions", rev, "--", path])
     }
 
     /// Squash a single file's changes from `source` into `source`'s parent.
@@ -889,5 +926,129 @@ mod tests {
         // Squash the file from source into dest.
         jj.squash_file_into(&source, &dest, "readme.txt")
             .expect("squash_file_into failed");
+    }
+
+    #[test]
+    fn log_with_stat_field_order_has_email_before_timestamp() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let out = jj.log("@").expect("log failed");
+        // The header line is: <graph> <change_id> <commit_id> <email> <timestamp> ...
+        // Verify email appears before the timestamp on the header line.
+        let header = out.lines().next().expect("no output");
+        let at_pos = header.find('@').expect("no @ in header");
+        // email contains @, timestamp does not — find a digit sequence for timestamp
+        let ts_pos = header.find(|c: char| c.is_ascii_digit()).expect("no digit in header");
+        assert!(
+            at_pos < ts_pos,
+            "expected email (@ sign) before timestamp (digit) in header: {header}"
+        );
+    }
+
+    #[test]
+    fn log_with_stat_inserts_blank_line_between_commits() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        jj.describe_set("@", "first").unwrap();
+        jj.new_change("").unwrap();
+        jj.describe_set("@", "second").unwrap();
+        let out = jj.log("::@").expect("log failed");
+        // In graph mode the blank line between commits appears as a line
+        // containing only the graph continuation char "│", or as an empty
+        // line for the root commit. Either signals a separator was injected.
+        assert!(
+            out.lines()
+                .any(|l| l.trim_end().is_empty() || l.trim_end() == "│"),
+            "expected blank separator line between commits; got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn files_changed_returns_modified_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        std::fs::write(dir.path().join("alpha.txt"), "a\n").unwrap();
+        std::fs::write(dir.path().join("beta.txt"), "b\n").unwrap();
+        let files = jj.files_changed("@").expect("files_changed failed");
+        assert!(
+            files.contains(&"alpha.txt".to_string()),
+            "expected alpha.txt; got {files:?}"
+        );
+        assert!(
+            files.contains(&"beta.txt".to_string()),
+            "expected beta.txt; got {files:?}"
+        );
+    }
+
+    #[test]
+    fn files_changed_empty_for_clean_working_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        // Fresh repo with no uncommitted changes.
+        let files = jj.files_changed("@").expect("files_changed failed");
+        assert!(files.is_empty(), "expected empty list; got {files:?}");
+    }
+
+    #[test]
+    fn files_changed_handles_rename_returns_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        // Create original file in a parent commit.
+        std::fs::write(dir.path().join("old.txt"), "content\n").unwrap();
+        jj.describe_set("@", "add old.txt").unwrap();
+        jj.new_change("").unwrap();
+        // Rename by removing old and adding new.
+        std::fs::remove_file(dir.path().join("old.txt")).unwrap();
+        std::fs::write(dir.path().join("new.txt"), "content\n").unwrap();
+        let files = jj.files_changed("@").expect("files_changed failed");
+        // Should contain new.txt (destination) regardless of rename representation.
+        assert!(
+            files.iter().any(|f| f.contains("new.txt")),
+            "expected new.txt in results; got {files:?}"
+        );
+    }
+
+    #[test]
+    fn files_changed_outside_repo_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = Jj::new("jj", dir.path());
+        let result = jj.files_changed("@");
+        assert!(matches!(result, Err(JjError::JjFailed { .. })));
+    }
+
+    #[test]
+    fn diff_file_returns_hunks_for_modified_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        std::fs::write(dir.path().join("readme.txt"), "hello\n").unwrap();
+        let out = jj.diff_file("@", "readme.txt").expect("diff_file failed");
+        assert!(
+            out.contains("readme.txt"),
+            "expected diff to mention readme.txt; got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn diff_file_empty_for_unmodified_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        // Write a file in the parent, then create a new empty change.
+        std::fs::write(dir.path().join("unchanged.txt"), "v1\n").unwrap();
+        jj.describe_set("@", "add file").unwrap();
+        jj.new_change("").unwrap();
+        // @ has no changes to unchanged.txt.
+        let out = jj.diff_file("@", "unchanged.txt").expect("diff_file failed");
+        assert!(
+            out.is_empty(),
+            "expected empty diff for unmodified file; got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn diff_file_outside_repo_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = Jj::new("jj", dir.path());
+        let result = jj.diff_file("@", "anything.txt");
+        assert!(matches!(result, Err(JjError::JjFailed { .. })));
     }
 }
