@@ -46,9 +46,32 @@ end
 --- server, which resolves both the file and the revision from the same line
 --- of status.jujutsu. A server-side "no file at cursor" error surfaces through
 --- the normal LSP error path.
----@param server_command 'badjuju.squash'|'badjuju.unsquash'
+---@param server_command 'badjuju.unsquash'
 local function run_file_scoped(server_command)
   require('badjuju').execute(server_command, { cursor_arg() })
+end
+
+--- Run badjuju.squash with multi-parent disambiguation via vim.ui.select.
+--- If the server returns RequiresParentSelection, shows a picker and retries
+--- with badjuju.squash.into.
+local function run_squash()
+  require('badjuju').execute('badjuju.squash', { cursor_arg() }, {
+    on_error = function(err)
+      local data = type(err) == 'table' and err.data or nil
+      if type(data) == 'table' and data.code == 'RequiresParentSelection' then
+        local candidates = data.candidates or {}
+        local labels = vim.tbl_map(function(c) return c.label end, candidates)
+        vim.ui.select(labels, { prompt = 'Squash into: ' }, function(_, idx)
+          if not idx then return end
+          require('badjuju').execute('badjuju.squash.into', {
+            { file = data.file, parentId = candidates[idx].id },
+          })
+        end)
+      else
+        vim.notify('badjuju: ' .. (err.message or vim.inspect(err)), vim.log.levels.ERROR)
+      end
+    end,
+  })
 end
 
 local LOG_MAPS = {
@@ -187,7 +210,7 @@ function M.setup_for_buffer(bufnr)
     if profile == 'vim' then
       nmap(bufnr, 'nn', '<Cmd>JJNew<CR>', 'badjuju: new change')
       nmap(bufnr, 'll', '<Cmd>JJLog<CR>', 'badjuju: open log')
-      nmap(bufnr, 'ss', function() run_file_scoped('badjuju.squash') end,
+      nmap(bufnr, 'ss', function() run_squash() end,
         'badjuju: squash file at cursor into parent')
       nmap(bufnr, 'UU', function() run_file_scoped('badjuju.unsquash') end,
         'badjuju: unsquash file at cursor from parent into child')
@@ -221,7 +244,7 @@ function M.setup_for_buffer(bufnr)
         'badjuju: show change diff at cursor (updates on amend)')
       nmap(bufnr, '=', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: show change diff at cursor (updates on amend)')
-      nmap(bufnr, 's', function() run_file_scoped('badjuju.squash') end,
+      nmap(bufnr, 's', function() run_squash() end,
         'badjuju: squash file at cursor into parent')
       nmap(bufnr, 'U', function() run_file_scoped('badjuju.unsquash') end,
         'badjuju: unsquash file at cursor from parent into child')

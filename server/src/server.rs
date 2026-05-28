@@ -83,6 +83,7 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.prev",
     "badjuju.refresh",
     "badjuju.squash",
+    "badjuju.squash.into",
     "badjuju.unsquash",
     "badjuju.undo",
     "badjuju.abandon",
@@ -1140,6 +1141,57 @@ impl LanguageServer for Backend {
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.squash" => {
+                if let Some(cp) =
+                    commands::parse_cursor_arg(params.arguments.first()).map_err(lsp_err)?
+                {
+                    let content = documents
+                        .get(&cp.uri)
+                        .cloned()
+                        .or_else(|| read_uri_from_disk(&cp.uri))
+                        .ok_or_else(|| lsp_err(format!("document not found: {}", cp.uri)))?;
+                    match cursor::cursor_target_at_line(&content, cp.line) {
+                        Some(cursor::CursorTarget::WorkingCopyFile { path }) => {
+                            match commands::run_squash_working_copy(&jj, &workspace, &path) {
+                                Ok(uri) => {
+                                    self.record_self_caused_op(&jj).await;
+                                    self.refresh_open_diffs(&jj, &workspace).await;
+                                    return Ok(Some(serde_json::Value::String(uri)));
+                                }
+                                Err(commands::CommandError::RequiresParentSelection {
+                                    file,
+                                    candidates,
+                                }) => {
+                                    let mut err = Error::internal_error();
+                                    err.message = "squash requires parent selection".into();
+                                    err.data = Some(serde_json::json!({
+                                        "code": "RequiresParentSelection",
+                                        "file": file,
+                                        "candidates": candidates.iter()
+                                            .map(|(id, label)| {
+                                                serde_json::json!({ "id": id, "label": label })
+                                            })
+                                            .collect::<Vec<_>>()
+                                    }));
+                                    return Err(err);
+                                }
+                                Err(e) => return Err(lsp_err(e)),
+                            }
+                        }
+                        Some(cursor::CursorTarget::ParentFile { .. }) => {
+                            let uri = commands::write_status(
+                                &jj,
+                                &workspace,
+                                Some(
+                                    "squash: cursor on parent change \
+                                     — use unsquash (U) instead",
+                                ),
+                            )
+                            .map_err(lsp_err)?;
+                            return Ok(Some(serde_json::Value::String(uri)));
+                        }
+                        _ => {}
+                    }
+                }
                 let (file, revision) = resolve_file_scoped_args(
                     params.arguments.first(),
                     params.arguments.get(1),
@@ -1147,6 +1199,27 @@ impl LanguageServer for Backend {
                 )?;
                 let uri =
                     commands::run_squash(&jj, &workspace, &file, &revision).map_err(lsp_err)?;
+                self.record_self_caused_op(&jj).await;
+                self.refresh_open_diffs(&jj, &workspace).await;
+                Ok(Some(serde_json::Value::String(uri)))
+            }
+            "badjuju.squash.into" => {
+                let arg = params
+                    .arguments
+                    .first()
+                    .ok_or_else(|| lsp_err("badjuju.squash.into requires arguments"))?;
+                let file = arg
+                    .get("file")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| lsp_err("badjuju.squash.into: missing file"))?
+                    .to_string();
+                let parent_id = arg
+                    .get("parentId")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| lsp_err("badjuju.squash.into: missing parentId"))?
+                    .to_string();
+                let uri = commands::run_squash_into(&jj, &workspace, &file, &parent_id)
+                    .map_err(lsp_err)?;
                 self.record_self_caused_op(&jj).await;
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))

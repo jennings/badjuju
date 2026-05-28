@@ -170,11 +170,14 @@ end
 --- from any buffer inside a jj workspace (not only after opening a .jujutsu file).
 ---@param command string  badjuju.* server command name
 ---@param arguments any[]?  optional arguments forwarded to the server
----@param opts { after?: fun(result_uri: string), split?: 'h'|'v' }?
+---@param opts { after?: fun(result_uri: string), split?: 'h'|'v', on_error?: fun(err: table) }?
 ---   after: optional callback invoked on the main loop after the result file
 ---     has been opened and reloaded. Receives the server-returned URI string.
 ---   split: open the result file in a new horizontal ('h') or vertical ('v')
 ---     split window instead of replacing the current window's buffer.
+---   on_error: optional callback receiving the raw jsonrpc error table (has
+---     `.message` and optionally `.data`). When provided, suppresses the
+---     default vim.notify error display.
 function M.execute(command, arguments, opts)
   local client = M.ensure_client()
   if not client then
@@ -190,7 +193,11 @@ function M.execute(command, arguments, opts)
     arguments = arguments or {},
   }, function(err, result)
     if err then
-      vim.notify('badjuju: ' .. (err.message or vim.inspect(err)), vim.log.levels.ERROR)
+      if opts and opts.on_error then
+        vim.schedule(function() opts.on_error(err) end)
+      else
+        vim.notify('badjuju: ' .. (err.message or vim.inspect(err)), vim.log.levels.ERROR)
+      end
       return
     end
     if type(result) ~= 'string' or result == '' then

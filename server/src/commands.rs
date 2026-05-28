@@ -242,7 +242,11 @@ fn changes_sections(jj: &Jj) -> Result<String, CommandError> {
 }
 
 /// Write status.jujutsu, optionally prepending a MESSAGE: block. Returns the URI.
-fn write_status(jj: &Jj, workspace: &Path, message: Option<&str>) -> Result<String, CommandError> {
+pub fn write_status(
+    jj: &Jj,
+    workspace: &Path,
+    message: Option<&str>,
+) -> Result<String, CommandError> {
     let at_header = header_line_for(jj, "@", "@  ")?;
 
     let parents = jj.change_ids("parents(@)")?;
@@ -326,6 +330,97 @@ pub fn run_squash(
             jj,
             workspace,
             Some(&format!("squash {file} from {rev} failed: {e}")),
+        ),
+    }
+}
+
+/// Run `badjuju.squash` from the working-copy (`@`), respecting multi-parent merges.
+///
+/// - Single parent: squash directly into it (existing behaviour).
+/// - Multiple parents, file touched by exactly one: squash into that parent automatically.
+/// - Multiple parents, ambiguous or zero: return `RequiresParentSelection`.
+pub fn run_squash_working_copy(
+    jj: &Jj,
+    workspace: &Path,
+    file: &str,
+) -> Result<String, CommandError> {
+    if file.is_empty() {
+        return write_status(jj, workspace, Some("squash: no file selected"));
+    }
+    let parents = jj.change_ids("parents(@)")?;
+    match parents.len() {
+        0 => write_status(jj, workspace, Some("squash: @ has no parents")),
+        1 => match jj.squash_file_into_parent("@", file) {
+            Ok(()) => run_status(jj, workspace),
+            Err(e) => write_status(jj, workspace, Some(&format!("squash {file} failed: {e}"))),
+        },
+        _ => {
+            // Find which parents have this file in their diff.
+            let mut parents_with_file: Vec<String> = parents
+                .iter()
+                .filter(|p| {
+                    jj.files_changed(p)
+                        .unwrap_or_default()
+                        .iter()
+                        .any(|f| f == file)
+                })
+                .cloned()
+                .collect();
+            if parents_with_file.len() == 1 {
+                let parent_id = parents_with_file.remove(0);
+                match jj.squash_file_into("@", &parent_id, file) {
+                    Ok(()) => run_status(jj, workspace),
+                    Err(e) => write_status(
+                        jj,
+                        workspace,
+                        Some(&format!("squash {file} into {parent_id} failed: {e}")),
+                    ),
+                }
+            } else {
+                // Ambiguous (0 or 2+ parents have the file): need user to pick.
+                let candidates = parents
+                    .iter()
+                    .map(|p| {
+                        let short = &p[..p.len().min(8)];
+                        let desc = jj.describe_get(p).unwrap_or_default();
+                        let label = if desc.trim().is_empty() {
+                            format!("{short}: (no description)")
+                        } else {
+                            format!("{short}: {}", desc.trim())
+                        };
+                        (p.clone(), label)
+                    })
+                    .collect();
+                Err(CommandError::RequiresParentSelection {
+                    file: file.to_string(),
+                    candidates,
+                })
+            }
+        }
+    }
+}
+
+/// Run `badjuju.squash.into`: squash `file` from `@` directly into the
+/// named `parent_id`. Used after the client resolves an ambiguous multi-parent
+/// case via a picker.
+pub fn run_squash_into(
+    jj: &Jj,
+    workspace: &Path,
+    file: &str,
+    parent_id: &str,
+) -> Result<String, CommandError> {
+    if file.is_empty() {
+        return write_status(jj, workspace, Some("squash: no file selected"));
+    }
+    if parent_id.is_empty() {
+        return write_status(jj, workspace, Some("squash: no parent selected"));
+    }
+    match jj.squash_file_into("@", parent_id, file) {
+        Ok(()) => run_status(jj, workspace),
+        Err(e) => write_status(
+            jj,
+            workspace,
+            Some(&format!("squash {file} into {parent_id} failed: {e}")),
         ),
     }
 }
@@ -1065,6 +1160,14 @@ pub enum CommandError {
     Jj(#[from] JjError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    /// Squash from @ into one of multiple parents is ambiguous; the client
+    /// must prompt for the target parent and retry with `badjuju.squash.into`.
+    #[error("squash requires parent selection")]
+    RequiresParentSelection {
+        file: String,
+        /// `(change_id, short_description)` pairs for all candidate parents.
+        candidates: Vec<(String, String)>,
+    },
 }
 
 // --- Cursor-form argument resolution ----------------------------------------

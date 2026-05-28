@@ -475,7 +475,52 @@ export async function activate(context: ExtensionContext) {
       await openServerResult(result as string);
     }),
     commands.registerCommand("badjuju.squash.file", async () => {
-      await runFileScopedStatusCommand("badjuju.squash");
+      const editor = window.activeTextEditor;
+      if (!editor) return;
+      if (!isStatusFile(editor.document.uri)) return;
+      const cursorArg = {
+        cursor: {
+          uri: editor.document.uri.toString(),
+          line: editor.selection.active.line,
+        },
+      };
+      let result: unknown;
+      try {
+        result = await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.squash",
+          arguments: [cursorArg],
+        });
+      } catch (e) {
+        // biome-ignore lint/suspicious/noExplicitAny: jsonrpc error data has no stable type
+        const data = (e as any)?.data;
+        if (data?.code === "RequiresParentSelection") {
+          const candidates: Array<{ id: string; label: string }> =
+            data.candidates;
+          const picked = await window.showQuickPick(
+            candidates.map((c) => ({ label: c.label, id: c.id })),
+            { placeHolder: "Select parent to squash into" },
+          );
+          if (!picked) return;
+          try {
+            const result2 = await client.sendRequest(
+              "workspace/executeCommand",
+              {
+                command: "badjuju.squash.into",
+                arguments: [{ file: data.file, parentId: picked.id }],
+              },
+            );
+            await openServerResult(result2 as string);
+          } catch (e2) {
+            window.showInformationMessage(
+              `squash.into: ${(e2 as Error).message}`,
+            );
+          }
+        } else {
+          window.showInformationMessage(`squash: ${(e as Error).message}`);
+        }
+        return;
+      }
+      await openServerResult(result as string);
     }),
     commands.registerCommand("badjuju.unsquash.file", async () => {
       await runFileScopedStatusCommand("badjuju.unsquash");
