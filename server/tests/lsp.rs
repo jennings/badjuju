@@ -1266,3 +1266,88 @@ fn lsp_folding_range_returns_ranges_for_commits_in_stack() {
         );
     }
 }
+
+#[test]
+fn lsp_folding_range_returns_nested_ranges_for_changes_sections() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    // Create a file in parent, then modify it in @.
+    std::fs::write(dir.path().join("foo.txt"), "old line\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "parent"])
+        .current_dir(dir.path())
+        .output()
+        .expect("jj describe failed");
+    Command::new("jj")
+        .args(["new"])
+        .current_dir(dir.path())
+        .output()
+        .expect("jj new failed");
+    std::fs::write(dir.path().join("foo.txt"), "new line\n").unwrap();
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+
+    assert!(
+        status_content.contains("WORKING COPY CHANGES"),
+        "expected WORKING COPY CHANGES in status:\n{status_content}"
+    );
+
+    session.did_open(&status_uri, "jujutsu", &status_content);
+
+    let resp = session.request(
+        "textDocument/foldingRange",
+        serde_json::json!({
+            "textDocument": { "uri": status_uri }
+        }),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "foldingRange returned error: {resp}"
+    );
+    let ranges = resp["result"].as_array().expect("expected array result");
+
+    // Find the section fold (starts at WORKING COPY CHANGES line).
+    let lines: Vec<&str> = status_content.lines().collect();
+    let section_line = lines
+        .iter()
+        .position(|l| l.starts_with("WORKING COPY CHANGES"))
+        .expect("expected WORKING COPY CHANGES line") as u64;
+    let file_line = lines
+        .iter()
+        .position(|l| *l == "foo.txt")
+        .expect("expected foo.txt line") as u64;
+
+    let section_fold = ranges
+        .iter()
+        .find(|r| r["startLine"].as_u64() == Some(section_line))
+        .expect("expected section fold starting at WORKING COPY CHANGES line");
+    let file_fold = ranges
+        .iter()
+        .find(|r| r["startLine"].as_u64() == Some(file_line))
+        .expect("expected file fold starting at foo.txt line");
+
+    // File fold must be contained within section fold.
+    assert!(
+        file_fold["startLine"].as_u64() >= section_fold["startLine"].as_u64()
+            && file_fold["endLine"].as_u64() <= section_fold["endLine"].as_u64(),
+        "file fold must be inside section fold: file={file_fold} section={section_fold}"
+    );
+
+    // There must be a hunk fold (starts at @@) contained within the file fold.
+    let hunk_fold = ranges.iter().find(|r| {
+        let sl = r["startLine"].as_u64().unwrap_or(0);
+        lines.get(sl as usize).is_some_and(|l| l.starts_with("@@"))
+    });
+    let hunk_fold = hunk_fold.expect("expected a hunk fold starting at @@");
+    assert!(
+        hunk_fold["startLine"].as_u64() >= file_fold["startLine"].as_u64()
+            && hunk_fold["endLine"].as_u64() <= file_fold["endLine"].as_u64(),
+        "hunk fold must be inside file fold: hunk={hunk_fold} file={file_fold}"
+    );
+}

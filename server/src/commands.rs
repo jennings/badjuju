@@ -909,12 +909,11 @@ pub fn on_log_save(jj: &Jj, workspace: &Path, content: &str) -> Result<String, C
     run_log(jj, workspace, &revset)
 }
 
-/// Return folding ranges for the STACK section of a status.jujutsu buffer.
+/// Return folding ranges for a status.jujutsu buffer.
 ///
-/// Each commit's stat file list is foldable: the fold starts at the commit
-/// header line and ends at the last non-empty line before the next commit
-/// header or section break. Callers (e.g. the LSP server) use these to let
-/// editors collapse per-commit file lists.
+/// Emits three levels of nested ranges for CHANGES sections (section ⊃ file ⊃ hunk)
+/// plus one range per commit in the STACK section. All ranges use
+/// `FoldingRangeKind::Region`.
 pub fn status_folding_ranges(content: &str) -> Vec<FoldingRange> {
     let lines: Vec<&str> = content.lines().collect();
     let mut ranges = Vec::new();
@@ -923,6 +922,10 @@ pub fn status_folding_ranges(content: &str) -> Vec<FoldingRange> {
         return ranges;
     };
 
+    // --- CHANGES section folds (before STACK) ---
+    changes_folding_ranges(&lines, stack_start, &mut ranges);
+
+    // --- STACK per-commit folds ---
     let stack_end = lines[stack_start..]
         .iter()
         .position(|l| l.starts_with("COMMAND REFERENCE:"))
@@ -945,14 +948,7 @@ pub fn status_folding_ranges(content: &str) -> Vec<FoldingRange> {
             if let (Some(header), Some(last)) = (current_header, last_nonempty)
                 && last > header
             {
-                ranges.push(FoldingRange {
-                    start_line: header as u32,
-                    end_line: last as u32,
-                    start_character: None,
-                    end_character: None,
-                    kind: None,
-                    collapsed_text: None,
-                });
+                ranges.push(make_region(header, last));
             }
             current_header = if is_commit { Some(i) } else { None };
             last_nonempty = None;
@@ -964,17 +960,100 @@ pub fn status_folding_ranges(content: &str) -> Vec<FoldingRange> {
     if let (Some(header), Some(last)) = (current_header, last_nonempty)
         && last > header
     {
-        ranges.push(FoldingRange {
-            start_line: header as u32,
-            end_line: last as u32,
-            start_character: None,
-            end_character: None,
-            kind: None,
-            collapsed_text: None,
-        });
+        ranges.push(make_region(header, last));
     }
 
     ranges
+}
+
+fn make_region(start: usize, end: usize) -> FoldingRange {
+    FoldingRange {
+        start_line: start as u32,
+        end_line: end as u32,
+        start_character: None,
+        end_character: None,
+        kind: Some(tower_lsp::lsp_types::FoldingRangeKind::Region),
+        collapsed_text: None,
+    }
+}
+
+/// Emit nested folding ranges for WORKING COPY CHANGES / PARENT CHANGES sections
+/// that appear before the STACK line. Three levels: section ⊃ file ⊃ hunk.
+fn changes_folding_ranges(lines: &[&str], stack_start: usize, ranges: &mut Vec<FoldingRange>) {
+    let mut section_start: Option<usize> = None;
+    let mut file_start: Option<usize> = None;
+    let mut hunk_start: Option<usize> = None;
+    let mut last_hunk_content: Option<usize> = None;
+    let mut last_file_content: Option<usize> = None;
+    let mut last_section_content: Option<usize> = None;
+
+    let flush_hunk =
+        |hunk_start: &mut Option<usize>, last_hunk_content: &mut Option<usize>, ranges: &mut Vec<FoldingRange>| {
+            if let (Some(hs), Some(hc)) = (*hunk_start, *last_hunk_content) {
+                if hc > hs {
+                    ranges.push(make_region(hs, hc));
+                }
+            }
+            *hunk_start = None;
+            *last_hunk_content = None;
+        };
+
+    let flush_file =
+        |file_start: &mut Option<usize>, last_file_content: &mut Option<usize>, ranges: &mut Vec<FoldingRange>| {
+            if let (Some(fs), Some(fc)) = (*file_start, *last_file_content) {
+                if fc > fs {
+                    ranges.push(make_region(fs, fc));
+                }
+            }
+            *file_start = None;
+            *last_file_content = None;
+        };
+
+    let flush_section =
+        |section_start: &mut Option<usize>, last_section_content: &mut Option<usize>, ranges: &mut Vec<FoldingRange>| {
+            if let (Some(ss), Some(sc)) = (*section_start, *last_section_content) {
+                if sc > ss {
+                    ranges.push(make_region(ss, sc));
+                }
+            }
+            *section_start = None;
+            *last_section_content = None;
+        };
+
+    for (i, &line) in lines.iter().enumerate().take(stack_start) {
+        if line.starts_with("WORKING COPY CHANGES (") || line.starts_with("PARENT CHANGES (") {
+            flush_hunk(&mut hunk_start, &mut last_hunk_content, ranges);
+            flush_file(&mut file_start, &mut last_file_content, ranges);
+            flush_section(&mut section_start, &mut last_section_content, ranges);
+            section_start = Some(i);
+        } else if line.is_empty() {
+            flush_hunk(&mut hunk_start, &mut last_hunk_content, ranges);
+            flush_file(&mut file_start, &mut last_file_content, ranges);
+            flush_section(&mut section_start, &mut last_section_content, ranges);
+        } else if line.starts_with("@@") {
+            flush_hunk(&mut hunk_start, &mut last_hunk_content, ranges);
+            hunk_start = Some(i);
+            last_file_content = Some(i);
+            last_section_content = Some(i);
+        } else if hunk_start.is_some()
+            && (line.starts_with('+') || line.starts_with('-') || line.starts_with(' '))
+        {
+            last_hunk_content = Some(i);
+            last_file_content = Some(i);
+            last_section_content = Some(i);
+        } else if section_start.is_some() {
+            // Plain flush-left file path line inside a CHANGES section.
+            flush_hunk(&mut hunk_start, &mut last_hunk_content, ranges);
+            flush_file(&mut file_start, &mut last_file_content, ranges);
+            file_start = Some(i);
+            last_section_content = Some(i);
+        }
+    }
+
+    // Flush anything not yet closed when STACK: is reached.
+    flush_hunk(&mut hunk_start, &mut last_hunk_content, ranges);
+    flush_file(&mut file_start, &mut last_file_content, ranges);
+    flush_section(&mut section_start, &mut last_section_content, ranges);
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -2807,5 +2886,193 @@ mod tests {
             !hunks.contains("-content") && !hunks.contains("+content"),
             "rename-only should not show content additions/removals: {hunks}"
         );
+    }
+
+    // Helper: build a synthetic status buffer with one CHANGES section and one STACK commit.
+    fn make_status_with_changes(section_header: &str, file: &str, hunks: &str) -> String {
+        let stack = concat!(
+            "STACK: ancestors(@, 2)\n\n",
+            "○  abcdefgh some commit\n",
+            "   M src/a.rs\n",
+            "\nCOMMAND REFERENCE:\nkeys"
+        );
+        if hunks.is_empty() {
+            format!("@  : (empty)\n@- : (empty)\n\n{section_header}\n{file}\n\n{stack}")
+        } else {
+            format!(
+                "@  : (empty)\n@- : (empty)\n\n{section_header}\n{file}\n{hunks}\n\n{stack}"
+            )
+        }
+    }
+
+    #[test]
+    fn status_folding_ranges_section_fold_spans_heading_to_last_hunk_line() {
+        let content = make_status_with_changes(
+            "WORKING COPY CHANGES (abc12345):",
+            "foo.txt",
+            "@@ -1,1 +1,1 @@\n-old\n+new",
+        );
+        let ranges = status_folding_ranges(&content);
+        let lines: Vec<&str> = content.lines().collect();
+        let section_line = lines
+            .iter()
+            .position(|l| l.starts_with("WORKING COPY CHANGES"))
+            .unwrap() as u32;
+        let section_fold = ranges
+            .iter()
+            .find(|r| r.start_line == section_line)
+            .expect("expected section fold");
+        let last_plus_line = lines
+            .iter()
+            .rposition(|l| l.starts_with('+') || l.starts_with('-'))
+            .unwrap() as u32;
+        assert_eq!(
+            section_fold.end_line, last_plus_line,
+            "section fold should end at last hunk content line"
+        );
+    }
+
+    #[test]
+    fn status_folding_ranges_file_fold_contained_in_section_fold() {
+        let content = make_status_with_changes(
+            "WORKING COPY CHANGES (abc12345):",
+            "foo.txt",
+            "@@ -1,1 +1,1 @@\n-old\n+new",
+        );
+        let ranges = status_folding_ranges(&content);
+        let lines: Vec<&str> = content.lines().collect();
+        let section_line = lines
+            .iter()
+            .position(|l| l.starts_with("WORKING COPY CHANGES"))
+            .unwrap() as u32;
+        let file_line = lines.iter().position(|l| *l == "foo.txt").unwrap() as u32;
+        let section_fold = ranges
+            .iter()
+            .find(|r| r.start_line == section_line)
+            .expect("section fold");
+        let file_fold = ranges
+            .iter()
+            .find(|r| r.start_line == file_line)
+            .expect("file fold");
+        assert!(
+            file_fold.start_line >= section_fold.start_line
+                && file_fold.end_line <= section_fold.end_line,
+            "file fold must be contained in section fold: file={file_fold:?} section={section_fold:?}"
+        );
+    }
+
+    #[test]
+    fn status_folding_ranges_hunk_fold_contained_in_file_fold() {
+        let content = make_status_with_changes(
+            "WORKING COPY CHANGES (abc12345):",
+            "foo.txt",
+            "@@ -1,1 +1,1 @@\n-old\n+new",
+        );
+        let ranges = status_folding_ranges(&content);
+        let lines: Vec<&str> = content.lines().collect();
+        let file_line = lines.iter().position(|l| *l == "foo.txt").unwrap() as u32;
+        let hunk_line = lines.iter().position(|l| l.starts_with("@@")).unwrap() as u32;
+        let file_fold = ranges
+            .iter()
+            .find(|r| r.start_line == file_line)
+            .expect("file fold");
+        let hunk_fold = ranges
+            .iter()
+            .find(|r| r.start_line == hunk_line)
+            .expect("hunk fold");
+        assert!(
+            hunk_fold.start_line >= file_fold.start_line
+                && hunk_fold.end_line <= file_fold.end_line,
+            "hunk fold must be inside file fold: hunk={hunk_fold:?} file={file_fold:?}"
+        );
+    }
+
+    #[test]
+    fn status_folding_ranges_multi_file_multi_hunk_emits_expected_count() {
+        // 2 files, 1 hunk each → 1 section + 2 file + 2 hunk + 1 stack = 6 ranges
+        let content = concat!(
+            "@  : (empty)\n@- : (empty)\n\n",
+            "WORKING COPY CHANGES (abc12345):\n",
+            "alpha.txt\n",
+            "@@ -1,1 +1,1 @@\n",
+            "-aaa\n",
+            "+AAA\n",
+            "beta.txt\n",
+            "@@ -1,1 +1,1 @@\n",
+            "-bbb\n",
+            "+BBB\n",
+            "\n",
+            "STACK: ancestors(@, 2)\n\n",
+            "○  abcdefgh commit\n",
+            "   M src/a.rs\n",
+            "\nCOMMAND REFERENCE:\nkeys",
+        );
+        let ranges = status_folding_ranges(content);
+        assert_eq!(
+            ranges.len(),
+            6,
+            "expected 6 ranges (1 section + 2 file + 2 hunk + 1 stack): {ranges:?}"
+        );
+    }
+
+    #[test]
+    fn status_folding_ranges_stack_folds_still_present_with_changes() {
+        let content = concat!(
+            "@  : (empty)\n@- : (empty)\n\n",
+            "WORKING COPY CHANGES (abc12345):\n",
+            "foo.txt\n",
+            "@@ -1,1 +1,1 @@\n",
+            "-old\n",
+            "+new\n",
+            "\n",
+            "STACK: ancestors(@, 2)\n\n",
+            "○  abcdefgh first commit\n",
+            "│  M src/a.rs\n",
+            "@  qrstuvwx second commit\n",
+            "   M src/b.rs\n",
+            "\nCOMMAND REFERENCE:\nkeys",
+        );
+        let ranges = status_folding_ranges(content);
+        // 1 section + 1 file + 1 hunk + 2 stack = 5
+        assert_eq!(
+            ranges.len(),
+            5,
+            "expected 5 ranges with stack folds: {ranges:?}"
+        );
+        // The two stack commit folds should be the last two ranges emitted.
+        let stack_folds: Vec<_> = ranges
+            .iter()
+            .filter(|r| {
+                let lines: Vec<&str> = content.lines().collect();
+                let line = lines.get(r.start_line as usize).unwrap_or(&"");
+                crate::cursor::match_commit_header(line).is_some()
+            })
+            .collect();
+        assert_eq!(stack_folds.len(), 2, "expected 2 stack folds: {ranges:?}");
+    }
+
+    #[test]
+    fn status_folding_ranges_all_have_region_kind() {
+        let content = concat!(
+            "@  : (empty)\n@- : (empty)\n\n",
+            "WORKING COPY CHANGES (abc12345):\n",
+            "foo.txt\n",
+            "@@ -1,1 +1,1 @@\n",
+            "-old\n",
+            "+new\n",
+            "\n",
+            "STACK: ancestors(@, 2)\n\n",
+            "○  abcdefgh commit\n",
+            "   M src/a.rs\n",
+            "\nCOMMAND REFERENCE:\nkeys",
+        );
+        let ranges = status_folding_ranges(content);
+        for r in &ranges {
+            assert_eq!(
+                r.kind,
+                Some(tower_lsp::lsp_types::FoldingRangeKind::Region),
+                "all ranges must have kind=Region: {r:?}"
+            );
+        }
     }
 }
