@@ -118,7 +118,6 @@ hx "$(badjuju status)"
 * https://www.rust-lang.org/tools/install[Rust toolchain] (edition 2024)
 * https://pnpm.io/installation[pnpm] 10+
 * https://github.com/apenwarr/redo[redo] (apenwarr/redo — `brew install redo` on macOS)
-* https://facebook.github.io/watchman/[Watchman] (used by the server for file watching)
 
 == Building
 

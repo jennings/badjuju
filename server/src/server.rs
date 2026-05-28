@@ -156,9 +156,7 @@ impl State {
         self.self_caused_ops.insert(op_id, Instant::now());
     }
 
-    // Called by the op-head watcher (bad-juju-zg1z, not yet implemented).
-    #[allow(dead_code)]
-    pub(crate) fn take_if_self_caused(&mut self, op_id: &str) -> bool {
+    fn take_if_self_caused(&mut self, op_id: &str) -> bool {
         let cutoff = Instant::now() - Duration::from_secs(10);
         self.self_caused_ops.retain(|_, t| *t > cutoff);
         self.self_caused_ops.remove(op_id).is_some()
@@ -169,6 +167,7 @@ impl State {
 pub struct Backend {
     client: Client,
     state: Arc<RwLock<State>>,
+    shutdown: Arc<tokio::sync::Notify>,
 }
 
 impl Backend {
@@ -176,6 +175,7 @@ impl Backend {
         Self {
             client,
             state: Arc::new(RwLock::new(State::default())),
+            shutdown: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
@@ -250,6 +250,124 @@ impl Backend {
 
         Ok(TextDocumentContentResult { text })
     }
+}
+
+/// Spawns a debounced watcher on `.jj/repo/op_heads/heads/`. On each external
+/// op-head change (i.e. not caused by bad-juju itself), refreshes all open
+/// status, log, and change-diff buffers.
+fn spawn_op_head_watcher(
+    heads_dir: PathBuf,
+    state: Arc<RwLock<State>>,
+    client: Client,
+    shutdown: Arc<tokio::sync::Notify>,
+) {
+    use notify_debouncer_mini::notify::RecursiveMode;
+    use notify_debouncer_mini::{DebounceEventResult, new_debouncer};
+
+    let watcher_fired = Arc::new(tokio::sync::Notify::new());
+    let watcher_fired2 = Arc::clone(&watcher_fired);
+
+    let mut debouncer = match new_debouncer(
+        Duration::from_millis(500),
+        move |res: DebounceEventResult| {
+            if res.is_ok() {
+                watcher_fired2.notify_one();
+            }
+        },
+    ) {
+        Ok(d) => d,
+        Err(e) => {
+            warn!("op-head watcher: failed to create debouncer: {e}");
+            return;
+        }
+    };
+
+    if let Err(e) = debouncer
+        .watcher()
+        .watch(&heads_dir, RecursiveMode::NonRecursive)
+    {
+        warn!(
+            "op-head watcher: failed to watch {}: {e}",
+            heads_dir.display()
+        );
+        return;
+    }
+
+    // Keep the debouncer alive in a thread; exit when the async task signals done.
+    let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        let _debouncer = debouncer;
+        let _ = stop_rx.recv();
+    });
+
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = watcher_fired.notified() => {
+                    let (jj, workspace) = {
+                        let s = state.read().await;
+                        match (s.jj(), s.workspace_root.clone()) {
+                            (Some(jj), Some(root)) => (jj, root),
+                            _ => continue,
+                        }
+                    };
+                    let op_id = match jj.op_head_id() {
+                        Ok(id) => id,
+                        Err(_) => continue,
+                    };
+                    if state.write().await.take_if_self_caused(&op_id) {
+                        continue;
+                    }
+                    let (open_status_uri, open_log_uri) = {
+                        let s = state.read().await;
+                        (s.open_status_uri.clone(), s.open_log_uri.clone())
+                    };
+                    if open_status_uri.is_some()
+                        && let Err(e) = commands::run_status(&jj, &workspace)
+                    {
+                        client
+                            .log_message(
+                                MessageType::WARNING,
+                                format!("watcher: refresh status failed: {e}"),
+                            )
+                            .await;
+                    }
+                    if open_log_uri.is_some()
+                        && let Err(e) =
+                            commands::regenerate_log_if_present(&jj, &workspace)
+                    {
+                        client
+                            .log_message(
+                                MessageType::WARNING,
+                                format!("watcher: refresh log failed: {e}"),
+                            )
+                            .await;
+                    }
+                    let (open_diffs, virtual_diffs_enabled) = {
+                        let s = state.read().await;
+                        (s.open_diffs.clone(), s.virtual_diffs_enabled)
+                    };
+                    if virtual_diffs_enabled {
+                        for (uri, target) in &open_diffs {
+                            if matches!(target, DiffTarget::Change(_)) {
+                                client
+                                    .send_notification::<WorkspaceTextDocumentContentRefresh>(
+                                        TextDocumentContentRefreshParams { uri: uri.clone() },
+                                    )
+                                    .await;
+                            }
+                        }
+                    } else {
+                        commands::refresh_change_diffs(&jj, &workspace, &open_diffs);
+                    }
+                }
+                _ = shutdown.notified() => {
+                    let _ = stop_tx.send(());
+                    break;
+                }
+            }
+        }
+    });
 }
 
 fn lsp_err(msg: impl ToString) -> Error {
@@ -452,6 +570,15 @@ impl LanguageServer for Backend {
         if let Some(ref root) = workspace_root {
             info!(root = %root.display(), "found jj workspace");
             commands::sweep_stale_diff_files(root);
+            let heads_dir = root.join(".jj/repo/op_heads/heads");
+            if heads_dir.exists() {
+                spawn_op_head_watcher(
+                    heads_dir,
+                    Arc::clone(&self.state),
+                    self.client.clone(),
+                    Arc::clone(&self.shutdown),
+                );
+            }
         } else {
             warn!("no jj workspace found; commands will return errors until a workspace is opened");
         }
@@ -667,6 +794,7 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
+        self.shutdown.notify_waiters();
         Ok(())
     }
 
