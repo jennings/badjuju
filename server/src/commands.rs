@@ -161,6 +161,56 @@ fn header_line_for(jj: &Jj, rev: &str, marker: &str) -> Result<String, CommandEr
     }
 }
 
+/// Build the WORKING COPY CHANGES / PARENT CHANGES sections for the status buffer.
+///
+/// Returns an empty string when no revision has any changed files. Each
+/// section is emitted only when the revision has at least one changed file.
+fn changes_sections(jj: &Jj) -> Result<String, CommandError> {
+    let at_id = jj.change_id_of("@")?;
+    let at_short = &at_id[..at_id.len().min(8)];
+    let at_files = jj.files_changed("@")?;
+
+    let parent_ids = jj.change_ids("parents(@)")?;
+    let parents_with_files: Vec<(String, Vec<String>)> = parent_ids
+        .into_iter()
+        .map(|id| {
+            let files = jj.files_changed(&id)?;
+            Ok((id, files))
+        })
+        .collect::<Result<Vec<_>, CommandError>>()?;
+
+    let has_any = !at_files.is_empty() || parents_with_files.iter().any(|(_, f)| !f.is_empty());
+    if !has_any {
+        return Ok(String::new());
+    }
+
+    let mut sections = Vec::new();
+
+    if !at_files.is_empty() {
+        let mut s = format!("WORKING COPY CHANGES ({}):", at_short);
+        for f in &at_files {
+            s.push('\n');
+            s.push_str(f);
+        }
+        sections.push(s);
+    }
+
+    for (id, files) in &parents_with_files {
+        if files.is_empty() {
+            continue;
+        }
+        let short = &id[..id.len().min(8)];
+        let mut s = format!("PARENT CHANGES ({}):", short);
+        for f in files {
+            s.push('\n');
+            s.push_str(f);
+        }
+        sections.push(s);
+    }
+
+    Ok(sections.join("\n\n"))
+}
+
 /// Write status.jujutsu, optionally prepending a MESSAGE: block. Returns the URI.
 fn write_status(jj: &Jj, workspace: &Path, message: Option<&str>) -> Result<String, CommandError> {
     let at_header = header_line_for(jj, "@", "@  ")?;
@@ -176,6 +226,7 @@ fn write_status(jj: &Jj, workspace: &Path, message: Option<&str>) -> Result<Stri
         .collect::<Vec<_>>()
         .join("\n");
 
+    let changes = changes_sections(jj)?;
     let stack = jj.log_with_stat(STATUS_REVSET, true)?;
 
     let prelude = match message {
@@ -183,14 +234,26 @@ fn write_status(jj: &Jj, workspace: &Path, message: Option<&str>) -> Result<Stri
         None => String::new(),
     };
 
-    let content = format!(
-        "{}{}\n\nSTACK: {}\n\n{}\n\n{}",
-        prelude,
-        header_block,
-        STATUS_REVSET,
-        stack.trim_end(),
-        jj.command_reference().status(),
-    );
+    let content = if changes.is_empty() {
+        format!(
+            "{}{}\n\nSTACK: {}\n\n{}\n\n{}",
+            prelude,
+            header_block,
+            STATUS_REVSET,
+            stack.trim_end(),
+            jj.command_reference().status(),
+        )
+    } else {
+        format!(
+            "{}{}\n\n{}\n\nSTACK: {}\n\n{}\n\n{}",
+            prelude,
+            header_block,
+            changes,
+            STATUS_REVSET,
+            stack.trim_end(),
+            jj.command_reference().status(),
+        )
+    };
 
     let dir = badjuju_dir(workspace)?;
     let path = dir.join("status.jujutsu");
@@ -1868,10 +1931,18 @@ mod tests {
         let uri = run_squash(&jj, dir.path(), "readme.txt", "").expect("run_squash failed");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(content.starts_with("@  :"));
-        let status_section = content.split("STACK:").next().unwrap_or("");
+        // readme.txt was squashed away from @, so it must not appear under
+        // WORKING COPY CHANGES (it may legitimately appear under PARENT CHANGES).
+        let at_changes_section = content
+            .split("PARENT CHANGES")
+            .next()
+            .unwrap_or("")
+            .split("STACK:")
+            .next()
+            .unwrap_or("");
         assert!(
-            !status_section.contains("readme.txt"),
-            "expected readme.txt absent from working-copy STATUS section:\n{status_section}"
+            !at_changes_section.contains("readme.txt"),
+            "expected readme.txt absent from @ working-copy section:\n{at_changes_section}"
         );
     }
 
@@ -2486,6 +2557,125 @@ mod tests {
         assert!(
             second.start_line > first.end_line,
             "ranges must not overlap: {first:?} vs {second:?}"
+        );
+    }
+
+    #[test]
+    fn write_status_includes_working_copy_changes_section() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("alpha.txt"), "a\n").unwrap();
+        std::fs::write(dir.path().join("beta.txt"), "b\n").unwrap();
+        let uri = run_status(&jj, dir.path()).expect("run_status failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.contains("WORKING COPY CHANGES ("),
+            "expected WORKING COPY CHANGES section:\n{content}"
+        );
+        assert!(
+            content.contains("alpha.txt"),
+            "expected alpha.txt in WORKING COPY CHANGES:\n{content}"
+        );
+        assert!(
+            content.contains("beta.txt"),
+            "expected beta.txt in WORKING COPY CHANGES:\n{content}"
+        );
+    }
+
+    #[test]
+    fn write_status_omits_changes_sections_when_clean() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        // Fresh repo: @ has no changes, parent (root) has no changes.
+        let uri = run_status(&jj, dir.path()).expect("run_status failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            !content.contains("WORKING COPY CHANGES"),
+            "expected no WORKING COPY CHANGES when clean:\n{content}"
+        );
+        assert!(
+            !content.contains("PARENT CHANGES"),
+            "expected no PARENT CHANGES when clean:\n{content}"
+        );
+    }
+
+    #[test]
+    fn write_status_emits_parent_changes_section() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        // Write a file in parent, then create an empty child.
+        std::fs::write(dir.path().join("baz.txt"), "baz\n").unwrap();
+        jj.describe_set("@", "parent commit").unwrap();
+        jj.new_change("").unwrap();
+        // @ has no changes; @- has baz.txt.
+        let uri = run_status(&jj, dir.path()).expect("run_status failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        assert!(
+            content.contains("PARENT CHANGES ("),
+            "expected PARENT CHANGES section:\n{content}"
+        );
+        assert!(
+            content.contains("baz.txt"),
+            "expected baz.txt in PARENT CHANGES:\n{content}"
+        );
+        assert!(
+            !content.contains("WORKING COPY CHANGES"),
+            "expected no WORKING COPY CHANGES for empty @:\n{content}"
+        );
+    }
+
+    #[test]
+    fn write_status_merge_emits_two_parent_changes_sections() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        // Create two parents each with a file.
+        std::fs::write(dir.path().join("from-a.txt"), "a\n").unwrap();
+        jj.describe_set("@", "branch-a").unwrap();
+        let a_id = jj.change_ids("@").unwrap().first().cloned().unwrap();
+        jj.new_change("").unwrap();
+        std::fs::write(dir.path().join("from-b.txt"), "b\n").unwrap();
+        jj.describe_set("@", "branch-b").unwrap();
+        let b_id = jj.change_ids("@").unwrap().first().cloned().unwrap();
+        // Merge.
+        std::process::Command::new("jj")
+            .args(["new", &a_id, &b_id])
+            .current_dir(dir.path())
+            .output()
+            .expect("jj new (merge) failed");
+        // @ is empty merge commit; it has two parents.
+        let uri = run_status(&jj, dir.path()).expect("run_status failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        let parent_sections: Vec<_> = content
+            .lines()
+            .filter(|l| l.starts_with("PARENT CHANGES ("))
+            .collect();
+        assert_eq!(
+            parent_sections.len(),
+            2,
+            "expected two PARENT CHANGES sections for a merge; got:\n{content}"
+        );
+        assert!(
+            content.contains("from-a.txt"),
+            "expected from-a.txt:\n{content}"
+        );
+        assert!(
+            content.contains("from-b.txt"),
+            "expected from-b.txt:\n{content}"
+        );
+    }
+
+    #[test]
+    fn write_status_changes_appear_before_stack() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("file.txt"), "hello\n").unwrap();
+        let uri = run_status(&jj, dir.path()).expect("run_status failed");
+        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
+        let changes_pos = content.find("WORKING COPY CHANGES (").unwrap();
+        let stack_pos = content.find("STACK:").unwrap();
+        assert!(
+            changes_pos < stack_pos,
+            "expected WORKING COPY CHANGES before STACK:\n{content}"
         );
     }
 
