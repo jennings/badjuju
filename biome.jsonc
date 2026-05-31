@@ -9,7 +9,6 @@
     "ignoreUnknown": false,
     "includes": [
       "**",
-      "!.beads/**",
       "!clients/neovim/tree-sitter-jujutsu/src/**"
     ]
   },

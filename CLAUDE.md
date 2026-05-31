@@ -2,54 +2,63 @@
 
 This file provides instructions and context for AI coding agents working on this project.
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
-## Beads Issue Tracker
+## Development process
 
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
+- This project uses GitHub issues as its ticket tracker.
+- Always create a GitHub issue for a unit of work if one does not exist yet.
+- Do not use TaskCreate.
 
-### Quick Reference
+Use the `gh` CLI to follow this process for working:
 
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
-```
+- Read tickets that are:
+  - Open
+  - Unblocked (query contains `-is:blocked`)
+  - Not labeled "in progress" or "implemented"
 
-### Rules
+- Choose a ticket to work on. Prefer higher priority tickets (`P1` is highest
+  priority, `P4` is lowest)
 
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+- Claim the ticket by adding the "in progress" label
 
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
+- Implement the ticket as described in the title and description.
 
-## Session Completion
+- Ensure all code compiles and all tests pass before finishing a unit of work.
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+- Commit message example:
 
-**MANDATORY WORKFLOW:**
+  ```
+  feat(area): Short descriptive title here in imperative voice
 
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+  Write a longer description here of the changes that were made and why.
+  Include lists, diagrams, tables, etc. if they help describe why this change
+  was made.
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-<!-- END BEADS INTEGRATION -->
+  Include as the last line either "Resolves #123" if this completely resolves
+  the ticket, or "Progresses: #123" if it doesn't, like this:
 
+  Resolves #123
+  ```
+
+- When the ticket is completely implemented:
+  - Add the "implemented" label and remove "in progress" when the ticket is completed
+
+- DO NOT close the ticket: Landing the commit in the `main` branch will close
+  the ticket automatically.
+
+## Planning process
+
+- Plan an implementation. Break the implementation into tickets of a reasonable
+  size that can be implemented in one commit.
+- Each ticket should be a reasonable size to review once implemented.
+- When the plan is accepted, write the tickets into the GitHub issues tracker. DO NOT begin implementing.
+- Add dependencies to tickets to indicate which tickets block others.
+  - Use the `gh api` command to set dependencies if there is no first-class feature.
+    Documentation: https://docs.github.com/en/rest/issues/issue-dependencies?apiVersion=2026-03-10
+- Assign priority labels:
+  - `P1` for bugs or critical features
+  - `P2` by default
+  - `P3` for "nice to have" features that will probably get implemented
+  - `P4` for "maybe some day" features
 
 ## Build & Test
 
@@ -75,7 +84,10 @@ redo check
 
 ## Testing
 
-**Run tests after every unit of work.** Before closing a beads issue or committing, you MUST run `redo test` and `redo check`, and confirm all tests pass with no warnings. Never close an issue or commit with a failing or skipped test.
+**Run tests after every unit of work.** Before labeling an issue "implemented"
+or committing, you MUST run `redo test` and `redo check`, and confirm all tests
+pass with no warnings. Never close an issue or commit with a failing or skipped
+test.
 
 ### Rust testing conventions
 
@@ -150,4 +162,4 @@ The server binary path defaults to `jj` on PATH but can be overridden via `initi
 - **Rust edition**: 2024. Async runtime is `tokio` (`rt-multi-thread`, `macros`, `io-std` features).
 - **Error handling**: Return structured errors (`JjError`, `CommandError`) from library functions. Convert to `tower_lsp::jsonrpc::Error` only at the `execute_command` / `did_save` boundary.
 - **No mocking**: Tests call real subprocesses. A test that mocks `jj` is worse than no test.
-- **One change per ticket**: Each beads issue gets its own `jj` commit. Create with `jj new -m "feat(...): ..."` before writing code.
+- **One change per ticket**: Each GitHub issue gets its own `jj` commit. Create with `jj new -m "feat(...): ..."` before writing code. Use `jj desc ...` to update the description of an existing commit to describe motivation and other information that is not apparenty by reading the diff.
