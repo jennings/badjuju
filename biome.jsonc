@@ -7,10 +7,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": [
-      "**",
-      "!clients/neovim/tree-sitter-jujutsu/src/**"
-    ]
+    "includes": ["**", "!clients/neovim/tree-sitter-jujutsu/src/**"]
   },
   "formatter": {
     "enabled": true,
