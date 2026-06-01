@@ -52,4 +52,17 @@ describe('ftplugin/jujutsu.lua', function()
     make_buffer('.jj/badjuju/status.jujutsu')
     assert.is_true(vim.bo.autoread)
   end)
+
+  it('sets LSP foldexpr on status.jujutsu', function()
+    make_buffer('.jj/badjuju/status.jujutsu')
+    assert.are.equal('expr', vim.wo.foldmethod)
+    assert.are.equal('v:lua.vim.lsp.foldexpr()', vim.wo.foldexpr)
+  end)
+
+  it('sets custom foldtext on status.jujutsu', function()
+    make_buffer('.jj/badjuju/status.jujutsu')
+    assert.are.equal('v:lua._badjuju_foldtext()', vim.wo.foldtext)
+    assert.are.equal('function', type(_G._badjuju_foldtext))
+  end)
+
 end)

@@ -36,8 +36,28 @@ if name:match('/%.jj/badjuju/status%.jujutsu$') then
   vim.wo.foldmethod = 'expr'
   vim.wo.foldexpr = 'v:lua.vim.lsp.foldexpr()'
   vim.wo.foldlevel = 0
+  -- Show only the first line of each fold with no line-count prefix.
+  _G._badjuju_foldtext = function()
+    return vim.api.nvim_buf_get_lines(0, vim.v.foldstart - 1, vim.v.foldstart, false)[1]
+  end
+  vim.wo.foldtext = 'v:lua._badjuju_foldtext()'
+  local buf = vim.api.nvim_get_current_buf()
+  local win = vim.api.nvim_get_current_win()
   vim.defer_fn(function()
-    pcall(vim.cmd, 'normal! zM')
+    if not vim.api.nvim_buf_is_valid(buf) or not vim.api.nvim_win_is_valid(win) then
+      return
+    end
+    vim.api.nvim_win_call(win, function()
+      pcall(vim.cmd, 'normal! zM')
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      for i, line in ipairs(lines) do
+        if line:match('^WORKING COPY CHANGES') or line:match('^PARENT CHANGES') then
+          vim.api.nvim_win_set_cursor(win, {i, 0})
+          pcall(vim.cmd, 'normal! zo')
+        end
+      end
+      vim.api.nvim_win_set_cursor(win, {1, 0})
+    end)
   end, 100)
 end
 
