@@ -202,28 +202,50 @@ impl Backend {
                 }
             }
         } else {
-            commands::refresh_change_diffs(jj, workspace, &open_diffs);
+            let refreshed = commands::refresh_change_diffs(jj, workspace, &open_diffs);
+            for (uri, content) in refreshed {
+                apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
+            }
         }
     }
 
     pub async fn refresh_open_artifacts(&self, jj: &Jj, workspace: &std::path::Path) {
-        let (open_status_uri, open_log_uri) = {
+        let (open_status_uri, open_log_uri, virtual_diffs_enabled) = {
             let state = self.state.read().await;
-            (state.open_status_uri.clone(), state.open_log_uri.clone())
+            (
+                state.open_status_uri.clone(),
+                state.open_log_uri.clone(),
+                state.virtual_diffs_enabled,
+            )
         };
-        if open_status_uri.is_some()
-            && let Err(e) = commands::run_status(jj, workspace)
-        {
-            self.client
-                .log_message(MessageType::WARNING, format!("refresh status failed: {e}"))
-                .await;
+        if open_status_uri.is_some() {
+            match commands::run_status_with_content(jj, workspace) {
+                Ok((uri, content)) => {
+                    if !virtual_diffs_enabled {
+                        apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
+                    }
+                }
+                Err(e) => {
+                    self.client
+                        .log_message(MessageType::WARNING, format!("refresh status failed: {e}"))
+                        .await;
+                }
+            }
         }
-        if open_log_uri.is_some()
-            && let Err(e) = commands::regenerate_log_if_present(jj, workspace)
-        {
-            self.client
-                .log_message(MessageType::WARNING, format!("refresh log failed: {e}"))
-                .await;
+        if open_log_uri.is_some() {
+            match commands::regenerate_log_if_present_with_content(jj, workspace) {
+                Ok(Some((uri, content))) => {
+                    if !virtual_diffs_enabled {
+                        apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    self.client
+                        .log_message(MessageType::WARNING, format!("refresh log failed: {e}"))
+                        .await;
+                }
+            }
         }
         self.refresh_open_diffs(jj, workspace).await;
     }
@@ -251,6 +273,50 @@ impl Backend {
 
         Ok(TextDocumentContentResult { text })
     }
+}
+
+/// Send a `workspace/applyEdit` with full-document replacement to the client
+/// when `uri` is currently open. This is the file-based fallback for clients
+/// (notably Helix) that don't auto-reload buffers when the underlying file
+/// changes on disk and don't support `workspace/textDocumentContent`.
+///
+/// `describe.jujutsu` URIs are skipped as defense in depth — the refresh
+/// callers never write describe buffers, but it would be wrong to overwrite
+/// the user's in-progress edits if they did.
+async fn apply_edit_if_open(client: &Client, state: &Arc<RwLock<State>>, uri: &str, content: &str) {
+    if uri.ends_with("/describe.jujutsu") {
+        return;
+    }
+    let is_open = state.read().await.documents.contains_key(uri);
+    if !is_open {
+        return;
+    }
+    let Ok(uri_url) = Url::parse(uri) else {
+        return;
+    };
+    let mut changes = HashMap::new();
+    changes.insert(
+        uri_url,
+        vec![TextEdit {
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: u32::MAX,
+                    character: u32::MAX,
+                },
+            },
+            new_text: content.to_string(),
+        }],
+    );
+    let _ = client
+        .apply_edit(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        })
+        .await;
 }
 
 /// Spawns a debounced watcher on `.jj/repo/op_heads/heads/`. On each external
@@ -319,35 +385,50 @@ fn spawn_op_head_watcher(
                     if state.write().await.take_if_self_caused(&op_id) {
                         continue;
                     }
-                    let (open_status_uri, open_log_uri) = {
+                    let (open_status_uri, open_log_uri, virtual_diffs_enabled) = {
                         let s = state.read().await;
-                        (s.open_status_uri.clone(), s.open_log_uri.clone())
+                        (
+                            s.open_status_uri.clone(),
+                            s.open_log_uri.clone(),
+                            s.virtual_diffs_enabled,
+                        )
                     };
-                    if open_status_uri.is_some()
-                        && let Err(e) = commands::run_status(&jj, &workspace)
-                    {
-                        client
-                            .log_message(
-                                MessageType::WARNING,
-                                format!("watcher: refresh status failed: {e}"),
-                            )
-                            .await;
+                    if open_status_uri.is_some() {
+                        match commands::run_status_with_content(&jj, &workspace) {
+                            Ok((uri, content)) => {
+                                if !virtual_diffs_enabled {
+                                    apply_edit_if_open(&client, &state, &uri, &content).await;
+                                }
+                            }
+                            Err(e) => {
+                                client
+                                    .log_message(
+                                        MessageType::WARNING,
+                                        format!("watcher: refresh status failed: {e}"),
+                                    )
+                                    .await;
+                            }
+                        }
                     }
-                    if open_log_uri.is_some()
-                        && let Err(e) =
-                            commands::regenerate_log_if_present(&jj, &workspace)
-                    {
-                        client
-                            .log_message(
-                                MessageType::WARNING,
-                                format!("watcher: refresh log failed: {e}"),
-                            )
-                            .await;
+                    if open_log_uri.is_some() {
+                        match commands::regenerate_log_if_present_with_content(&jj, &workspace) {
+                            Ok(Some((uri, content))) => {
+                                if !virtual_diffs_enabled {
+                                    apply_edit_if_open(&client, &state, &uri, &content).await;
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                client
+                                    .log_message(
+                                        MessageType::WARNING,
+                                        format!("watcher: refresh log failed: {e}"),
+                                    )
+                                    .await;
+                            }
+                        }
                     }
-                    let (open_diffs, virtual_diffs_enabled) = {
-                        let s = state.read().await;
-                        (s.open_diffs.clone(), s.virtual_diffs_enabled)
-                    };
+                    let open_diffs = state.read().await.open_diffs.clone();
                     if virtual_diffs_enabled {
                         for (uri, target) in &open_diffs {
                             if matches!(target, DiffTarget::Change(_)) {
@@ -359,7 +440,11 @@ fn spawn_op_head_watcher(
                             }
                         }
                     } else {
-                        commands::refresh_change_diffs(&jj, &workspace, &open_diffs);
+                        let refreshed =
+                            commands::refresh_change_diffs(&jj, &workspace, &open_diffs);
+                        for (uri, content) in refreshed {
+                            apply_edit_if_open(&client, &state, &uri, &content).await;
+                        }
                     }
                 }
                 _ = shutdown.notified() => {

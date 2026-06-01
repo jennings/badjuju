@@ -132,7 +132,16 @@ pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
 
 /// Run `badjuju.status`: write status.jujutsu and return its URI.
 pub fn run_status(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
-    write_status(jj, workspace, None)
+    run_status_with_content(jj, workspace).map(|(uri, _)| uri)
+}
+
+/// Same as [`run_status`], but additionally returns the content written to
+/// disk so callers can ship it to clients without re-reading the file.
+pub fn run_status_with_content(
+    jj: &Jj,
+    workspace: &Path,
+) -> Result<(String, String), CommandError> {
+    write_status_with_content(jj, workspace, None)
 }
 
 /// Build a single `@  :` or `@- :` header line for the status buffer.
@@ -247,6 +256,16 @@ pub fn write_status(
     workspace: &Path,
     message: Option<&str>,
 ) -> Result<String, CommandError> {
+    write_status_with_content(jj, workspace, message).map(|(uri, _)| uri)
+}
+
+/// Same as [`write_status`], but additionally returns the content written to
+/// disk so callers can ship it to clients without re-reading the file.
+pub fn write_status_with_content(
+    jj: &Jj,
+    workspace: &Path,
+    message: Option<&str>,
+) -> Result<(String, String), CommandError> {
     let at_header = header_line_for(jj, "@", "@  ")?;
 
     let parents = jj.change_ids("parents(@)")?;
@@ -291,8 +310,8 @@ pub fn write_status(
 
     let dir = badjuju_dir(workspace)?;
     let path = dir.join("status.jujutsu");
-    std::fs::write(&path, content)?;
-    Ok(file_uri(&path))
+    std::fs::write(&path, &content)?;
+    Ok((file_uri(&path), content))
 }
 
 /// Normalize a revision argument from the client. Empty string falls back to `@`.
@@ -460,6 +479,15 @@ pub fn run_unsquash(
 
 /// Run `badjuju.log`: write log.jujutsu and return its URI.
 pub fn run_log(jj: &Jj, workspace: &Path, revset: &str) -> Result<String, CommandError> {
+    run_log_with_content(jj, workspace, revset).map(|(uri, _)| uri)
+}
+
+/// Same as [`run_log`], but additionally returns the content written to disk.
+pub fn run_log_with_content(
+    jj: &Jj,
+    workspace: &Path,
+    revset: &str,
+) -> Result<(String, String), CommandError> {
     let revset = if revset.is_empty() {
         DEFAULT_LOG_REVSET
     } else {
@@ -477,8 +505,8 @@ pub fn run_log(jj: &Jj, workspace: &Path, revset: &str) -> Result<String, Comman
 
     let dir = badjuju_dir(workspace)?;
     let path = dir.join("log.jujutsu");
-    std::fs::write(&path, content)?;
-    Ok(file_uri(&path))
+    std::fs::write(&path, &content)?;
+    Ok((file_uri(&path), content))
 }
 
 /// Which flavor of diff buffer was opened. Determines filename and refresh policy.
@@ -508,19 +536,23 @@ pub fn run_diff_change(
     workspace: &Path,
     revision: &str,
 ) -> Result<(String, DiffTarget), CommandError> {
+    run_diff_change_with_content(jj, workspace, revision).map(|(uri, target, _)| (uri, target))
+}
+
+/// Same as [`run_diff_change`], but additionally returns the content written
+/// to disk so callers can ship it to clients without re-reading the file.
+pub fn run_diff_change_with_content(
+    jj: &Jj,
+    workspace: &Path,
+    revision: &str,
+) -> Result<(String, DiffTarget, String), CommandError> {
     let rev = revision_or_at(revision);
     let change_id = jj.change_id_of(rev)?;
-    let output = jj.diff(&change_id)?;
-    let content = format!(
-        "CHANGE_ID: {}\n\nDIFF:\n\n{}\n\n{}",
-        change_id,
-        output.trim_end(),
-        jj.command_reference().diff(),
-    );
+    let content = diff_content_for_change(jj, &change_id)?;
     let dir = badjuju_dir(workspace)?;
     let path = dir.join(format!("diff-change-{}.jujutsu", short_id(&change_id)));
     std::fs::write(&path, &content)?;
-    Ok((file_uri(&path), DiffTarget::Change(change_id)))
+    Ok((file_uri(&path), DiffTarget::Change(change_id), content))
 }
 
 /// Run `badjuju.diff.commit` (commit mode): write `diff-commit-<id>.jujutsu`
@@ -624,14 +656,24 @@ pub fn parse_commit_id_from_uri(uri: &str) -> Option<String> {
 }
 
 /// Re-render all open change-mode diff buffers. Called after any state-changing
-/// jj operation. Errors per diff are silently ignored so one stale diff doesn't
-/// block the others from refreshing.
-pub fn refresh_change_diffs(jj: &Jj, workspace: &Path, open_diffs: &HashMap<String, DiffTarget>) {
+/// jj operation. Returns the `(uri, content)` of each successfully refreshed
+/// change diff so callers can deliver the new content to file-based clients
+/// via `workspace/applyEdit` without re-reading from disk. Errors per diff are
+/// silently dropped so one stale diff doesn't block the others from refreshing.
+pub fn refresh_change_diffs(
+    jj: &Jj,
+    workspace: &Path,
+    open_diffs: &HashMap<String, DiffTarget>,
+) -> Vec<(String, String)> {
+    let mut refreshed = Vec::new();
     for target in open_diffs.values() {
-        if let DiffTarget::Change(change_id) = target {
-            let _ = run_diff_change(jj, workspace, change_id);
+        if let DiffTarget::Change(change_id) = target
+            && let Ok((uri, _, content)) = run_diff_change_with_content(jj, workspace, change_id)
+        {
+            refreshed.push((uri, content));
         }
     }
+    refreshed
 }
 
 /// Remove stale `diff-change-*.jujutsu` and `diff-commit-*.jujutsu` files left
@@ -988,14 +1030,24 @@ pub fn on_describe_save(jj: &Jj, workspace: &Path, content: &str) -> Result<(), 
 /// has been opened in this workspace). Preserves the persisted REVSET header
 /// so the same query is re-run. No-op when the file is absent.
 pub fn regenerate_log_if_present(jj: &Jj, workspace: &Path) -> Result<(), CommandError> {
+    regenerate_log_if_present_with_content(jj, workspace).map(|_| ())
+}
+
+/// Same as [`regenerate_log_if_present`], but returns `Some((uri, content))`
+/// when the file was regenerated and `None` when the file was absent so
+/// callers can deliver the new content to file-based clients.
+pub fn regenerate_log_if_present_with_content(
+    jj: &Jj,
+    workspace: &Path,
+) -> Result<Option<(String, String)>, CommandError> {
     let log_path = workspace.join(".jj").join("badjuju").join("log.jujutsu");
     if !log_path.exists() {
-        return Ok(());
+        return Ok(None);
     }
     let content = std::fs::read_to_string(&log_path)?;
     let revset = parse_log_revset(&content).unwrap_or_else(|| DEFAULT_LOG_REVSET.to_string());
-    run_log(jj, workspace, &revset)?;
-    Ok(())
+    let result = run_log_with_content(jj, workspace, &revset)?;
+    Ok(Some(result))
 }
 
 /// On log.jujutsu save: re-parse the REVSET: header and regenerate the file.

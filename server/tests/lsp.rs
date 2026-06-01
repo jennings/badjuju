@@ -1,13 +1,17 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{Receiver, channel};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 const BINARY: &str = env!("CARGO_BIN_EXE_badjuju");
 
 struct LspSession {
     child: Child,
     stdin: ChildStdin,
-    reader: BufReader<ChildStdout>,
+    msg_rx: Receiver<serde_json::Value>,
+    _reader_thread: JoinHandle<()>,
     next_id: u64,
 }
 
@@ -24,11 +28,50 @@ impl LspSession {
 
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
+        let (tx, rx) = channel();
+        let reader_thread = std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                let mut content_length = 0usize;
+                let mut got_header = false;
+                loop {
+                    let mut line = String::new();
+                    match reader.read_line(&mut line) {
+                        Ok(0) => return,
+                        Ok(_) => {}
+                        Err(_) => return,
+                    }
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        if got_header {
+                            break;
+                        } else {
+                            continue;
+                        }
+                    }
+                    got_header = true;
+                    if let Some(val) = trimmed.strip_prefix("Content-Length: ") {
+                        content_length = val.parse().unwrap_or(0);
+                    }
+                }
+                let mut body = vec![0u8; content_length];
+                if Read::read_exact(&mut reader, &mut body).is_err() {
+                    return;
+                }
+                let Ok(msg) = serde_json::from_slice::<serde_json::Value>(&body) else {
+                    return;
+                };
+                if tx.send(msg).is_err() {
+                    return;
+                }
+            }
+        });
 
         Self {
             child,
             stdin,
-            reader: BufReader::new(stdout),
+            msg_rx: rx,
+            _reader_thread: reader_thread,
             next_id: 1,
         }
     }
@@ -40,21 +83,11 @@ impl LspSession {
     }
 
     fn recv(&mut self) -> serde_json::Value {
-        let mut content_length = 0usize;
-        loop {
-            let mut line = String::new();
-            self.reader.read_line(&mut line).unwrap();
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                break;
-            }
-            if let Some(val) = trimmed.strip_prefix("Content-Length: ") {
-                content_length = val.parse().unwrap();
-            }
-        }
-        let mut body = vec![0u8; content_length];
-        Read::read_exact(&mut self.reader, &mut body).unwrap();
-        serde_json::from_slice(&body).unwrap()
+        self.msg_rx.recv().expect("LSP session disconnected")
+    }
+
+    fn try_recv(&mut self, timeout: Duration) -> Option<serde_json::Value> {
+        self.msg_rx.recv_timeout(timeout).ok()
     }
 
     fn request(&mut self, method: &str, params: serde_json::Value) -> serde_json::Value {
@@ -84,14 +117,23 @@ impl LspSession {
     }
 
     fn initialize(&mut self, root_uri: &str) -> serde_json::Value {
-        let resp = self.request(
-            "initialize",
-            serde_json::json!({
-                "processId": null,
-                "rootUri": root_uri,
-                "capabilities": {}
-            }),
-        );
+        self.initialize_with_options(root_uri, serde_json::Value::Null)
+    }
+
+    fn initialize_with_options(
+        &mut self,
+        root_uri: &str,
+        initialization_options: serde_json::Value,
+    ) -> serde_json::Value {
+        let mut params = serde_json::json!({
+            "processId": null,
+            "rootUri": root_uri,
+            "capabilities": {}
+        });
+        if !initialization_options.is_null() {
+            params["initializationOptions"] = initialization_options;
+        }
+        let resp = self.request("initialize", params);
         assert!(resp.get("result").is_some(), "initialize failed: {resp}");
         self.notify("initialized", serde_json::json!({}));
         resp
@@ -147,6 +189,23 @@ impl LspSession {
             let msg = self.recv();
             if msg.get("method").and_then(|v| v.as_str()) == Some(method) {
                 return msg;
+            }
+        }
+    }
+
+    /// Read messages until a server-initiated request with the given method is
+    /// found or the timeout expires. Returns `None` on timeout.
+    fn recv_server_request_timeout(
+        &mut self,
+        method: &str,
+        timeout: Duration,
+    ) -> Option<serde_json::Value> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.checked_duration_since(Instant::now())?;
+            let msg = self.try_recv(remaining)?;
+            if msg.get("method").and_then(|v| v.as_str()) == Some(method) {
+                return Some(msg);
             }
         }
     }
@@ -1444,5 +1503,126 @@ fn lsp_status_merge_commit_emits_two_parent_changes_sections() {
     assert!(
         status_content.contains("from-b.txt"),
         "expected from-b.txt:\n{status_content}"
+    );
+}
+
+/// When a client that does NOT advertise virtualDiffs opens status.jujutsu and
+/// an external `jj` operation fires the op-head watcher, the server should
+/// push the regenerated content to the client via `workspace/applyEdit`. This
+/// is the Helix fallback path (no auto-reload, no virtual content support).
+#[test]
+fn lsp_apply_edit_sent_to_file_based_client_on_external_op() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+    session.did_open(&status_uri, "jujutsu", &status_content);
+
+    // Trigger an external op-head change so the watcher refreshes status.
+    Command::new("jj")
+        .args(["new"])
+        .current_dir(dir.path())
+        .output()
+        .expect("jj new failed");
+
+    let req = session
+        .recv_server_request_timeout("workspace/applyEdit", Duration::from_millis(3000))
+        .expect("expected workspace/applyEdit within 3s after external jj new");
+
+    let changes = req["params"]["edit"]["changes"]
+        .as_object()
+        .expect("edit.changes should be an object");
+    let edits = changes
+        .get(&status_uri)
+        .unwrap_or_else(|| panic!("no edits for {status_uri} in: {req}"))
+        .as_array()
+        .expect("edits should be an array");
+    let new_text = edits[0]["newText"]
+        .as_str()
+        .expect("newText should be a string");
+
+    // Acknowledge the request so the server's apply_edit() call returns.
+    session.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": req["id"],
+        "result": { "applied": true }
+    }));
+
+    // The pushed content must match what's on disk — the server should have
+    // sent the same string it wrote, not re-read it.
+    let on_disk = std::fs::read_to_string(status_uri.strip_prefix("file://").unwrap()).unwrap();
+    assert_eq!(
+        new_text, on_disk,
+        "applyEdit newText should match regenerated file content"
+    );
+    assert!(
+        new_text.contains("@  :"),
+        "applyEdit content should be a fresh status buffer:\n{new_text}"
+    );
+}
+
+/// When the client advertises `virtualDiffs: true` (VS Code, Neovim), the
+/// server must NOT send `workspace/applyEdit` on external ops — those clients
+/// handle refresh via FileSystemWatcher (VS Code) or autoreload (Neovim).
+/// Guards against regressing those clients while adding the Helix fallback.
+#[test]
+fn lsp_apply_edit_suppressed_when_virtual_diffs_enabled() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize_with_options(&root_uri, serde_json::json!({ "virtualDiffs": true }));
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+    session.did_open(&status_uri, "jujutsu", &status_content);
+
+    Command::new("jj")
+        .args(["new"])
+        .current_dir(dir.path())
+        .output()
+        .expect("jj new failed");
+
+    // Wait well past the 500ms debounce; no applyEdit should arrive.
+    let msg =
+        session.recv_server_request_timeout("workspace/applyEdit", Duration::from_millis(2000));
+    assert!(
+        msg.is_none(),
+        "expected no applyEdit when virtualDiffs is enabled, got: {msg:?}"
+    );
+}
+
+/// `apply_edit_if_open` skips URIs not in `state.documents`. When status was
+/// generated via executeCommand but never opened, no applyEdit should fire on
+/// an external op — there's no client buffer to update.
+#[test]
+fn lsp_apply_edit_skipped_when_document_not_open() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    // Generate status.jujutsu on disk but never did_open it.
+    let _status_uri = session.execute_command("badjuju.status");
+
+    Command::new("jj")
+        .args(["new"])
+        .current_dir(dir.path())
+        .output()
+        .expect("jj new failed");
+
+    let msg =
+        session.recv_server_request_timeout("workspace/applyEdit", Duration::from_millis(2000));
+    assert!(
+        msg.is_none(),
+        "expected no applyEdit when no document is open, got: {msg:?}"
     );
 }

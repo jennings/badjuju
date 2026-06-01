@@ -92,4 +92,13 @@ auto-open the returned file path. Open it manually:
 
 (The exact filename is printed by `badjuju diff`.)
 
-Bad Juju's LSP server now rewrites status, log, and diff files on disk when a `jj` operation occurs outside the editor. Helix does not auto-reload open buffers when the underlying file changes, so a manual `:reload` is still required to see the updated content. A fix for this is under investigation (see bad-juju-byvy).
+## Auto-reload
+
+When a `jj` operation occurs outside the editor (e.g. you run `jj new` in a
+terminal), the server detects the op-head change and pushes the refreshed
+status, log, and diff content to Helix via `workspace/applyEdit`. Open
+buffers update in place without a manual `:reload`.
+
+Helix's apply-edit handler currently marks the buffer modified after a
+server-driven edit. The on-disk file already matches, so `:write` is a
+no-op (or you can ignore the modified indicator until the next real edit).
