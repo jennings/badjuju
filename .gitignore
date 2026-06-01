@@ -9,10 +9,8 @@ clients/neovim/.test-deps/
 /configuration
 *.vsix
 
-# Beads / Dolt files (added by bd init)
-.dolt/
-*.db
-.beads-credential-key
+.claude/*
+!.claude/skills
+!.claude/settings.json
 
-# Per-developer Claude Code overrides — settings.json is shared, .local is not.
-.claude/settings.local.json
+.beads/

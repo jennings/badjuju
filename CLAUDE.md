@@ -2,66 +2,16 @@
 
 This file provides instructions and context for AI coding agents working on this project.
 
-## Development process
 
-- This project uses GitHub issues as its ticket tracker.
-- Always create a GitHub issue for a unit of work if one does not exist yet.
-- Do not use TaskCreate.
+## Workflows
 
-Use the `gh` CLI to follow this process for working:
+Ticket-driven workflows live as skills:
 
-- Read tickets that are:
-  - Open
-  - Unblocked (query contains `-is:blocked`)
-  - Not labeled "in progress" or "implemented"
+- **Working on a ticket** — `.claude/skills/work-on-ticket/SKILL.md`
+- **Planning and creating tickets** — `.claude/skills/plan-tickets/SKILL.md`
 
-- Choose a ticket to work on. Prefer higher priority tickets (`P1` is highest
-  priority, `P4` is lowest)
-
-- Implement one ticket at a time. Even if the user requests working on multiple
-  tickets, implement them sequentially in separate commits.
-
-- Claim the ticket by adding the "in progress" label
-
-- Implement the ticket as described in the title and description.
-
-- Ensure all code compiles and all tests pass before finishing a unit of work.
-
-- Commit message example:
-
-  ```
-  feat(area): Short descriptive title here in imperative voice
-
-  Write a longer description here of the changes that were made and why.
-  Include lists, diagrams, tables, etc. if they help describe why this change
-  was made.
-
-  Include as the last line either "Resolves #123" if this completely resolves
-  the ticket, or "Progresses: #123" if it doesn't, like this:
-
-  Resolves #123
-  ```
-
-- When the ticket is completely implemented:
-  - Add the "implemented" label and remove "in progress" when the ticket is completed
-
-- DO NOT close the ticket: Landing the commit in the `main` branch will close
-  the ticket automatically.
-
-## Planning process
-
-- Plan an implementation. Break the implementation into tickets of a reasonable
-  size that can be implemented in one commit.
-- Each ticket should be a reasonable size to review once implemented.
-- When the plan is accepted, write the tickets into the GitHub issues tracker. DO NOT begin implementing.
-- Add dependencies to tickets to indicate which tickets block others.
-  - Use the `gh api` command to set dependencies if there is no first-class feature.
-    Documentation: https://docs.github.com/en/rest/issues/issue-dependencies?apiVersion=2026-03-10
-- Assign priority labels:
-  - `P1` for bugs or critical features
-  - `P2` by default
-  - `P3` for "nice to have" features that will probably get implemented
-  - `P4` for "maybe some day" features
+Claude Code auto-loads these by description match; the skill content is
+authoritative.
 
 ## Build & Test
 
