@@ -18,6 +18,9 @@ Use the `gh` CLI to follow this process for working:
 - Choose a ticket to work on. Prefer higher priority tickets (`P1` is highest
   priority, `P4` is lowest)
 
+- Implement one ticket at a time. Even if the user requests working on multiple
+  tickets, implement them sequentially in separate commits.
+
 - Claim the ticket by adding the "in progress" label
 
 - Implement the ticket as described in the title and description.
