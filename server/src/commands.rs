@@ -22,6 +22,7 @@ pub struct CommandReference {
     status: String,
     log: String,
     diff: String,
+    squash: String,
 }
 
 impl Default for CommandReference {
@@ -31,12 +32,13 @@ impl Default for CommandReference {
 }
 
 impl CommandReference {
-    /// Render all three buffers' reference text from the given profile.
+    /// Render all four buffers' reference text from the given profile.
     pub fn from_profile(profile: &KeymapProfile) -> Self {
         Self {
             status: keymap::render_command_reference(profile, "status"),
             log: keymap::render_command_reference(profile, "log"),
             diff: keymap::render_command_reference(profile, "diff"),
+            squash: keymap::render_command_reference(profile, "squash"),
         }
     }
 
@@ -45,8 +47,13 @@ impl CommandReference {
     /// `None` for a field means "use the profile default"; a `Some` value
     /// replaces the rendered text entirely (the escape-hatch path used by
     /// clients whose keybindings differ from any built-in profile).
-    pub fn new(status: Option<String>, log: Option<String>, diff: Option<String>) -> Self {
-        Self::with_profile(&KeymapProfile::Magit, status, log, diff)
+    pub fn new(
+        status: Option<String>,
+        log: Option<String>,
+        diff: Option<String>,
+        squash: Option<String>,
+    ) -> Self {
+        Self::with_profile(&KeymapProfile::Magit, status, log, diff, squash)
     }
 
     pub fn with_profile(
@@ -54,12 +61,14 @@ impl CommandReference {
         status: Option<String>,
         log: Option<String>,
         diff: Option<String>,
+        squash: Option<String>,
     ) -> Self {
         let base = Self::from_profile(profile);
         Self {
             status: status.unwrap_or(base.status),
             log: log.unwrap_or(base.log),
             diff: diff.unwrap_or(base.diff),
+            squash: squash.unwrap_or(base.squash),
         }
     }
 
@@ -73,6 +82,10 @@ impl CommandReference {
 
     pub fn diff(&self) -> &str {
         &self.diff
+    }
+
+    pub fn squash(&self) -> &str {
+        &self.squash
     }
 }
 
@@ -694,7 +707,7 @@ pub fn run_squash_window(
          REMAINING CHANGES:\n\
          {remaining}\n\
          {}",
-        jj.command_reference().diff(),
+        jj.command_reference().squash(),
     );
 
     let dir = badjuju_dir(workspace)?;
@@ -796,7 +809,7 @@ pub fn regenerate_squash_window(
          REMAINING CHANGES:\n\
          {remaining_section}\
          {}",
-        jj.command_reference().diff(),
+        jj.command_reference().squash(),
     );
 
     std::fs::write(&path, &content)?;
@@ -2008,6 +2021,10 @@ mod tests {
             default.diff(),
             render_command_reference(&KeymapProfile::Magit, "diff")
         );
+        assert_eq!(
+            default.squash(),
+            render_command_reference(&KeymapProfile::Magit, "squash")
+        );
     }
 
     #[test]
@@ -2017,6 +2034,7 @@ mod tests {
             Some("CUSTOM STATUS REF".to_string()),
             Some("CUSTOM LOG REF".to_string()),
             Some("CUSTOM DIFF REF".to_string()),
+            None,
         );
         let jj = Jj::with_binary_or_default(None, dir.path()).with_command_reference(reference);
         std::process::Command::new("jj")
@@ -2060,7 +2078,8 @@ mod tests {
     fn command_reference_partial_override_falls_back_per_field() {
         let dir = tempdir().unwrap();
         // Only override the log reference; status and diff should use defaults.
-        let reference = CommandReference::new(None, Some("LOG ONLY OVERRIDE".to_string()), None);
+        let reference =
+            CommandReference::new(None, Some("LOG ONLY OVERRIDE".to_string()), None, None);
         let jj = Jj::with_binary_or_default(None, dir.path()).with_command_reference(reference);
         std::process::Command::new("jj")
             .args(["git", "init"])

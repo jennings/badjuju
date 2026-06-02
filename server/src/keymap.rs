@@ -59,9 +59,21 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
     },
     KeymapEntry {
         key: "s",
-        action: "badjuju.squash",
-        description: "squash file at cursor into parent",
+        action: "badjuju.squash.commit",
+        description: "select squash source or destination",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "S",
+        action: "badjuju.squash.cancel",
+        description: "cancel pending squash / squash file at cursor",
         windows: &["status"],
+    },
+    KeymapEntry {
+        key: "S",
+        action: "badjuju.squash.cancel",
+        description: "cancel pending squash",
+        windows: &["log"],
     },
     KeymapEntry {
         key: "U",
@@ -171,6 +183,31 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         description: "abort (close without saving)",
         windows: &["describe"],
     },
+    // Squash window
+    KeymapEntry {
+        key: "s",
+        action: "badjuju.squash.toggle",
+        description: "toggle hunk or file (move between selected/remaining)",
+        windows: &["squash"],
+    },
+    KeymapEntry {
+        key: "a",
+        action: "badjuju.squash.select_all",
+        description: "select all changes",
+        windows: &["squash"],
+    },
+    KeymapEntry {
+        key: "A",
+        action: "badjuju.squash.select_none",
+        description: "deselect all changes",
+        windows: &["squash"],
+    },
+    KeymapEntry {
+        key: "q",
+        action: "",
+        description: "close",
+        windows: &["squash"],
+    },
 ];
 
 /// Fugitive-style two-letter verb profile.
@@ -190,9 +227,21 @@ static VIM_ENTRIES: &[KeymapEntry] = &[
     },
     KeymapEntry {
         key: "ss",
-        action: "badjuju.squash",
-        description: "squash file at cursor into parent",
+        action: "badjuju.squash.commit",
+        description: "select squash source or destination",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "SS",
+        action: "badjuju.squash.cancel",
+        description: "cancel pending squash / squash file at cursor",
         windows: &["status"],
+    },
+    KeymapEntry {
+        key: "SS",
+        action: "badjuju.squash.cancel",
+        description: "cancel pending squash",
+        windows: &["log"],
     },
     KeymapEntry {
         key: "UU",
@@ -302,6 +351,31 @@ static VIM_ENTRIES: &[KeymapEntry] = &[
         description: "abort (close without saving)",
         windows: &["describe"],
     },
+    // Squash window
+    KeymapEntry {
+        key: "s",
+        action: "badjuju.squash.toggle",
+        description: "toggle hunk or file (move between selected/remaining)",
+        windows: &["squash"],
+    },
+    KeymapEntry {
+        key: "a",
+        action: "badjuju.squash.select_all",
+        description: "select all changes",
+        windows: &["squash"],
+    },
+    KeymapEntry {
+        key: "A",
+        action: "badjuju.squash.select_none",
+        description: "deselect all changes",
+        windows: &["squash"],
+    },
+    KeymapEntry {
+        key: "q",
+        action: "",
+        description: "close",
+        windows: &["squash"],
+    },
 ];
 
 /// Return the keymap entries for a given profile and window type.
@@ -353,8 +427,8 @@ mod tests {
         let text = render_command_reference(&KeymapProfile::Magit, "status");
         assert!(text.starts_with("COMMAND REFERENCE:"));
         for key in [
-            "n", "L", "b", "r", "e", "d", "D", "s", "U", "a", "f", "p", "P", "u", "R", "q", "?",
-            "Tab",
+            "n", "L", "b", "r", "e", "d", "D", "s", "S", "U", "a", "f", "p", "P", "u", "R", "q",
+            "?", "Tab",
         ] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
@@ -374,7 +448,7 @@ mod tests {
             text.contains("shortcut line"),
             "missing shortcut hint in:\n{text}"
         );
-        for key in ["b", "r", "e", "d", "D", "a", "R", "q", "?"] {
+        for key in ["b", "r", "e", "d", "D", "s", "S", "a", "R", "q", "?"] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in log:\n{text}"
@@ -389,6 +463,17 @@ mod tests {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in diff:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn render_squash_has_toggle_select_close() {
+        let text = render_command_reference(&KeymapProfile::Magit, "squash");
+        for key in ["s", "a", "A", "q"] {
+            assert!(
+                text.lines().any(|l| l.starts_with(key)),
+                "missing key `{key}` in squash:\n{text}"
             );
         }
     }

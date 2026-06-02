@@ -342,8 +342,6 @@ pub fn squash_hunk_at_line(content: &str, line: usize) -> Option<SquashHunk> {
         let l = lines[i];
         if is_squash_file_line(l) {
             Some(l.trim_end().to_string())
-        } else if l == "SELECTED CHANGES:" || l == "REMAINING CHANGES:" {
-            None
         } else {
             None
         }

@@ -195,7 +195,7 @@ describe('revision-scoped hotkeys send cursor-form', function()
   end
 
   for _, case in ipairs({
-    { key = 's', server_command = 'badjuju.squash' },
+    { key = 's', server_command = 'badjuju.squash.commit' },
     { key = 'U', server_command = 'badjuju.unsquash' },
   }) do
     it(

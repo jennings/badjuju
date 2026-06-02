@@ -629,22 +629,22 @@ fn squash_window_actions(uri: &str, line: usize, content: &str) -> Vec<CodeActio
             && cursor::squash_hunk_at_line(content, line).is_none();
         let is_hunk = cursor::squash_hunk_at_line(content, line).is_some();
 
-        if let Some(file) = cursor::squash_file_at_line(content, line) {
-            if is_file_only {
-                let title = match sec {
-                    cursor::SquashSection::Remaining => {
-                        format!("Move file {file} to SELECTED")
-                    }
-                    cursor::SquashSection::Selected => {
-                        format!("Move file {file} to REMAINING")
-                    }
-                };
-                actions.push(make(
-                    title,
-                    "badjuju.squash.toggle",
-                    vec![cursor_arg.clone()],
-                ));
-            }
+        if let Some(file) = cursor::squash_file_at_line(content, line)
+            && is_file_only
+        {
+            let title = match sec {
+                cursor::SquashSection::Remaining => {
+                    format!("Move file {file} to SELECTED")
+                }
+                cursor::SquashSection::Selected => {
+                    format!("Move file {file} to REMAINING")
+                }
+            };
+            actions.push(make(
+                title,
+                "badjuju.squash.toggle",
+                vec![cursor_arg.clone()],
+            ));
         }
         if is_hunk {
             let title = match sec {
@@ -690,8 +690,9 @@ fn squash_window_actions(uri: &str, line: usize, content: &str) -> Vec<CodeActio
 
 /// Build the squash-flow code actions offered for a commit-header row in status
 /// and log buffers. When no squash is pending, offers "Squash from this
-/// revision"; when a squash is pending, offers "Cancel pending squash".
-/// Both use cursor-form args for stability across buffer regenerations.
+/// revision"; when a squash is pending, offers "Squash into this revision"
+/// and "Cancel pending squash". Both use cursor-form args for stability
+/// across buffer regenerations.
 fn squash_commit_actions(
     uri: &str,
     line: usize,
@@ -712,11 +713,18 @@ fn squash_commit_actions(
             })
         };
     if pending_source.is_some() {
-        vec![make(
-            "Cancel pending squash".to_string(),
-            "badjuju.squash.cancel",
-            vec![],
-        )]
+        vec![
+            make(
+                "Squash into this revision".to_string(),
+                "badjuju.squash.commit",
+                vec![cursor_arg],
+            ),
+            make(
+                "Cancel pending squash".to_string(),
+                "badjuju.squash.cancel",
+                vec![],
+            ),
+        ]
     } else {
         vec![make(
             "Squash from this revision".to_string(),
@@ -760,7 +768,13 @@ fn parse_command_reference(value: &serde_json::Value, profile: &KeymapProfile) -
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     };
-    CommandReference::with_profile(profile, pick("status"), pick("log"), pick("diff"))
+    CommandReference::with_profile(
+        profile,
+        pick("status"),
+        pick("log"),
+        pick("diff"),
+        pick("squash"),
+    )
 }
 
 #[tower_lsp::async_trait]

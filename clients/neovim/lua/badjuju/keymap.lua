@@ -1,5 +1,9 @@
 local M = {}
 
+--- Module-level pending-squash flag. Set to true after source selection,
+--- cleared after destination selection or cancel.
+local pending_squash = false
+
 local function nmap(bufnr, key, rhs, desc)
   vim.keymap.set('n', key, rhs, {
     buffer = bufnr,
@@ -72,6 +76,43 @@ local function run_squash()
       end
     end,
   })
+end
+
+--- Select source or destination for a commit-to-commit squash.
+--- First call sets the source (pending state); second call sets the
+--- destination and opens the squash window.
+local function run_squash_commit()
+  require('badjuju').execute('badjuju.squash.commit', { cursor_arg() }, {
+    after = function(result_uri)
+      -- A squash URI contains /squash/ in the path; a status URI does not.
+      if result_uri:find('/squash/', 1, true) then
+        pending_squash = false
+      else
+        pending_squash = true
+      end
+    end,
+  })
+end
+
+--- Cancel a pending squash selection and return to the status view.
+local function run_squash_cancel()
+  pending_squash = false
+  require('badjuju').execute('badjuju.squash.cancel', {})
+end
+
+--- Toggle the hunk or file under the cursor between SELECTED and REMAINING.
+local function run_squash_toggle()
+  require('badjuju').execute('badjuju.squash.toggle', { cursor_arg() })
+end
+
+--- Move all changes into the SELECTED section.
+local function run_squash_select_all()
+  require('badjuju').execute('badjuju.squash.select_all', {})
+end
+
+--- Move all changes back to the REMAINING section.
+local function run_squash_select_none()
+  require('badjuju').execute('badjuju.squash.select_none', {})
 end
 
 local LOG_MAPS = {
@@ -210,8 +251,14 @@ function M.setup_for_buffer(bufnr)
     if profile == 'vim' then
       nmap(bufnr, 'nn', '<Cmd>JJNew<CR>', 'badjuju: new change')
       nmap(bufnr, 'll', '<Cmd>JJLog<CR>', 'badjuju: open log')
-      nmap(bufnr, 'ss', function() run_squash() end,
-        'badjuju: squash file at cursor into parent')
+      nmap(bufnr, 'ss', run_squash_commit, 'badjuju: select squash source or destination')
+      nmap(bufnr, 'SS', function()
+        if pending_squash then
+          run_squash_cancel()
+        else
+          run_squash()
+        end
+      end, 'badjuju: cancel pending squash / squash file at cursor')
       nmap(bufnr, 'UU', function() run_file_scoped('badjuju.unsquash') end,
         'badjuju: unsquash file at cursor from parent into child')
       nmap(bufnr, 'ff', '<Cmd>JJFetch<CR>', 'badjuju: git fetch')
@@ -244,8 +291,14 @@ function M.setup_for_buffer(bufnr)
         'badjuju: show change diff at cursor (updates on amend)')
       nmap(bufnr, '=', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: show change diff at cursor (updates on amend)')
-      nmap(bufnr, 's', function() run_squash() end,
-        'badjuju: squash file at cursor into parent')
+      nmap(bufnr, 's', run_squash_commit, 'badjuju: select squash source or destination')
+      nmap(bufnr, 'S', function()
+        if pending_squash then
+          run_squash_cancel()
+        else
+          run_squash()
+        end
+      end, 'badjuju: cancel pending squash / squash file at cursor')
       nmap(bufnr, 'U', function() run_file_scoped('badjuju.unsquash') end,
         'badjuju: unsquash file at cursor from parent into child')
     end
@@ -296,6 +349,10 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff.commit') end,
         'badjuju: show commit diff at cursor (pinned, immutable)')
       nmap(bufnr, 'aa', '<Cmd>JJAbandon<CR>', 'badjuju: abandon revision')
+      nmap(bufnr, 'ss', run_squash_commit, 'badjuju: select squash source or destination')
+      nmap(bufnr, 'SS', function()
+        if pending_squash then run_squash_cancel() end
+      end, 'badjuju: cancel pending squash')
       for _, m in ipairs(LOG_MAPS) do
         if m[1] ~= 'a' then map_cmd(bufnr, m[1], m[2], m[3]) end
       end
@@ -311,6 +368,10 @@ function M.setup_for_buffer(bufnr)
         'badjuju: describe commit at cursor in a split')
       nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: show change diff at cursor (updates on amend)')
+      nmap(bufnr, 's', run_squash_commit, 'badjuju: select squash source or destination')
+      nmap(bufnr, 'S', function()
+        if pending_squash then run_squash_cancel() end
+      end, 'badjuju: cancel pending squash')
     end
     nmap(bufnr, '<CR>', apply_log_shortcut, 'badjuju: apply revset shortcut under cursor')
     nmap(bufnr, '?', function() show_help('log') end, 'badjuju: show help')
@@ -324,6 +385,12 @@ function M.setup_for_buffer(bufnr)
     nmap(bufnr, 'R', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
     nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
     nmap(bufnr, '?', function() show_help('diff') end, 'badjuju: show help')
+  elseif name:match('/%.jj/badjuju/squash/[^/]+%.jujutsu$') then
+    nmap(bufnr, 's', run_squash_toggle, 'badjuju: toggle hunk or file in squash window')
+    nmap(bufnr, 'a', run_squash_select_all, 'badjuju: select all changes')
+    nmap(bufnr, 'A', run_squash_select_none, 'badjuju: deselect all changes')
+    nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close squash window')
+    nmap(bufnr, '?', function() show_help('squash') end, 'badjuju: show help')
   elseif name:match('/%.jj/badjuju/describe%.jujutsu$') then
     nmap(bufnr, '?', function() show_help('describe') end, 'badjuju: show help')
     nmap(bufnr, '<C-c><C-c>', '<Cmd>write | quit<CR>', 'badjuju: finalize commit (save and close)')

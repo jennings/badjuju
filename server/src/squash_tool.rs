@@ -11,9 +11,9 @@ pub struct SquashSelection {
 /// Parse `@@ -(old_start)[,(old_len)] ... @@` and return `(old_start, old_len)`.
 /// Both are returned as 0-based (we subtract 1 from the 1-indexed start).
 pub fn parse_hunk_old_range(header: &str) -> Option<(usize, usize)> {
-    let after = header.trim_start_matches(|c: char| c == '@' || c == ' ');
+    let after = header.trim_start_matches(['@', ' ']);
     let after = after.strip_prefix('-')?;
-    let end = after.find(|c: char| c == ' ' || c == '+')?;
+    let end = after.find([' ', '+'])?;
     let range = &after[..end];
     if let Some(comma) = range.find(',') {
         let start: usize = range[..comma].parse().ok()?;

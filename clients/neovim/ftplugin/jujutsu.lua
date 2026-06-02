@@ -8,6 +8,7 @@ if
   name:match('/%.jj/badjuju/status%.jujutsu$')
   or name:match('/%.jj/badjuju/diff%.jujutsu$')
   or name:match('/%.jj/badjuju/diff%-[a-z]+%-[^/]+%.jujutsu$')
+  or name:match('/%.jj/badjuju/squash/[^/]+%.jujutsu$')
 then
   vim.bo.modifiable = false
   vim.bo.readonly = true
@@ -58,6 +59,27 @@ if name:match('/%.jj/badjuju/status%.jujutsu$') then
       end
       vim.api.nvim_win_set_cursor(win, {1, 0})
     end)
+  end, 100)
+end
+
+-- Enable LSP-driven folding for squash buffers; start fully folded.
+if name:match('/%.jj/badjuju/squash/[^/]+%.jujutsu$') then
+  vim.wo.foldmethod = 'expr'
+  vim.wo.foldexpr = 'v:lua.vim.lsp.foldexpr()'
+  vim.wo.foldlevel = 0
+  if _G._badjuju_foldtext == nil then
+    _G._badjuju_foldtext = function()
+      return vim.api.nvim_buf_get_lines(0, vim.v.foldstart - 1, vim.v.foldstart, false)[1]
+    end
+  end
+  vim.wo.foldtext = 'v:lua._badjuju_foldtext()'
+  local win = vim.api.nvim_get_current_win()
+  vim.defer_fn(function()
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_call(win, function()
+        pcall(vim.cmd, 'normal! zM')
+      end)
+    end
   end, 100)
 end
 
