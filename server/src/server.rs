@@ -84,6 +84,11 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.refresh",
     "badjuju.squash",
     "badjuju.squash.into",
+    "badjuju.squash.commit",
+    "badjuju.squash.cancel",
+    "badjuju.squash.toggle",
+    "badjuju.squash.select_all",
+    "badjuju.squash.select_none",
     "badjuju.unsquash",
     "badjuju.undo",
     "badjuju.abandon",
@@ -120,6 +125,10 @@ struct State {
     /// When true, diffs are served as virtual `badjuju-diff://` URIs; otherwise
     /// the server writes physical `diff-{change,commit}-*.jujutsu` files.
     virtual_diffs_enabled: bool,
+    /// Full change-id of a pending commit-to-commit squash source, or `None` when
+    /// no squash is in progress. Set by `badjuju.squash.commit` and cleared by
+    /// `badjuju.squash.cancel`.
+    pending_squash_source: Option<String>,
     /// Op-ids produced by bad-juju's own mutations, with the time they were recorded.
     /// Used by an op-head watcher to suppress double-refreshes.
     self_caused_ops: HashMap<String, Instant>,
@@ -137,6 +146,7 @@ impl Default for State {
             open_log_uri: None,
             open_diffs: HashMap::new(),
             virtual_diffs_enabled: false,
+            pending_squash_source: None,
             self_caused_ops: HashMap::new(),
         }
     }
@@ -210,16 +220,18 @@ impl Backend {
     }
 
     pub async fn refresh_open_artifacts(&self, jj: &Jj, workspace: &std::path::Path) {
-        let (open_status_uri, open_log_uri, virtual_diffs_enabled) = {
+        let (open_status_uri, open_log_uri, virtual_diffs_enabled, pending_squash) = {
             let state = self.state.read().await;
             (
                 state.open_status_uri.clone(),
                 state.open_log_uri.clone(),
                 state.virtual_diffs_enabled,
+                state.pending_squash_source.clone(),
             )
         };
+        let pending = pending_squash.as_deref();
         if open_status_uri.is_some() {
-            match commands::run_status_with_content(jj, workspace) {
+            match commands::run_status_with_content(jj, workspace, pending) {
                 Ok((uri, content)) => {
                     if !virtual_diffs_enabled {
                         apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
@@ -233,7 +245,7 @@ impl Backend {
             }
         }
         if open_log_uri.is_some() {
-            match commands::regenerate_log_if_present_with_content(jj, workspace) {
+            match commands::regenerate_log_if_present_with_content(jj, workspace, pending) {
                 Ok(Some((uri, content))) => {
                     if !virtual_diffs_enabled {
                         apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
@@ -385,16 +397,18 @@ fn spawn_op_head_watcher(
                     if state.write().await.take_if_self_caused(&op_id) {
                         continue;
                     }
-                    let (open_status_uri, open_log_uri, virtual_diffs_enabled) = {
+                    let (open_status_uri, open_log_uri, virtual_diffs_enabled, pending_squash) = {
                         let s = state.read().await;
                         (
                             s.open_status_uri.clone(),
                             s.open_log_uri.clone(),
                             s.virtual_diffs_enabled,
+                            s.pending_squash_source.clone(),
                         )
                     };
+                    let pending = pending_squash.as_deref();
                     if open_status_uri.is_some() {
-                        match commands::run_status_with_content(&jj, &workspace) {
+                        match commands::run_status_with_content(&jj, &workspace, pending) {
                             Ok((uri, content)) => {
                                 if !virtual_diffs_enabled {
                                     apply_edit_if_open(&client, &state, &uri, &content).await;
@@ -411,7 +425,7 @@ fn spawn_op_head_watcher(
                         }
                     }
                     if open_log_uri.is_some() {
-                        match commands::regenerate_log_if_present_with_content(&jj, &workspace) {
+                        match commands::regenerate_log_if_present_with_content(&jj, &workspace, pending) {
                             Ok(Some((uri, content))) => {
                                 if !virtual_diffs_enabled {
                                     apply_edit_if_open(&client, &state, &uri, &content).await;
@@ -539,6 +553,44 @@ fn log_shortcut_action(uri: &str, line: usize, label: &str) -> CodeActionOrComma
         }),
         ..Default::default()
     })
+}
+
+/// Build the squash-flow code actions offered for a commit-header row in status
+/// and log buffers. When no squash is pending, offers "Squash from this
+/// revision"; when a squash is pending, offers "Cancel pending squash".
+/// Both use cursor-form args for stability across buffer regenerations.
+fn squash_commit_actions(
+    uri: &str,
+    line: usize,
+    pending_source: Option<&str>,
+) -> Vec<CodeActionOrCommand> {
+    let cursor_arg = serde_json::json!({ "cursor": { "uri": uri, "line": line } });
+    let make =
+        |title: String, command: &str, args: Vec<serde_json::Value>| -> CodeActionOrCommand {
+            CodeActionOrCommand::CodeAction(CodeAction {
+                title,
+                kind: Some(CodeActionKind::EMPTY),
+                command: Some(Command {
+                    title: String::new(),
+                    command: command.to_string(),
+                    arguments: Some(args),
+                }),
+                ..Default::default()
+            })
+        };
+    if pending_source.is_some() {
+        vec![make(
+            "Cancel pending squash".to_string(),
+            "badjuju.squash.cancel",
+            vec![],
+        )]
+    } else {
+        vec![make(
+            "Squash from this revision".to_string(),
+            "badjuju.squash.commit",
+            vec![cursor_arg],
+        )]
+    }
 }
 
 /// Build the two squash/unsquash code actions offered for a status-buffer file
@@ -747,13 +799,15 @@ impl LanguageServer for Backend {
             return Ok(Some(vec![]));
         };
 
-        let content = {
+        let (content, pending_squash) = {
             let state = self.state.read().await;
-            state
+            let content = state
                 .documents
                 .get(&uri)
                 .cloned()
-                .or_else(|| read_uri_from_disk(&uri))
+                .or_else(|| read_uri_from_disk(&uri));
+            let pending = state.pending_squash_source.clone();
+            (content, pending)
         };
         let Some(content) = content else {
             return Ok(Some(vec![]));
@@ -770,6 +824,14 @@ impl LanguageServer for Backend {
                     actions.push(log_shortcut_action(&uri, line, &shortcut.label));
                 } else if let Some(revision) = cursor::revision_at_line(&content, line, kind) {
                     actions.extend(commit_actions(&revision));
+                    // Add squash actions when cursor is on a commit header row.
+                    if cursor::commit_id_at_line(&content, line).is_some() {
+                        actions.extend(squash_commit_actions(
+                            &uri,
+                            line,
+                            pending_squash.as_deref(),
+                        ));
+                    }
                 }
             }
             BufferKind::Status => {
@@ -781,6 +843,7 @@ impl LanguageServer for Backend {
                     actions.extend(file_actions(&uri, line, &file));
                 } else if let Some(revision) = cursor::commit_id_at_line(&content, line) {
                     actions.extend(commit_actions(&revision));
+                    actions.extend(squash_commit_actions(&uri, line, pending_squash.as_deref()));
                 }
             }
             BufferKind::Diff => {}
@@ -1287,6 +1350,68 @@ impl LanguageServer for Backend {
                 self.record_self_caused_op(&jj).await;
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
+            }
+            "badjuju.squash.commit" => {
+                // When a source is already pending, the next squash.commit invocation
+                // selects the destination — implemented in ticket #8. Return an error
+                // stub so clients can detect this state and act accordingly.
+                let already_pending = self.state.read().await.pending_squash_source.clone();
+                if already_pending.is_some() {
+                    let mut err = Error::internal_error();
+                    err.message = "destination selection not yet implemented".into();
+                    err.data = Some(serde_json::json!({
+                        "code": "DestinationSelectionNotImplemented"
+                    }));
+                    return Err(err);
+                }
+
+                let revision = commands::resolve_revision_arg(params.arguments.first(), |uri| {
+                    documents
+                        .get(uri)
+                        .cloned()
+                        .or_else(|| read_uri_from_disk(uri))
+                })
+                .map_err(lsp_err)?;
+                let rev = if revision.is_empty() { "@" } else { &revision };
+                let change_id = jj.change_id_of(rev).map_err(lsp_err)?;
+
+                self.state.write().await.pending_squash_source = Some(change_id.clone());
+
+                let (uri, content) =
+                    commands::run_status_with_content(&jj, &workspace, Some(&change_id))
+                        .map_err(lsp_err)?;
+                apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
+                if let Ok(Some((log_uri, log_content))) =
+                    commands::regenerate_log_if_present_with_content(
+                        &jj,
+                        &workspace,
+                        Some(&change_id),
+                    )
+                {
+                    apply_edit_if_open(&self.client, &self.state, &log_uri, &log_content).await;
+                }
+                Ok(Some(serde_json::Value::String(uri)))
+            }
+            "badjuju.squash.cancel" => {
+                self.state.write().await.pending_squash_source = None;
+
+                let (uri, content) =
+                    commands::run_status_with_content(&jj, &workspace, None).map_err(lsp_err)?;
+                apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
+                if let Ok(Some((log_uri, log_content))) =
+                    commands::regenerate_log_if_present_with_content(&jj, &workspace, None)
+                {
+                    apply_edit_if_open(&self.client, &self.state, &log_uri, &log_content).await;
+                }
+                Ok(Some(serde_json::Value::String(uri)))
+            }
+            "badjuju.squash.toggle"
+            | "badjuju.squash.select_all"
+            | "badjuju.squash.select_none" => {
+                // Implemented in ticket #9.
+                let mut err = Error::method_not_found();
+                err.message = format!("{} not yet implemented", params.command).into();
+                Err(err)
             }
             "badjuju.squash.into" => {
                 let arg = params

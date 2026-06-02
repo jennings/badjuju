@@ -444,6 +444,7 @@ fn parse_changes_file_line(line: &str) -> Option<String> {
         || line.starts_with("STACK:")
         || line.starts_with("COMMAND REFERENCE:")
         || line.starts_with("MESSAGE:")
+        || line.starts_with("Preparing to squash")
         || line.starts_with("@  ")
         || line.starts_with("@- ")
     {

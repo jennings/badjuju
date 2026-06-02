@@ -132,16 +132,20 @@ pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
 
 /// Run `badjuju.status`: write status.jujutsu and return its URI.
 pub fn run_status(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
-    run_status_with_content(jj, workspace).map(|(uri, _)| uri)
+    run_status_with_content(jj, workspace, None).map(|(uri, _)| uri)
 }
 
 /// Same as [`run_status`], but additionally returns the content written to
 /// disk so callers can ship it to clients without re-reading the file.
+///
+/// `pending_squash` is the full change-id of a pending squash source; when
+/// set a "Preparing to squash…" line is prepended to the buffer.
 pub fn run_status_with_content(
     jj: &Jj,
     workspace: &Path,
+    pending_squash: Option<&str>,
 ) -> Result<(String, String), CommandError> {
-    write_status_with_content(jj, workspace, None)
+    write_status_with_content(jj, workspace, None, pending_squash)
 }
 
 /// Build a single `@  :` or `@- :` header line for the status buffer.
@@ -168,6 +172,24 @@ fn header_line_for(jj: &Jj, rev: &str, marker: &str) -> Result<String, CommandEr
             .join(" ");
         Ok(format!("{marker}: {bk_str} {desc_display}"))
     }
+}
+
+/// Build the one-line "Preparing to squash…" header rendered when a squash source
+/// is pending. Uses short (8-char) IDs to keep the line readable.
+fn render_squash_pending_line(jj: &Jj, change_id: &str) -> String {
+    let commit_id = jj
+        .commit_id_of(change_id)
+        .unwrap_or_else(|_| "?".to_string());
+    let desc_raw = jj.describe_get(change_id).unwrap_or_default();
+    let desc_first = desc_raw.trim().lines().next().unwrap_or("");
+    let desc_display = if desc_first.is_empty() {
+        "(empty)"
+    } else {
+        desc_first
+    };
+    let ch = &change_id[..change_id.len().min(8)];
+    let co = &commit_id[..commit_id.len().min(8)];
+    format!("Preparing to squash changes from revision: {ch} {co} {desc_display}")
 }
 
 /// Strip diff header lines and return only hunk content for a file in a revision.
@@ -256,15 +278,19 @@ pub fn write_status(
     workspace: &Path,
     message: Option<&str>,
 ) -> Result<String, CommandError> {
-    write_status_with_content(jj, workspace, message).map(|(uri, _)| uri)
+    write_status_with_content(jj, workspace, message, None).map(|(uri, _)| uri)
 }
 
 /// Same as [`write_status`], but additionally returns the content written to
 /// disk so callers can ship it to clients without re-reading the file.
+///
+/// `pending_squash` is the full change-id of a pending squash source; when set
+/// a "Preparing to squash…" line is prepended before the rest of the buffer.
 pub fn write_status_with_content(
     jj: &Jj,
     workspace: &Path,
     message: Option<&str>,
+    pending_squash: Option<&str>,
 ) -> Result<(String, String), CommandError> {
     let at_header = header_line_for(jj, "@", "@  ")?;
 
@@ -282,6 +308,10 @@ pub fn write_status_with_content(
     let changes = changes_sections(jj)?;
     let stack = jj.log_with_stat(STATUS_REVSET, true)?;
 
+    let pending_block = pending_squash
+        .map(|id| format!("{}\n\n", render_squash_pending_line(jj, id)))
+        .unwrap_or_default();
+
     let prelude = match message {
         Some(m) => format!("MESSAGE: {}\n\n", m.trim()),
         None => String::new(),
@@ -289,7 +319,8 @@ pub fn write_status_with_content(
 
     let content = if changes.is_empty() {
         format!(
-            "{}{}\n\nSTACK: {}\n\n{}\n\n{}",
+            "{}{}{}\n\nSTACK: {}\n\n{}\n\n{}",
+            pending_block,
             prelude,
             header_block,
             STATUS_REVSET,
@@ -298,7 +329,8 @@ pub fn write_status_with_content(
         )
     } else {
         format!(
-            "{}{}\n\n{}\n\nSTACK: {}\n\n{}\n\n{}",
+            "{}{}{}\n\n{}\n\nSTACK: {}\n\n{}\n\n{}",
+            pending_block,
             prelude,
             header_block,
             changes,
@@ -479,14 +511,18 @@ pub fn run_unsquash(
 
 /// Run `badjuju.log`: write log.jujutsu and return its URI.
 pub fn run_log(jj: &Jj, workspace: &Path, revset: &str) -> Result<String, CommandError> {
-    run_log_with_content(jj, workspace, revset).map(|(uri, _)| uri)
+    run_log_with_content(jj, workspace, revset, None).map(|(uri, _)| uri)
 }
 
 /// Same as [`run_log`], but additionally returns the content written to disk.
+///
+/// `pending_squash` is the full change-id of a pending squash source; when set
+/// a "Preparing to squash…" line is prepended before the rest of the buffer.
 pub fn run_log_with_content(
     jj: &Jj,
     workspace: &Path,
     revset: &str,
+    pending_squash: Option<&str>,
 ) -> Result<(String, String), CommandError> {
     let revset = if revset.is_empty() {
         DEFAULT_LOG_REVSET
@@ -495,8 +531,13 @@ pub fn run_log_with_content(
     };
     let output = jj.log_with_stat(revset, true)?;
 
+    let pending_block = pending_squash
+        .map(|id| format!("{}\n\n", render_squash_pending_line(jj, id)))
+        .unwrap_or_default();
+
     let content = format!(
-        "REVSET: {}\n{}\n\nOUTPUT:\n\n{}\n\n{}",
+        "{}REVSET: {}\n{}\n\nOUTPUT:\n\n{}\n\n{}",
+        pending_block,
         revset,
         render_log_shortcuts(),
         output.trim_end(),
@@ -1030,15 +1071,18 @@ pub fn on_describe_save(jj: &Jj, workspace: &Path, content: &str) -> Result<(), 
 /// has been opened in this workspace). Preserves the persisted REVSET header
 /// so the same query is re-run. No-op when the file is absent.
 pub fn regenerate_log_if_present(jj: &Jj, workspace: &Path) -> Result<(), CommandError> {
-    regenerate_log_if_present_with_content(jj, workspace).map(|_| ())
+    regenerate_log_if_present_with_content(jj, workspace, None).map(|_| ())
 }
 
 /// Same as [`regenerate_log_if_present`], but returns `Some((uri, content))`
 /// when the file was regenerated and `None` when the file was absent so
 /// callers can deliver the new content to file-based clients.
+///
+/// `pending_squash` is forwarded to [`run_log_with_content`].
 pub fn regenerate_log_if_present_with_content(
     jj: &Jj,
     workspace: &Path,
+    pending_squash: Option<&str>,
 ) -> Result<Option<(String, String)>, CommandError> {
     let log_path = workspace.join(".jj").join("badjuju").join("log.jujutsu");
     if !log_path.exists() {
@@ -1046,7 +1090,7 @@ pub fn regenerate_log_if_present_with_content(
     }
     let content = std::fs::read_to_string(&log_path)?;
     let revset = parse_log_revset(&content).unwrap_or_else(|| DEFAULT_LOG_REVSET.to_string());
-    let result = run_log_with_content(jj, workspace, &revset)?;
+    let result = run_log_with_content(jj, workspace, &revset, pending_squash)?;
     Ok(Some(result))
 }
 
