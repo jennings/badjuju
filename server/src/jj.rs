@@ -380,6 +380,12 @@ impl Jj {
         self.run(&["diff", "--revisions", rev, "--", path])
     }
 
+    /// Return `jj diff --from <from_rev> --to <to_rev> --git` output.
+    /// Used to enumerate baseline hunks for the squash window.
+    pub fn diff_from_to_git(&self, from_rev: &str, to_rev: &str) -> Result<String, JjError> {
+        self.run(&["diff", "--from", from_rev, "--to", to_rev, "--git"])
+    }
+
     /// Squash a single file's changes from `source` into `source`'s parent.
     /// Uses `--use-destination-message` to avoid opening an editor and
     /// `--keep-emptied` so the source revision survives even when it becomes empty.

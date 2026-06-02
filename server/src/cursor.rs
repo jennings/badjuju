@@ -17,6 +17,7 @@ pub enum BufferKind {
     Status,
     Log,
     Diff,
+    Squash,
 }
 
 impl BufferKind {
@@ -29,10 +30,38 @@ impl BufferKind {
             Some(Self::Log)
         } else if is_diff_uri(uri) {
             Some(Self::Diff)
+        } else if is_squash_uri(uri) {
+            Some(Self::Squash)
         } else {
             None
         }
     }
+}
+
+/// Whether the URI resolves to a squash window file: `.jj/badjuju/squash/<id>-<id>.jujutsu`.
+fn is_squash_uri(uri: &str) -> bool {
+    let name = uri.rsplit('/').next().unwrap_or(uri);
+    // Must look like "<12chars>-<12chars>.jujutsu" and the containing path
+    // must include a "/squash/" segment.
+    if !uri.contains("/squash/") {
+        return false;
+    }
+    // Filename: two 12-char lowercase alphanumeric sequences joined by '-', ending in .jujutsu.
+    let Some(stem) = name.strip_suffix(".jujutsu") else {
+        return false;
+    };
+    let Some(mid) = stem.find('-') else {
+        return false;
+    };
+    let (left, right) = (&stem[..mid], &stem[mid + 1..]);
+    !left.is_empty()
+        && !right.is_empty()
+        && left
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && right
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
 }
 
 fn is_diff_uri(uri: &str) -> bool {
@@ -73,7 +102,31 @@ pub fn revision_at_line(content: &str, line: usize, kind: BufferKind) -> Option<
         BufferKind::Status => Some(revision_at_line_status(content, line)),
         BufferKind::Log => revision_at_line_log(content, line),
         BufferKind::Diff => revision_from_diff_header(content),
+        BufferKind::Squash => revision_from_squash_header(content),
     }
+}
+
+/// Which CHANGES section a squash-buffer cursor line falls in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SquashSection {
+    Selected,
+    Remaining,
+}
+
+/// Resolve which section (SELECTED or REMAINING CHANGES) the cursor is in for
+/// a squash window buffer. Returns `None` if the line is above both sections.
+pub fn squash_section_at_line(content: &str, line: usize) -> Option<SquashSection> {
+    let lines: Vec<&str> = content.lines().collect();
+    let start = line.min(lines.len().saturating_sub(1));
+    for i in (0..=start).rev() {
+        if lines[i] == "REMAINING CHANGES:" {
+            return Some(SquashSection::Remaining);
+        }
+        if lines[i] == "SELECTED CHANGES:" {
+            return Some(SquashSection::Selected);
+        }
+    }
+    None
 }
 
 fn revision_at_line_status(content: &str, line: usize) -> String {
@@ -118,6 +171,20 @@ fn revision_at_line_log(content: &str, line: usize) -> Option<String> {
     for i in (0..=start).rev() {
         if let Some(change_id) = match_commit_header(lines[i]) {
             return Some(change_id.to_string());
+        }
+    }
+    None
+}
+
+fn revision_from_squash_header(content: &str) -> Option<String> {
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("From:") {
+            let rest = rest.trim();
+            // "From: <change_id_short> <commit_id_short> <desc>" — first word is the change-id
+            let change_id = rest.split_whitespace().next()?;
+            if !change_id.is_empty() {
+                return Some(change_id.to_string());
+            }
         }
     }
     None

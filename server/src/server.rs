@@ -129,6 +129,8 @@ struct State {
     /// no squash is in progress. Set by `badjuju.squash.commit` and cleared by
     /// `badjuju.squash.cancel`.
     pending_squash_source: Option<String>,
+    /// State of the currently open squash window, if any.
+    open_squash_window: Option<commands::SquashWindow>,
     /// Op-ids produced by bad-juju's own mutations, with the time they were recorded.
     /// Used by an op-head watcher to suppress double-refreshes.
     self_caused_ops: HashMap<String, Instant>,
@@ -147,6 +149,7 @@ impl Default for State {
             open_diffs: HashMap::new(),
             virtual_diffs_enabled: false,
             pending_squash_source: None,
+            open_squash_window: None,
             self_caused_ops: HashMap::new(),
         }
     }
@@ -846,7 +849,7 @@ impl LanguageServer for Backend {
                     actions.extend(squash_commit_actions(&uri, line, pending_squash.as_deref()));
                 }
             }
-            BufferKind::Diff => {}
+            BufferKind::Diff | BufferKind::Squash => {}
         }
 
         Ok(Some(actions))
@@ -915,9 +918,10 @@ impl LanguageServer for Backend {
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
         let uri = params.text_document.uri.to_string();
 
-        let Some(BufferKind::Status) = BufferKind::from_uri(&uri) else {
+        let kind = BufferKind::from_uri(&uri);
+        if !matches!(kind, Some(BufferKind::Status | BufferKind::Squash)) {
             return Ok(None);
-        };
+        }
 
         let content = {
             let state = self.state.read().await;
@@ -931,7 +935,10 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let ranges = commands::status_folding_ranges(&content);
+        let ranges = match kind {
+            Some(BufferKind::Squash) => commands::squash_folding_ranges(&content),
+            _ => commands::status_folding_ranges(&content),
+        };
         Ok(Some(ranges))
     }
 
@@ -988,7 +995,8 @@ impl LanguageServer for Backend {
                 BufferKind::Diff if !virtual_diffs_enabled => {
                     commands::run_diff_change(&jj, &workspace, "@").map(|(uri, _)| uri)
                 }
-                BufferKind::Diff => return,
+                // Squash windows are always materialized as files; no auto-populate needed.
+                BufferKind::Diff | BufferKind::Squash => return,
             };
 
             match result {
@@ -1058,6 +1066,18 @@ impl LanguageServer for Backend {
         }
         if state.open_diffs.remove(&uri).is_some() {
             // Best-effort delete; ignore errors (file may already be gone).
+            if let Some(path) = commands::path_from_uri(&uri) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        if matches!(BufferKind::from_uri(&uri), Some(BufferKind::Squash)) {
+            if state
+                .open_squash_window
+                .as_ref()
+                .is_some_and(|w| w.uri == uri)
+            {
+                state.open_squash_window = None;
+            }
             if let Some(path) = commands::path_from_uri(&uri) {
                 let _ = std::fs::remove_file(path);
             }
@@ -1352,45 +1372,61 @@ impl LanguageServer for Backend {
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.squash.commit" => {
-                // When a source is already pending, the next squash.commit invocation
-                // selects the destination — implemented in ticket #8. Return an error
-                // stub so clients can detect this state and act accordingly.
                 let already_pending = self.state.read().await.pending_squash_source.clone();
-                if already_pending.is_some() {
-                    let mut err = Error::internal_error();
-                    err.message = "destination selection not yet implemented".into();
-                    err.data = Some(serde_json::json!({
-                        "code": "DestinationSelectionNotImplemented"
-                    }));
-                    return Err(err);
-                }
 
-                let revision = commands::resolve_revision_arg(params.arguments.first(), |uri| {
-                    documents
-                        .get(uri)
-                        .cloned()
-                        .or_else(|| read_uri_from_disk(uri))
-                })
-                .map_err(lsp_err)?;
-                let rev = if revision.is_empty() { "@" } else { &revision };
-                let change_id = jj.change_id_of(rev).map_err(lsp_err)?;
-
-                self.state.write().await.pending_squash_source = Some(change_id.clone());
-
-                let (uri, content) =
-                    commands::run_status_with_content(&jj, &workspace, Some(&change_id))
+                if let Some(from) = already_pending {
+                    // Destination selection: resolve the cursor to a destination change-id.
+                    let revision =
+                        commands::resolve_revision_arg(params.arguments.first(), |uri| {
+                            documents
+                                .get(uri)
+                                .cloned()
+                                .or_else(|| read_uri_from_disk(uri))
+                        })
                         .map_err(lsp_err)?;
-                apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
-                if let Ok(Some((log_uri, log_content))) =
-                    commands::regenerate_log_if_present_with_content(
-                        &jj,
-                        &workspace,
-                        Some(&change_id),
-                    )
-                {
-                    apply_edit_if_open(&self.client, &self.state, &log_uri, &log_content).await;
+                    let rev = if revision.is_empty() { "@" } else { &revision };
+                    let into = jj.change_id_of(rev).map_err(lsp_err)?;
+
+                    let (squash_uri, window) =
+                        commands::run_squash_window(&jj, &workspace, &from, &into)
+                            .map_err(lsp_err)?;
+
+                    {
+                        let mut state = self.state.write().await;
+                        state.pending_squash_source = None;
+                        state.open_squash_window = Some(window);
+                    }
+                    Ok(Some(serde_json::Value::String(squash_uri)))
+                } else {
+                    // Source selection: resolve the cursor to a source change-id.
+                    let revision =
+                        commands::resolve_revision_arg(params.arguments.first(), |uri| {
+                            documents
+                                .get(uri)
+                                .cloned()
+                                .or_else(|| read_uri_from_disk(uri))
+                        })
+                        .map_err(lsp_err)?;
+                    let rev = if revision.is_empty() { "@" } else { &revision };
+                    let change_id = jj.change_id_of(rev).map_err(lsp_err)?;
+
+                    self.state.write().await.pending_squash_source = Some(change_id.clone());
+
+                    let (uri, content) =
+                        commands::run_status_with_content(&jj, &workspace, Some(&change_id))
+                            .map_err(lsp_err)?;
+                    apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
+                    if let Ok(Some((log_uri, log_content))) =
+                        commands::regenerate_log_if_present_with_content(
+                            &jj,
+                            &workspace,
+                            Some(&change_id),
+                        )
+                    {
+                        apply_edit_if_open(&self.client, &self.state, &log_uri, &log_content).await;
+                    }
+                    Ok(Some(serde_json::Value::String(uri)))
                 }
-                Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.squash.cancel" => {
                 self.state.write().await.pending_squash_source = None;

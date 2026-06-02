@@ -550,6 +550,290 @@ pub fn run_log_with_content(
     Ok((file_uri(&path), content))
 }
 
+/// A single unified-diff hunk inside a squash window buffer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hunk {
+    pub file: String,
+    pub header: String,
+    pub content: String,
+}
+
+/// State of an open squash window.
+#[derive(Debug, Clone)]
+pub struct SquashWindow {
+    /// Full change-id of the source revision.
+    pub from: String,
+    /// Full change-id of the destination revision.
+    pub into: String,
+    /// `file://` URI of the on-disk squash buffer.
+    pub uri: String,
+    /// Baseline hunks enumerated from `jj diff --from <from>- --to <from> --git`.
+    pub baseline_hunks: Vec<Hunk>,
+}
+
+/// Parse git-format unified diff (`--git`) into a flat list of hunks.
+/// Each hunk knows its file path, `@@` header line, and content (+/-/space) lines.
+pub fn parse_git_diff_hunks(diff: &str) -> Vec<Hunk> {
+    let mut hunks: Vec<Hunk> = Vec::new();
+    let mut current_file: Option<String> = None;
+    let mut current_header: Option<String> = None;
+    let mut current_content: Vec<&str> = Vec::new();
+
+    let flush = |hunks: &mut Vec<Hunk>,
+                 current_file: &Option<String>,
+                 current_header: &mut Option<String>,
+                 current_content: &mut Vec<&str>| {
+        if let (Some(file), Some(header)) = (current_file.as_deref(), current_header.take()) {
+            hunks.push(Hunk {
+                file: file.to_string(),
+                header,
+                content: current_content.join("\n"),
+            });
+            current_content.clear();
+        }
+    };
+
+    for line in diff.lines() {
+        if line.starts_with("diff --git ") {
+            flush(
+                &mut hunks,
+                &current_file,
+                &mut current_header,
+                &mut current_content,
+            );
+            // "diff --git a/path b/path" — extract destination path (after " b/")
+            let file = line
+                .rsplit_once(" b/")
+                .map(|(_, p)| p.to_string())
+                .unwrap_or_default();
+            current_file = Some(file);
+            current_header = None;
+            current_content.clear();
+        } else if line.starts_with("index ")
+            || line.starts_with("--- ")
+            || line.starts_with("+++ ")
+            || line.starts_with("new file mode")
+            || line.starts_with("deleted file mode")
+            || line.starts_with("old mode")
+            || line.starts_with("new mode")
+            || line.starts_with("similarity index")
+            || line.starts_with("rename from")
+            || line.starts_with("rename to")
+            || line.starts_with("copy from")
+            || line.starts_with("copy to")
+        {
+            // Git diff metadata lines — skip
+        } else if line.starts_with("@@") {
+            flush(
+                &mut hunks,
+                &current_file,
+                &mut current_header,
+                &mut current_content,
+            );
+            current_header = Some(line.to_string());
+        } else if current_header.is_some() {
+            current_content.push(line);
+        }
+    }
+    flush(
+        &mut hunks,
+        &current_file,
+        &mut current_header,
+        &mut current_content,
+    );
+    hunks
+}
+
+/// Write a `squash/<from12>-<into12>.jujutsu` buffer showing baseline hunks
+/// grouped into SELECTED CHANGES (empty at open time) and REMAINING CHANGES
+/// (all hunks). Returns the file URI and the populated `SquashWindow` state.
+pub fn run_squash_window(
+    jj: &Jj,
+    workspace: &Path,
+    from: &str,
+    into: &str,
+) -> Result<(String, SquashWindow), CommandError> {
+    let from_commit_id = jj.commit_id_of(from)?;
+    let into_commit_id = jj.commit_id_of(into)?;
+    let from_desc = jj.describe_get(from)?;
+    let into_desc = jj.describe_get(into)?;
+
+    let from_desc_first = from_desc.trim().lines().next().unwrap_or("(empty)");
+    let from_desc_display = if from_desc_first.is_empty() {
+        "(empty)"
+    } else {
+        from_desc_first
+    };
+    let into_desc_first = into_desc.trim().lines().next().unwrap_or("(empty)");
+    let into_desc_display = if into_desc_first.is_empty() {
+        "(empty)"
+    } else {
+        into_desc_first
+    };
+
+    let from_short = short_id(from);
+    let from_commit_short = short_id(&from_commit_id);
+    let into_short = short_id(into);
+    let into_commit_short = short_id(&into_commit_id);
+
+    // Enumerate baseline hunks: changes introduced by `from` vs its parent.
+    let parent_rev = format!("{from}-");
+    let diff_output = jj.diff_from_to_git(&parent_rev, from)?;
+    let baseline_hunks = parse_git_diff_hunks(&diff_output);
+
+    // Build REMAINING CHANGES section from all baseline hunks grouped by file.
+    let remaining = render_hunk_section(&baseline_hunks);
+
+    let content = format!(
+        "SQUASHING:\n\
+         From: {from_short} {from_commit_short} {from_desc_display}\n\
+         To:   {into_short} {into_commit_short} {into_desc_display}\n\
+         \n\
+         SELECTED CHANGES:\n\
+         \n\
+         REMAINING CHANGES:\n\
+         {remaining}\n\
+         {}",
+        jj.command_reference().diff(),
+    );
+
+    let dir = badjuju_dir(workspace)?;
+    let squash_dir = dir.join("squash");
+    std::fs::create_dir_all(&squash_dir)?;
+    let filename = format!("{}-{}.jujutsu", short_id(from), short_id(into));
+    let path = squash_dir.join(&filename);
+    std::fs::write(&path, &content)?;
+    let uri = file_uri(&path);
+
+    let window = SquashWindow {
+        from: from.to_string(),
+        into: into.to_string(),
+        uri: uri.clone(),
+        baseline_hunks,
+    };
+    Ok((uri, window))
+}
+
+/// Render baseline hunks as plain-text grouped by file path, ready to embed
+/// in a REMAINING CHANGES section. Files are separated by a blank line.
+fn render_hunk_section(hunks: &[Hunk]) -> String {
+    if hunks.is_empty() {
+        return "\n".to_string();
+    }
+    let mut out = String::new();
+    let mut last_file: Option<&str> = None;
+    for hunk in hunks {
+        if last_file != Some(hunk.file.as_str()) {
+            if last_file.is_some() {
+                out.push('\n');
+            }
+            out.push('\n');
+            out.push_str(&hunk.file);
+            last_file = Some(&hunk.file);
+        }
+        out.push('\n');
+        out.push_str(&hunk.header);
+        if !hunk.content.is_empty() {
+            out.push('\n');
+            out.push_str(&hunk.content);
+        }
+    }
+    out.push('\n');
+    out
+}
+
+/// Return folding ranges for a squash window buffer.
+///
+/// Three levels: section (SELECTED/REMAINING) → file → `@@` hunk.
+/// Both sections are folded by default.
+pub fn squash_folding_ranges(content: &str) -> Vec<FoldingRange> {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut ranges = Vec::new();
+
+    let cmd_ref_line = lines
+        .iter()
+        .position(|l| l.starts_with("COMMAND REFERENCE:"))
+        .unwrap_or(lines.len());
+
+    let selected_line = lines.iter().position(|l| *l == "SELECTED CHANGES:");
+    let remaining_line = lines.iter().position(|l| *l == "REMAINING CHANGES:");
+
+    for (section_start, section_end) in [
+        (selected_line, remaining_line.unwrap_or(cmd_ref_line)),
+        (remaining_line, cmd_ref_line),
+    ] {
+        let Some(ss) = section_start else { continue };
+        let se = section_end;
+        let last_nonempty = (ss..se).rfind(|&i| !lines[i].trim().is_empty());
+        if let Some(last) = last_nonempty
+            && last > ss
+        {
+            ranges.push(make_region(ss, last));
+        }
+        squash_section_file_hunk_folds(&lines, ss + 1, se, &mut ranges);
+    }
+    ranges
+}
+
+/// Emit file and hunk folds for the content within a squash section (SELECTED or
+/// REMAINING CHANGES). `start` is the line after the section header; `end` is
+/// the first line of the next section (exclusive).
+fn squash_section_file_hunk_folds(
+    lines: &[&str],
+    start: usize,
+    end: usize,
+    ranges: &mut Vec<FoldingRange>,
+) {
+    let mut file_start: Option<usize> = None;
+    let mut hunk_start: Option<usize> = None;
+    let mut last_hunk_content: Option<usize> = None;
+    let mut last_file_content: Option<usize> = None;
+
+    let flush_hunk =
+        |hs: &mut Option<usize>, hc: &mut Option<usize>, ranges: &mut Vec<FoldingRange>| {
+            if let (Some(h), Some(c)) = (*hs, *hc)
+                && c > h
+            {
+                ranges.push(make_region(h, c));
+            }
+            *hs = None;
+            *hc = None;
+        };
+    let flush_file =
+        |fs: &mut Option<usize>, fc: &mut Option<usize>, ranges: &mut Vec<FoldingRange>| {
+            if let (Some(f), Some(c)) = (*fs, *fc)
+                && c > f
+            {
+                ranges.push(make_region(f, c));
+            }
+            *fs = None;
+            *fc = None;
+        };
+
+    for (i, line) in lines.iter().enumerate().take(end).skip(start) {
+        if line.is_empty() {
+            flush_hunk(&mut hunk_start, &mut last_hunk_content, ranges);
+            flush_file(&mut file_start, &mut last_file_content, ranges);
+        } else if line.starts_with("@@") {
+            flush_hunk(&mut hunk_start, &mut last_hunk_content, ranges);
+            hunk_start = Some(i);
+            last_file_content = Some(i);
+        } else if hunk_start.is_some()
+            && (line.starts_with('+') || line.starts_with('-') || line.starts_with(' '))
+        {
+            last_hunk_content = Some(i);
+            last_file_content = Some(i);
+        } else if !line.starts_with(' ') && !line.starts_with('+') && !line.starts_with('-') {
+            // Plain file path line.
+            flush_hunk(&mut hunk_start, &mut last_hunk_content, ranges);
+            flush_file(&mut file_start, &mut last_file_content, ranges);
+            file_start = Some(i);
+        }
+    }
+    flush_hunk(&mut hunk_start, &mut last_hunk_content, ranges);
+    flush_file(&mut file_start, &mut last_file_content, ranges);
+}
+
 /// Which flavor of diff buffer was opened. Determines filename and refresh policy.
 #[derive(Debug, Clone)]
 pub enum DiffTarget {

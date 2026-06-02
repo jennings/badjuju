@@ -1676,32 +1676,66 @@ fn lsp_squash_cancel_removes_pending_header_from_status() {
 }
 
 #[test]
-fn lsp_squash_commit_when_already_pending_returns_stub_error() {
-    // Calling squash.commit a second time while a source is already pending
-    // must return an error with data.code "DestinationSelectionNotImplemented".
+fn lsp_squash_commit_destination_selection_opens_squash_window() {
+    // After squash.commit selects a source, a second squash.commit call selects
+    // the destination and must return a squash window URI (SQUASHING: header).
     let dir = tempfile::tempdir().unwrap();
     init_jj_repo(dir.path());
+    // Two commits so source and destination are distinct.
+    Command::new("jj")
+        .args(["describe", "-m", "source commit"])
+        .current_dir(dir.path())
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new", "-m", "destination commit"])
+        .current_dir(dir.path())
+        .output()
+        .expect("new failed");
 
     let root_uri = format!("file://{}", dir.path().display());
     let mut session = LspSession::start(dir.path());
     session.initialize(&root_uri);
 
+    // First call: source selection (@-).
+    let resp =
+        session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@-"]));
+    assert!(
+        resp.get("error").is_none(),
+        "source selection failed: {resp}"
+    );
+
+    // Second call: destination selection (@).
     let resp = session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@"]));
     assert!(
         resp.get("error").is_none(),
-        "first squash.commit failed: {resp}"
+        "destination selection failed: {resp}"
     );
-
-    let resp = session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@"]));
+    let squash_uri = resp["result"].as_str().unwrap();
     assert!(
-        resp.get("error").is_some(),
-        "expected error on second squash.commit while pending, got: {resp}"
+        squash_uri.contains("/squash/") && squash_uri.ends_with(".jujutsu"),
+        "expected squash window URI, got: {squash_uri}"
     );
-    let code = resp["error"]["data"]["code"].as_str();
-    assert_eq!(
-        code,
-        Some("DestinationSelectionNotImplemented"),
-        "unexpected error code: {resp}"
+    let squash_content = read_file(squash_uri);
+    assert!(
+        squash_content.starts_with("SQUASHING:"),
+        "expected SQUASHING: header:\n{squash_content}"
+    );
+    assert!(
+        squash_content.contains("From:"),
+        "expected From: row:\n{squash_content}"
+    );
+    assert!(
+        squash_content.contains("To:"),
+        "expected To: row:\n{squash_content}"
+    );
+    assert!(
+        squash_content.contains("SELECTED CHANGES:"),
+        "expected SELECTED CHANGES section:\n{squash_content}"
+    );
+    assert!(
+        squash_content.contains("REMAINING CHANGES:"),
+        "expected REMAINING CHANGES section:\n{squash_content}"
     );
 }
 
@@ -1754,6 +1788,135 @@ fn lsp_code_action_with_pending_squash_shows_cancel() {
     assert_eq!(
         squash_action["command"]["command"].as_str(),
         Some("badjuju.squash.cancel")
+    );
+}
+
+/// Open a squash window between two commits and return the URI + content.
+/// Helper shared by squash window tests.
+fn open_squash_window(dir: &std::path::Path) -> (std::string::String, std::string::String) {
+    // Two commits: @- has a file change, @ is the destination.
+    std::fs::write(dir.join("readme.txt"), "v1\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "source commit"])
+        .current_dir(dir)
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new", "-m", "destination commit"])
+        .current_dir(dir)
+        .output()
+        .expect("new failed");
+
+    let root_uri = format!("file://{}", dir.display());
+    let mut session = LspSession::start(dir);
+    session.initialize(&root_uri);
+
+    // Source = @- (has changes), Destination = @.
+    let resp =
+        session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@-"]));
+    assert!(
+        resp.get("error").is_none(),
+        "source selection failed: {resp}"
+    );
+
+    let resp = session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@"]));
+    assert!(
+        resp.get("error").is_none(),
+        "destination selection failed: {resp}"
+    );
+
+    let squash_uri = resp["result"].as_str().unwrap().to_string();
+    let squash_content = read_file(&squash_uri);
+    (squash_uri, squash_content)
+}
+
+#[test]
+fn lsp_squash_window_remaining_contains_source_hunks() {
+    // REMAINING CHANGES must contain the file changed in the source commit.
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let (_squash_uri, squash_content) = open_squash_window(dir.path());
+
+    assert!(
+        squash_content.contains("readme.txt"),
+        "expected readme.txt in REMAINING CHANGES:\n{squash_content}"
+    );
+    // SELECTED CHANGES must be empty at open time.
+    let selected_start = squash_content
+        .find("SELECTED CHANGES:")
+        .expect("missing SELECTED CHANGES");
+    let remaining_start = squash_content
+        .find("REMAINING CHANGES:")
+        .expect("missing REMAINING CHANGES");
+    let between = &squash_content[selected_start + "SELECTED CHANGES:".len()..remaining_start];
+    assert!(
+        between.trim().is_empty(),
+        "SELECTED CHANGES must be empty at open time; got:\n{between}"
+    );
+}
+
+#[test]
+fn lsp_squash_window_folding_ranges_cover_sections() {
+    // squash_folding_ranges must emit at least one range per non-empty section.
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let (squash_uri, squash_content) = open_squash_window(dir.path());
+
+    let mut session = LspSession::start(dir.path());
+    let root_uri = format!("file://{}", dir.path().display());
+    session.initialize(&root_uri);
+    session.did_open(&squash_uri, "jujutsu", &squash_content);
+
+    let resp = session.request(
+        "textDocument/foldingRange",
+        serde_json::json!({ "textDocument": { "uri": squash_uri } }),
+    );
+    assert!(resp.get("error").is_none(), "foldingRange error: {resp}");
+    let ranges = resp["result"].as_array().expect("array result");
+
+    // There must be at least the REMAINING CHANGES section fold (non-empty, has hunks).
+    assert!(
+        !ranges.is_empty(),
+        "expected folding ranges for squash window:\n{squash_content}"
+    );
+    for range in ranges {
+        assert!(
+            range["startLine"].as_u64() < range["endLine"].as_u64(),
+            "each fold must span at least 2 lines: {range}"
+        );
+    }
+}
+
+#[test]
+fn lsp_squash_window_did_close_deletes_file() {
+    // Closing the squash buffer must delete the on-disk file and clear open_squash_window.
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let (squash_uri, squash_content) = open_squash_window(dir.path());
+
+    // Verify file exists on disk before close.
+    let squash_path = squash_uri.strip_prefix("file://").unwrap();
+    assert!(
+        std::path::Path::new(squash_path).exists(),
+        "expected squash file on disk before close"
+    );
+
+    // Start a fresh session and open then close the squash buffer.
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+    session.did_open(&squash_uri, "jujutsu", &squash_content);
+    session.notify(
+        "textDocument/didClose",
+        serde_json::json!({ "textDocument": { "uri": squash_uri } }),
+    );
+
+    // Give the server a moment to process the notification.
+    std::thread::sleep(Duration::from_millis(200));
+
+    assert!(
+        !std::path::Path::new(squash_path).exists(),
+        "expected squash file deleted after didClose"
     );
 }
 
