@@ -1810,23 +1810,24 @@ fn lsp_code_action_with_pending_squash_shows_cancel() {
         .unwrap_or_else(|| panic!("no commit line in status:\n{status_content}"));
     let actions = code_action_at(&mut session, &status_uri, commit_line);
 
-    let squash_action = actions
+    let into_action = actions
         .iter()
-        .find(|a| {
-            matches!(
-                a["command"]["command"].as_str(),
-                Some("badjuju.squash.cancel") | Some("badjuju.squash.commit")
-            )
-        })
-        .expect("expected a squash-related code action");
+        .find(|a| a["title"].as_str() == Some("Squash into this revision"))
+        .expect("expected 'Squash into this revision' action when pending");
     assert_eq!(
-        squash_action["title"].as_str(),
-        Some("Cancel pending squash"),
-        "expected Cancel action when squash is pending, got: {squash_action}"
+        into_action["command"]["command"].as_str(),
+        Some("badjuju.squash.commit"),
+        "Squash into this revision should invoke badjuju.squash.commit"
     );
+
+    let cancel_action = actions
+        .iter()
+        .find(|a| a["title"].as_str() == Some("Cancel pending squash"))
+        .expect("expected 'Cancel pending squash' action when pending");
     assert_eq!(
-        squash_action["command"]["command"].as_str(),
-        Some("badjuju.squash.cancel")
+        cancel_action["command"]["command"].as_str(),
+        Some("badjuju.squash.cancel"),
+        "Cancel pending squash should invoke badjuju.squash.cancel"
     );
 }
 

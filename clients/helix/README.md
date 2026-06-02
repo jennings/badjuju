@@ -69,12 +69,85 @@ pinned to a specific immutable commit that never changes).
 
 Once a `*.jujutsu` buffer is open, the LSP provides code actions on commit
 lines. Press `Space a` to see available actions for the commit under the
-cursor:
+cursor.
 
-- **Edit** — `jj edit <rev>`
-- **New child** — `jj new <rev>`
-- **Describe** — opens `describe.jujutsu` for editing the commit message
-- **Show diff** — writes `diff-change-<id>.jujutsu` (change mode, updates on amend)
+### Commit-row code actions
+
+When the cursor is on a commit header row in `status.jujutsu` or `log.jujutsu`:
+
+| Action | Description |
+|--------|-------------|
+| Edit commit `<rev>` | `jj edit <rev>` — move `@` to this commit |
+| Abandon commit `<rev>` | `jj abandon <rev>` |
+| Describe commit `<rev>` | Open `describe.jujutsu` for editing the commit message |
+| Show diff for `<rev>` | Write `diff-change-<id>.jujutsu` (change mode, updates on amend) |
+| New child of `<rev>` | `jj new <rev>` |
+| Rebase commit `<rev>`… | `jj rebase -r <rev>` |
+| Bookmark `<rev>`… | Bookmark management menu |
+| Squash from this revision | Mark this commit as the squash source; status/log header updates to confirm |
+
+Once a squash source is marked, the following actions appear on every commit row:
+
+| Action | Description |
+|--------|-------------|
+| Squash into this revision | Use this commit as the destination; materializes the squash window |
+| Cancel pending squash | Clear the pending squash source without performing any operation |
+
+### File-row code actions
+
+When the cursor is on a changed-file line in `status.jujutsu`:
+
+| Action | Description |
+|--------|-------------|
+| Squash `<file>` | Move this file from `@` into its parent |
+| Unsquash `<file>` | Pull this file from the parent back into `@` |
+
+### Squash-window code actions
+
+When the squash window (`.jj/badjuju/squash/<from>-<to>.jujutsu`) is open:
+
+| Action | Description |
+|--------|-------------|
+| Move hunk to SELECTED | Move the hunk under the cursor into the SELECTED CHANGES section |
+| Move hunk to REMAINING | Move the hunk under the cursor back into the REMAINING CHANGES section |
+| Move file `<name>` to SELECTED | Move all hunks for a file into SELECTED CHANGES |
+| Move file `<name>` to REMAINING | Move all hunks for a file back into REMAINING CHANGES |
+| Move all hunks to SELECTED | Select every change (equivalent to a plain `jj squash`) |
+| Move all hunks to REMAINING | Deselect all changes |
+
+## Commit-to-commit squash walkthrough
+
+To move specific hunks from one commit into another:
+
+1. Open the status or log view and place the cursor on the **source** commit
+   (the one whose changes you want to move). Press `Space a` and choose
+   **Squash from this revision**. The status/log header updates to show the
+   pending source.
+
+2. Move the cursor to the **destination** commit (the one you want to receive
+   the changes). Press `Space a` and choose **Squash into this revision**. The
+   server writes the squash window to disk and returns its path.
+
+3. Open the squash window if Helix does not do so automatically:
+
+   ```
+   :open .jj/badjuju/squash/<from>-<to>.jujutsu
+   ```
+
+4. Navigate to a hunk or file header in the **REMAINING CHANGES** section.
+   Press `Space a` and choose **Move hunk to SELECTED** (or **Move file …**).
+   The buffer refreshes immediately to reflect the new state.
+
+5. Repeat step 4 until all desired changes are in SELECTED CHANGES. When
+   finished, close the squash buffer — the operation is applied automatically
+   when the server finalizes the selection. If you want to move everything at
+   once, use **Move all hunks to SELECTED** from any line.
+
+## Log shortcut actions
+
+In `log.jujutsu`, lines beginning with `JJ:` are named revset shortcuts. Place
+the cursor on a `JJ:` line and press `Space a` → **Apply revset: `<label>`** to
+re-run the log query with that revset.
 
 ## Syntax highlighting
 
@@ -83,14 +156,16 @@ advertises automatically. No Helix grammar or tree-sitter query is required.
 
 ## Known limitations
 
-After an action that produces a new buffer (e.g. Show diff), Helix does not
-auto-open the returned file path. Open it manually:
+After an action that produces a new buffer (e.g. Show diff, Squash into this
+revision), Helix does not auto-open the returned file path. Open it manually:
 
 ```
 :open .jj/badjuju/diff-change-<id>.jujutsu
+:open .jj/badjuju/squash/<from>-<to>.jujutsu
 ```
 
-(The exact filename is printed by `badjuju diff`.)
+(The exact filename is printed by the corresponding `badjuju` CLI command or
+returned by the code action.)
 
 ## Auto-reload
 
