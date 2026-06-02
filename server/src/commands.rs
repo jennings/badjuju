@@ -705,8 +705,7 @@ pub fn run_squash_window(
          SELECTED CHANGES:\n\
          \n\
          REMAINING CHANGES:\n\
-         {remaining}\n\
-         {}",
+         {remaining}{}",
         jj.command_reference().squash(),
     );
 
@@ -947,14 +946,14 @@ fn render_hunk_section(hunks: &[Hunk]) -> String {
             out.push_str(&hunk.content);
         }
     }
-    out.push('\n');
+    out.push_str("\n\n");
     out
 }
 
 /// Return folding ranges for a squash window buffer.
 ///
-/// Three levels: section (SELECTED/REMAINING) → file → `@@` hunk.
-/// Both sections are folded by default.
+/// Two levels: file → `@@` hunk. Section headers (SELECTED/REMAINING) are
+/// not themselves folded so they stay visible when files are collapsed.
 pub fn squash_folding_ranges(content: &str) -> Vec<FoldingRange> {
     let lines: Vec<&str> = content.lines().collect();
     let mut ranges = Vec::new();
@@ -972,14 +971,7 @@ pub fn squash_folding_ranges(content: &str) -> Vec<FoldingRange> {
         (remaining_line, cmd_ref_line),
     ] {
         let Some(ss) = section_start else { continue };
-        let se = section_end;
-        let last_nonempty = (ss..se).rfind(|&i| !lines[i].trim().is_empty());
-        if let Some(last) = last_nonempty
-            && last > ss
-        {
-            ranges.push(make_region(ss, last));
-        }
-        squash_section_file_hunk_folds(&lines, ss + 1, se, &mut ranges);
+        squash_section_file_hunk_folds(&lines, ss + 1, section_end, &mut ranges);
     }
     ranges
 }

@@ -1914,7 +1914,7 @@ fn lsp_squash_window_folding_ranges_cover_sections() {
     assert!(resp.get("error").is_none(), "foldingRange error: {resp}");
     let ranges = resp["result"].as_array().expect("array result");
 
-    // There must be at least the REMAINING CHANGES section fold (non-empty, has hunks).
+    // There must be at least file and hunk folds for the non-empty REMAINING section.
     assert!(
         !ranges.is_empty(),
         "expected folding ranges for squash window:\n{squash_content}"
