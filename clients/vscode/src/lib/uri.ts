@@ -26,6 +26,10 @@ export function isDescribeFile(uri: UriLike): boolean {
   return uri.path.endsWith("/describe.jujutsu");
 }
 
+export function isSquashFile(uri: UriLike): boolean {
+  return uri.path.includes("/squash/") && uri.path.endsWith(".jujutsu");
+}
+
 export function isReadonlyOutput(uri: UriLike): boolean {
   return isStatusFile(uri) || isLogFile(uri) || isDiffFile(uri);
 }

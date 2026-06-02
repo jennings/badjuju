@@ -27,6 +27,7 @@ import {
   DIFF_SCHEME,
   isLogFile,
   isReadonlyOutput,
+  isSquashFile,
   isStatusFile,
   READONLY_SCHEME,
 } from "./lib/uri";
@@ -36,6 +37,10 @@ declare const __BADJUJU_COMMIT__: string;
 declare const __BADJUJU_VERSION__: string;
 
 let client: LanguageClient;
+
+function setPendingSquash(value: boolean): void {
+  commands.executeCommand("setContext", "badjuju.pendingSquash", value);
+}
 
 class StatusContentProvider implements TextDocumentContentProvider {
   private readonly _onDidChange = new EventEmitter<Uri>();
@@ -130,6 +135,12 @@ async function openServerResult(
     const doc = await workspace.openTextDocument(readonlyUri);
     await languages.setTextDocumentLanguage(doc, "jujutsu");
     await window.showTextDocument(doc, showOpts);
+    return;
+  }
+  if (parsed.scheme === "file" && isSquashFile(parsed)) {
+    const doc = await workspace.openTextDocument(parsed);
+    await languages.setTextDocumentLanguage(doc, "jujutsu");
+    await window.showTextDocument(doc, { ...showOpts, preview: false });
     return;
   }
   const doc = await workspace.openTextDocument(parsed);
@@ -524,6 +535,80 @@ export async function activate(context: ExtensionContext) {
     }),
     commands.registerCommand("badjuju.unsquash.file", async () => {
       await runFileScopedStatusCommand("badjuju.unsquash");
+    }),
+    commands.registerCommand("badjuju.squash.commit", async () => {
+      const args = cursorArgsForActiveEditor() ?? [];
+      try {
+        const result = await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.squash.commit",
+          arguments: args,
+        });
+        const resultUri = result as string;
+        // Source selection returns the status URI; destination selection returns the squash URI.
+        if (isSquashFile(Uri.parse(resultUri))) {
+          setPendingSquash(false);
+        } else {
+          setPendingSquash(true);
+        }
+        await openServerResult(resultUri);
+      } catch (e) {
+        window.showInformationMessage(`squash.commit: ${(e as Error).message}`);
+      }
+    }),
+    commands.registerCommand("badjuju.squash.cancel", async () => {
+      try {
+        const result = await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.squash.cancel",
+          arguments: [],
+        });
+        setPendingSquash(false);
+        await openServerResult(result as string);
+      } catch (e) {
+        window.showInformationMessage(`squash.cancel: ${(e as Error).message}`);
+      }
+    }),
+    commands.registerCommand("badjuju.squash.toggle", async () => {
+      const editor = window.activeTextEditor;
+      if (!editor) return;
+      try {
+        await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.squash.toggle",
+          arguments: [
+            {
+              cursor: {
+                uri: editor.document.uri.toString(),
+                line: editor.selection.active.line,
+              },
+            },
+          ],
+        });
+      } catch (e) {
+        window.showInformationMessage(`squash.toggle: ${(e as Error).message}`);
+      }
+    }),
+    commands.registerCommand("badjuju.squash.select_all", async () => {
+      try {
+        await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.squash.select_all",
+          arguments: [],
+        });
+      } catch (e) {
+        window.showInformationMessage(
+          `squash.select_all: ${(e as Error).message}`,
+        );
+      }
+    }),
+    commands.registerCommand("badjuju.squash.select_none", async () => {
+      try {
+        await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.squash.select_none",
+          arguments: [],
+        });
+      } catch (e) {
+        window.showInformationMessage(
+          `squash.select_none: ${(e as Error).message}`,
+        );
+      }
     }),
     commands.registerCommand("badjuju.undo.open", async () => {
       const result = await client.sendRequest("workspace/executeCommand", {

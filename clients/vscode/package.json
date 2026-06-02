@@ -153,6 +153,31 @@
         "title": "Unsquash file at cursor from parent into child"
       },
       {
+        "command": "badjuju.squash.commit",
+        "category": "jj",
+        "title": "Select source or destination for commit-to-commit squash"
+      },
+      {
+        "command": "badjuju.squash.cancel",
+        "category": "jj",
+        "title": "Cancel pending commit-to-commit squash"
+      },
+      {
+        "command": "badjuju.squash.toggle",
+        "category": "jj",
+        "title": "Toggle hunk or file in squash window"
+      },
+      {
+        "command": "badjuju.squash.select_all",
+        "category": "jj",
+        "title": "Select all changes for squash"
+      },
+      {
+        "command": "badjuju.squash.select_none",
+        "category": "jj",
+        "title": "Deselect all changes for squash"
+      },
+      {
         "command": "badjuju.undo.open",
         "category": "jj",
         "title": "Undo last operation (jj undo)"
@@ -300,9 +325,19 @@
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
-        "command": "badjuju.squash.file",
+        "command": "badjuju.squash.commit",
         "key": "s",
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.squash.cancel",
+        "key": "shift+s",
+        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus && badjuju.pendingSquash"
+      },
+      {
+        "command": "badjuju.squash.file",
+        "key": "shift+s",
+        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !badjuju.pendingSquash"
       },
       {
         "command": "badjuju.undo.open",
@@ -333,6 +368,16 @@
         "command": "badjuju.abandon.cursor",
         "key": "a",
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.squash.commit",
+        "key": "s",
+        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.squash.cancel",
+        "key": "shift+s",
+        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus && badjuju.pendingSquash"
       },
       {
         "command": "badjuju.edit.cursor",
@@ -437,9 +482,19 @@
         "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
-        "command": "badjuju.squash.file",
+        "command": "badjuju.squash.commit",
         "key": "s s",
         "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.squash.cancel",
+        "key": "shift+s shift+s",
+        "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus && badjuju.pendingSquash"
+      },
+      {
+        "command": "badjuju.squash.file",
+        "key": "shift+s shift+s",
+        "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !badjuju.pendingSquash"
       },
       {
         "command": "badjuju.unsquash.file",
@@ -554,6 +609,16 @@
         "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
+        "command": "badjuju.squash.commit",
+        "key": "s s",
+        "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.squash.cancel",
+        "key": "shift+s shift+s",
+        "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus && badjuju.pendingSquash"
+      },
+      {
         "command": "badjuju.refresh.open",
         "key": "shift+r",
         "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
@@ -612,6 +677,46 @@
         "command": "editor.toggleFold",
         "key": "tab",
         "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus && vim.mode == 'Normal'"
+      },
+      {
+        "command": "badjuju.squash.toggle",
+        "key": "s",
+        "when": "badjuju.keymapProfile == 'magit' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.squash.select_all",
+        "key": "a",
+        "when": "badjuju.keymapProfile == 'magit' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.squash.select_none",
+        "key": "shift+a",
+        "when": "badjuju.keymapProfile == 'magit' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "workbench.action.closeActiveEditor",
+        "key": "q",
+        "when": "badjuju.keymapProfile == 'magit' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.squash.toggle",
+        "key": "s",
+        "when": "badjuju.keymapProfile == 'vim' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.squash.select_all",
+        "key": "a",
+        "when": "badjuju.keymapProfile == 'vim' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.squash.select_none",
+        "key": "shift+a",
+        "when": "badjuju.keymapProfile == 'vim' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "workbench.action.closeActiveEditor",
+        "key": "q",
+        "when": "badjuju.keymapProfile == 'vim' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
       }
     ]
   }
