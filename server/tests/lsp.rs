@@ -168,6 +168,45 @@ impl LspSession {
         )
     }
 
+    /// Like `execute_command_with_args`, but automatically responds to any
+    /// `workspace/applyEdit` server requests received while waiting for the
+    /// command response. Required for squash commands that call `apply_edit`
+    /// before returning — without this the exchange deadlocks.
+    fn execute_command_acked(
+        &mut self,
+        command: &str,
+        arguments: serde_json::Value,
+    ) -> serde_json::Value {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.send(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "workspace/executeCommand",
+            "params": {
+                "command": command,
+                "arguments": arguments,
+            },
+        }));
+        let expected_id = serde_json::json!(id);
+        loop {
+            let msg = self.recv();
+            if msg.get("id") == Some(&expected_id) {
+                return msg;
+            }
+            // Auto-ACK workspace/applyEdit so the server's apply_edit() doesn't block.
+            if msg.get("method").and_then(|v| v.as_str()) == Some("workspace/applyEdit") {
+                if let Some(req_id) = msg.get("id").cloned() {
+                    self.send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "result": { "applied": true }
+                    }));
+                }
+            }
+        }
+    }
+
     fn did_open(&mut self, uri: &str, language_id: &str, text: &str) {
         self.notify(
             "textDocument/didOpen",
@@ -1917,6 +1956,385 @@ fn lsp_squash_window_did_close_deletes_file() {
     assert!(
         !std::path::Path::new(squash_path).exists(),
         "expected squash file deleted after didClose"
+    );
+}
+
+/// Open a squash window in a fresh LSP session and return the session (with
+/// `open_squash_window` set), the squash buffer URI, and its initial content.
+/// The repo has one source commit (adds readme.txt v1) and one destination commit.
+fn setup_squash_session(dir: &std::path::Path) -> (LspSession, String, String) {
+    std::fs::write(dir.join("readme.txt"), "v1\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "source commit"])
+        .current_dir(dir)
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new", "-m", "destination commit"])
+        .current_dir(dir)
+        .output()
+        .expect("new failed");
+
+    let root_uri = format!("file://{}", dir.display());
+    let mut session = LspSession::start(dir);
+    session.initialize(&root_uri);
+
+    let resp =
+        session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@-"]));
+    assert!(
+        resp.get("error").is_none(),
+        "source selection failed: {resp}"
+    );
+
+    let resp = session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@"]));
+    assert!(
+        resp.get("error").is_none(),
+        "destination selection failed: {resp}"
+    );
+
+    let squash_uri = resp["result"].as_str().unwrap().to_string();
+    let squash_content = read_file(&squash_uri);
+    (session, squash_uri, squash_content)
+}
+
+#[test]
+fn lsp_squash_toggle_hunk_moves_remaining_to_selected() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let (mut session, squash_uri, squash_content) = setup_squash_session(dir.path());
+
+    session.did_open(&squash_uri, "jujutsu", &squash_content);
+
+    // Find the first @@ line that appears after the REMAINING CHANGES: header.
+    let remaining_line = squash_content
+        .lines()
+        .enumerate()
+        .find_map(|(i, l)| (l == "REMAINING CHANGES:").then_some(i))
+        .expect("REMAINING CHANGES: not found in initial squash buffer");
+    let hunk_line = squash_content
+        .lines()
+        .enumerate()
+        .skip(remaining_line)
+        .find_map(|(i, l)| l.starts_with("@@").then_some(i))
+        .expect("no @@ hunk found in REMAINING section");
+
+    let resp = session.execute_command_acked(
+        "badjuju.squash.toggle",
+        serde_json::json!([{ "cursor": { "uri": squash_uri, "line": hunk_line } }]),
+    );
+    assert!(resp.get("error").is_none(), "squash.toggle failed: {resp}");
+    let new_uri = resp["result"].as_str().unwrap();
+    let new_content = read_file(new_uri);
+
+    let selected_start = new_content
+        .find("SELECTED CHANGES:")
+        .expect("SELECTED CHANGES: missing after toggle");
+    let remaining_start = new_content
+        .find("REMAINING CHANGES:")
+        .expect("REMAINING CHANGES: missing after toggle");
+    let selected_section = &new_content[selected_start..remaining_start];
+    let remaining_section = {
+        let after = &new_content[remaining_start..];
+        let cmd = after.find("COMMAND REFERENCE:").unwrap_or(after.len());
+        &after[..cmd]
+    };
+
+    assert!(
+        selected_section.contains("@@"),
+        "hunk should be in SELECTED after toggle:\n{new_content}"
+    );
+    assert!(
+        !remaining_section.contains("@@"),
+        "REMAINING should have no hunks after toggle:\n{new_content}"
+    );
+}
+
+#[test]
+fn lsp_squash_toggle_hunk_moves_selected_to_remaining() {
+    // Move all hunks to SELECTED first via select_all, then toggle one back.
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let (mut session, squash_uri, squash_content) = setup_squash_session(dir.path());
+
+    session.did_open(&squash_uri, "jujutsu", &squash_content);
+
+    // select_all moves everything from REMAINING to SELECTED.
+    let resp = session.execute_command_acked("badjuju.squash.select_all", serde_json::json!([]));
+    assert!(resp.get("error").is_none(), "select_all failed: {resp}");
+    let after_all_uri = resp["result"].as_str().unwrap().to_string();
+    let after_all_content = read_file(&after_all_uri);
+
+    // Find first @@ line in SELECTED section of the post-select_all content.
+    let selected_line = after_all_content
+        .lines()
+        .enumerate()
+        .find_map(|(i, l)| (l == "SELECTED CHANGES:").then_some(i))
+        .expect("SELECTED CHANGES: not found after select_all");
+    let remaining_line = after_all_content
+        .lines()
+        .enumerate()
+        .skip(selected_line)
+        .find_map(|(i, l)| (l == "REMAINING CHANGES:").then_some(i))
+        .expect("REMAINING CHANGES: not found after select_all");
+    let hunk_line = after_all_content
+        .lines()
+        .enumerate()
+        .skip(selected_line)
+        .take(remaining_line - selected_line)
+        .find_map(|(i, l)| l.starts_with("@@").then_some(i))
+        .expect("no @@ hunk in SELECTED section after select_all");
+
+    let resp = session.execute_command_acked(
+        "badjuju.squash.toggle",
+        serde_json::json!([{ "cursor": { "uri": squash_uri, "line": hunk_line } }]),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "squash.toggle (selected→remaining) failed: {resp}"
+    );
+    let new_uri = resp["result"].as_str().unwrap();
+    let new_content = read_file(new_uri);
+
+    let sel_start = new_content
+        .find("SELECTED CHANGES:")
+        .expect("SELECTED CHANGES: missing");
+    let rem_start = new_content
+        .find("REMAINING CHANGES:")
+        .expect("REMAINING CHANGES: missing");
+    let selected_section = &new_content[sel_start..rem_start];
+    let remaining_section = &new_content[rem_start..];
+
+    assert!(
+        !selected_section.contains("@@"),
+        "SELECTED should be empty after toggle back:\n{new_content}"
+    );
+    assert!(
+        remaining_section.contains("@@"),
+        "hunk should be back in REMAINING:\n{new_content}"
+    );
+}
+
+#[test]
+fn lsp_squash_toggle_file_moves_remaining_to_selected() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let (mut session, squash_uri, squash_content) = setup_squash_session(dir.path());
+
+    session.did_open(&squash_uri, "jujutsu", &squash_content);
+
+    // Find the plain file-path line (readme.txt) in REMAINING — not @@, not a diff line.
+    let remaining_line = squash_content
+        .lines()
+        .enumerate()
+        .find_map(|(i, l)| (l == "REMAINING CHANGES:").then_some(i))
+        .expect("REMAINING CHANGES: not found");
+    let file_line = squash_content
+        .lines()
+        .enumerate()
+        .skip(remaining_line + 1)
+        .find_map(|(i, l)| {
+            let plain = !l.is_empty()
+                && !l.starts_with("@@")
+                && !l.starts_with('+')
+                && !l.starts_with('-')
+                && !l.starts_with(' ')
+                && !l.starts_with("COMMAND");
+            plain.then_some(i)
+        })
+        .expect("no file-path line found in REMAINING section");
+
+    let resp = session.execute_command_acked(
+        "badjuju.squash.toggle",
+        serde_json::json!([{ "cursor": { "uri": squash_uri, "line": file_line } }]),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "squash.toggle (file) failed: {resp}"
+    );
+    let new_uri = resp["result"].as_str().unwrap();
+    let new_content = read_file(new_uri);
+
+    let sel_start = new_content
+        .find("SELECTED CHANGES:")
+        .expect("SELECTED CHANGES: missing");
+    let rem_start = new_content
+        .find("REMAINING CHANGES:")
+        .expect("REMAINING CHANGES: missing");
+    let selected_section = &new_content[sel_start..rem_start];
+
+    assert!(
+        selected_section.contains("readme.txt"),
+        "file should be in SELECTED after file-level toggle:\n{new_content}"
+    );
+    assert!(
+        !selected_section.is_empty(),
+        "SELECTED section should be non-trivial:\n{new_content}"
+    );
+}
+
+#[test]
+fn lsp_squash_select_all_empties_remaining() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let (mut session, squash_uri, squash_content) = setup_squash_session(dir.path());
+
+    session.did_open(&squash_uri, "jujutsu", &squash_content);
+
+    let resp = session.execute_command_acked("badjuju.squash.select_all", serde_json::json!([]));
+    assert!(resp.get("error").is_none(), "select_all failed: {resp}");
+    let new_uri = resp["result"].as_str().unwrap();
+    let new_content = read_file(new_uri);
+
+    let sel_start = new_content
+        .find("SELECTED CHANGES:")
+        .expect("SELECTED CHANGES: missing");
+    let rem_start = new_content
+        .find("REMAINING CHANGES:")
+        .expect("REMAINING CHANGES: missing");
+    let selected_section = &new_content[sel_start..rem_start];
+    let remaining_after = &new_content[rem_start + "REMAINING CHANGES:".len()..];
+    let remaining_body = remaining_after
+        .find("COMMAND REFERENCE:")
+        .map(|i| &remaining_after[..i])
+        .unwrap_or(remaining_after);
+
+    assert!(
+        selected_section.contains("@@"),
+        "SELECTED should have hunks after select_all:\n{new_content}"
+    );
+    assert!(
+        !remaining_body.contains("@@"),
+        "REMAINING should have no hunks after select_all:\n{new_content}"
+    );
+}
+
+#[test]
+fn lsp_squash_select_none_repopulates_remaining() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let (mut session, squash_uri, squash_content) = setup_squash_session(dir.path());
+
+    session.did_open(&squash_uri, "jujutsu", &squash_content);
+
+    // Move everything to SELECTED first.
+    let resp = session.execute_command_acked("badjuju.squash.select_all", serde_json::json!([]));
+    assert!(resp.get("error").is_none(), "select_all failed: {resp}");
+
+    // Then move it all back to REMAINING.
+    let resp = session.execute_command_acked("badjuju.squash.select_none", serde_json::json!([]));
+    assert!(resp.get("error").is_none(), "select_none failed: {resp}");
+    let new_uri = resp["result"].as_str().unwrap();
+    let new_content = read_file(new_uri);
+
+    let sel_start = new_content
+        .find("SELECTED CHANGES:")
+        .expect("SELECTED CHANGES: missing");
+    let rem_start = new_content
+        .find("REMAINING CHANGES:")
+        .expect("REMAINING CHANGES: missing");
+    let selected_section = &new_content[sel_start..rem_start];
+    let remaining_section = &new_content[rem_start..];
+
+    assert!(
+        !selected_section.contains("@@"),
+        "SELECTED should be empty after select_none:\n{new_content}"
+    );
+    assert!(
+        remaining_section.contains("@@"),
+        "REMAINING should have hunks after select_none:\n{new_content}"
+    );
+}
+
+#[test]
+fn lsp_squash_window_regenerates_on_external_op() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let (mut session, squash_uri, squash_content) = setup_squash_session(dir.path());
+
+    // Register the squash buffer in the server's document cache.
+    session.did_open(&squash_uri, "jujutsu", &squash_content);
+
+    // Trigger an external jj operation — describe the destination commit.
+    Command::new("jj")
+        .args(["describe", "-r", "@", "-m", "updated destination"])
+        .current_dir(dir.path())
+        .output()
+        .expect("jj describe failed");
+
+    // The op-head watcher must regenerate and push the squash window via applyEdit.
+    let req = session
+        .recv_server_request_timeout("workspace/applyEdit", Duration::from_millis(3000))
+        .expect("expected workspace/applyEdit within 3s after external jj describe");
+
+    let changes = req["params"]["edit"]["changes"]
+        .as_object()
+        .expect("edit.changes should be an object");
+    let edits = changes
+        .get(&squash_uri)
+        .unwrap_or_else(|| panic!("no edits for {squash_uri} in: {req}"))
+        .as_array()
+        .expect("edits should be an array");
+    let new_text = edits[0]["newText"]
+        .as_str()
+        .expect("newText should be a string");
+
+    session.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": req["id"],
+        "result": { "applied": true }
+    }));
+
+    assert!(
+        new_text.starts_with("SQUASHING:"),
+        "regenerated content should start with SQUASHING::\n{new_text}"
+    );
+    assert!(
+        new_text.contains("updated destination"),
+        "regenerated content should reflect new commit description:\n{new_text}"
+    );
+}
+
+#[test]
+fn lsp_squash_window_shows_notice_when_from_abandoned() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let (mut session, squash_uri, squash_content) = setup_squash_session(dir.path());
+
+    session.did_open(&squash_uri, "jujutsu", &squash_content);
+
+    // Abandon the source commit externally.
+    Command::new("jj")
+        .args(["abandon", "@-"])
+        .current_dir(dir.path())
+        .output()
+        .expect("jj abandon failed");
+
+    // The watcher must push a "target no longer exists" notice via applyEdit.
+    let req = session
+        .recv_server_request_timeout("workspace/applyEdit", Duration::from_millis(3000))
+        .expect("expected workspace/applyEdit within 3s after abandoning source");
+
+    let changes = req["params"]["edit"]["changes"]
+        .as_object()
+        .expect("edit.changes should be an object");
+    let edits = changes
+        .get(&squash_uri)
+        .unwrap_or_else(|| panic!("no edits for {squash_uri} in: {req}"))
+        .as_array()
+        .expect("edits should be an array");
+    let new_text = edits[0]["newText"]
+        .as_str()
+        .expect("newText should be a string");
+
+    session.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": req["id"],
+        "result": { "applied": true }
+    }));
+
+    assert!(
+        new_text.contains("SQUASH TARGET NO LONGER EXISTS"),
+        "expected notice when source commit is abandoned:\n{new_text}"
     );
 }
 

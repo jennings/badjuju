@@ -223,13 +223,20 @@ impl Backend {
     }
 
     pub async fn refresh_open_artifacts(&self, jj: &Jj, workspace: &std::path::Path) {
-        let (open_status_uri, open_log_uri, virtual_diffs_enabled, pending_squash) = {
+        let (
+            open_status_uri,
+            open_log_uri,
+            virtual_diffs_enabled,
+            pending_squash,
+            open_squash_window,
+        ) = {
             let state = self.state.read().await;
             (
                 state.open_status_uri.clone(),
                 state.open_log_uri.clone(),
                 state.virtual_diffs_enabled,
                 state.pending_squash_source.clone(),
+                state.open_squash_window.clone(),
             )
         };
         let pending = pending_squash.as_deref();
@@ -263,6 +270,19 @@ impl Backend {
             }
         }
         self.refresh_open_diffs(jj, workspace).await;
+        if let Some(window) = open_squash_window {
+            match commands::regenerate_squash_window(jj, &window) {
+                Ok((uri, content)) => {
+                    apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
+                    self.state.write().await.documents.insert(uri, content);
+                }
+                Err(e) => {
+                    self.client
+                        .log_message(MessageType::WARNING, format!("refresh squash failed: {e}"))
+                        .await;
+                }
+            }
+        }
     }
 
     /// Handler for `workspace/textDocumentContent` (LSP 3.18).
@@ -463,6 +483,24 @@ fn spawn_op_head_watcher(
                             apply_edit_if_open(&client, &state, &uri, &content).await;
                         }
                     }
+                    // Refresh open squash window if any.
+                    let open_squash_window = state.read().await.open_squash_window.clone();
+                    if let Some(window) = open_squash_window {
+                        match commands::regenerate_squash_window(&jj, &window) {
+                            Ok((uri, content)) => {
+                                apply_edit_if_open(&client, &state, &uri, &content).await;
+                                state.write().await.documents.insert(uri, content);
+                            }
+                            Err(e) => {
+                                client
+                                    .log_message(
+                                        MessageType::WARNING,
+                                        format!("watcher: refresh squash failed: {e}"),
+                                    )
+                                    .await;
+                            }
+                        }
+                    }
                 }
                 _ = shutdown.notified() => {
                     let _ = stop_tx.send(());
@@ -556,6 +594,98 @@ fn log_shortcut_action(uri: &str, line: usize, label: &str) -> CodeActionOrComma
         }),
         ..Default::default()
     })
+}
+
+/// Build code actions offered for a squash window buffer line.
+///
+/// - File-path line in REMAINING: "Move file to SELECTED"
+/// - File-path line in SELECTED: "Move file to REMAINING"
+/// - Hunk line in REMAINING: "Move hunk to SELECTED"
+/// - Hunk line in SELECTED: "Move hunk to REMAINING"
+/// - Anywhere: "Move all to SELECTED" (when REMAINING non-empty)
+/// - Anywhere: "Move all to REMAINING" (when SELECTED non-empty)
+fn squash_window_actions(uri: &str, line: usize, content: &str) -> Vec<CodeActionOrCommand> {
+    let cursor_arg = serde_json::json!({ "cursor": { "uri": uri, "line": line } });
+    let make =
+        |title: String, command: &str, args: Vec<serde_json::Value>| -> CodeActionOrCommand {
+            CodeActionOrCommand::CodeAction(CodeAction {
+                title,
+                kind: Some(CodeActionKind::EMPTY),
+                command: Some(Command {
+                    title: String::new(),
+                    command: command.to_string(),
+                    arguments: Some(args),
+                }),
+                ..Default::default()
+            })
+        };
+
+    let mut actions: Vec<CodeActionOrCommand> = Vec::new();
+    let section = cursor::squash_section_at_line(content, line);
+
+    // File or hunk actions
+    if let Some(sec) = section {
+        let is_file_only = cursor::squash_file_at_line(content, line).is_some()
+            && cursor::squash_hunk_at_line(content, line).is_none();
+        let is_hunk = cursor::squash_hunk_at_line(content, line).is_some();
+
+        if let Some(file) = cursor::squash_file_at_line(content, line) {
+            if is_file_only {
+                let title = match sec {
+                    cursor::SquashSection::Remaining => {
+                        format!("Move file {file} to SELECTED")
+                    }
+                    cursor::SquashSection::Selected => {
+                        format!("Move file {file} to REMAINING")
+                    }
+                };
+                actions.push(make(
+                    title,
+                    "badjuju.squash.toggle",
+                    vec![cursor_arg.clone()],
+                ));
+            }
+        }
+        if is_hunk {
+            let title = match sec {
+                cursor::SquashSection::Remaining => "Move hunk to SELECTED".to_string(),
+                cursor::SquashSection::Selected => "Move hunk to REMAINING".to_string(),
+            };
+            actions.push(make(
+                title,
+                "badjuju.squash.toggle",
+                vec![cursor_arg.clone()],
+            ));
+        }
+    }
+
+    // Bulk actions — check whether REMAINING / SELECTED sections have content.
+    let lines: Vec<&str> = content.lines().collect();
+    let remaining_has_content = lines.iter().enumerate().any(|(i, _)| {
+        cursor::squash_section_at_line(content, i) == Some(cursor::SquashSection::Remaining)
+            && cursor::squash_file_at_line(content, i).is_some()
+    });
+    let selected_has_content = lines.iter().enumerate().any(|(i, _)| {
+        cursor::squash_section_at_line(content, i) == Some(cursor::SquashSection::Selected)
+            && cursor::squash_file_at_line(content, i).is_some()
+    });
+
+    if remaining_has_content {
+        actions.push(make(
+            "Move all hunks to SELECTED".to_string(),
+            "badjuju.squash.select_all",
+            vec![],
+        ));
+    }
+    if selected_has_content {
+        actions.push(make(
+            "Move all hunks to REMAINING".to_string(),
+            "badjuju.squash.select_none",
+            vec![],
+        ));
+    }
+
+    actions
 }
 
 /// Build the squash-flow code actions offered for a commit-header row in status
@@ -849,7 +979,10 @@ impl LanguageServer for Backend {
                     actions.extend(squash_commit_actions(&uri, line, pending_squash.as_deref()));
                 }
             }
-            BufferKind::Diff | BufferKind::Squash => {}
+            BufferKind::Squash => {
+                actions.extend(squash_window_actions(&uri, line, &content));
+            }
+            BufferKind::Diff => {}
         }
 
         Ok(Some(actions))
@@ -1441,13 +1574,90 @@ impl LanguageServer for Backend {
                 }
                 Ok(Some(serde_json::Value::String(uri)))
             }
-            "badjuju.squash.toggle"
-            | "badjuju.squash.select_all"
-            | "badjuju.squash.select_none" => {
-                // Implemented in ticket #9.
-                let mut err = Error::method_not_found();
-                err.message = format!("{} not yet implemented", params.command).into();
-                Err(err)
+            "badjuju.squash.toggle" => {
+                let cp = commands::parse_cursor_arg(params.arguments.first())
+                    .map_err(lsp_err)?
+                    .ok_or_else(|| lsp_err("squash.toggle requires a cursor argument"))?;
+
+                let (window, content) = {
+                    let state = self.state.read().await;
+                    let w = state
+                        .open_squash_window
+                        .clone()
+                        .ok_or_else(|| lsp_err("no open squash window"))?;
+                    let c = state
+                        .documents
+                        .get(&cp.uri)
+                        .cloned()
+                        .or_else(|| read_uri_from_disk(&cp.uri))
+                        .ok_or_else(|| lsp_err(format!("document not found: {}", cp.uri)))?;
+                    (w, c)
+                };
+
+                let section = cursor::squash_section_at_line(&content, cp.line)
+                    .ok_or_else(|| lsp_err("cursor not in a SELECTED or REMAINING section"))?;
+
+                let (squash_uri, new_content) = if let Some(file) =
+                    cursor::squash_file_at_line(&content, cp.line)
+                    && cursor::squash_hunk_at_line(&content, cp.line).is_none()
+                {
+                    // File-level toggle: use file-level squash (no --interactive needed).
+                    commands::run_squash_toggle_file(&jj, &window, &file, section)
+                        .map_err(lsp_err)?
+                } else if let Some(hunk) = cursor::squash_hunk_at_line(&content, cp.line) {
+                    // Hunk-level toggle: use --interactive --tool.
+                    commands::run_squash_toggle_hunk(&jj, &workspace, &window, &hunk, section)
+                        .map_err(lsp_err)?
+                } else {
+                    return Err(lsp_err("cursor is not on a file or hunk line"));
+                };
+
+                self.record_self_caused_op(&jj).await;
+                apply_edit_if_open(&self.client, &self.state, &squash_uri, &new_content).await;
+                self.state
+                    .write()
+                    .await
+                    .documents
+                    .insert(squash_uri.clone(), new_content);
+                Ok(Some(serde_json::Value::String(squash_uri)))
+            }
+            "badjuju.squash.select_all" => {
+                let window = self
+                    .state
+                    .read()
+                    .await
+                    .open_squash_window
+                    .clone()
+                    .ok_or_else(|| lsp_err("no open squash window"))?;
+                let (squash_uri, new_content) =
+                    commands::run_squash_select_all(&jj, &window).map_err(lsp_err)?;
+                self.record_self_caused_op(&jj).await;
+                apply_edit_if_open(&self.client, &self.state, &squash_uri, &new_content).await;
+                self.state
+                    .write()
+                    .await
+                    .documents
+                    .insert(squash_uri.clone(), new_content);
+                Ok(Some(serde_json::Value::String(squash_uri)))
+            }
+            "badjuju.squash.select_none" => {
+                let window = self
+                    .state
+                    .read()
+                    .await
+                    .open_squash_window
+                    .clone()
+                    .ok_or_else(|| lsp_err("no open squash window"))?;
+                let (squash_uri, new_content) =
+                    commands::run_squash_select_none(&jj, &window).map_err(lsp_err)?;
+                self.record_self_caused_op(&jj).await;
+                apply_edit_if_open(&self.client, &self.state, &squash_uri, &new_content).await;
+                self.state
+                    .write()
+                    .await
+                    .documents
+                    .insert(squash_uri.clone(), new_content);
+                Ok(Some(serde_json::Value::String(squash_uri)))
             }
             "badjuju.squash.into" => {
                 let arg = params

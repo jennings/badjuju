@@ -247,6 +247,128 @@ pub fn cursor_target_at_line(content: &str, line: usize) -> Option<CursorTarget>
     None
 }
 
+/// A file+hunk identified at a cursor position in a squash window buffer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SquashHunk {
+    pub file: String,
+    pub header: String,
+    pub content: String,
+}
+
+/// True for lines that are plain file-path lines in a squash window section
+/// (not blank, not hunk markers, not section/header lines).
+fn is_squash_file_line(line: &str) -> bool {
+    if line.is_empty() {
+        return false;
+    }
+    if line.starts_with("@@")
+        || line.starts_with('+')
+        || line.starts_with('-')
+        || line.starts_with(' ')
+    {
+        return false;
+    }
+    // Section headers and SQUASHING header lines
+    for prefix in [
+        "SQUASHING:",
+        "From:",
+        "To:  ",
+        "SELECTED CHANGES:",
+        "REMAINING CHANGES:",
+        "COMMAND REFERENCE:",
+        "SQUASH TARGET",
+    ] {
+        if line.starts_with(prefix) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Resolve the file path at a cursor position inside a squash window buffer.
+/// Returns `Some(file_path)` when the line is a plain file-path line, or when
+/// it is a hunk line (walks up to find the enclosing file). Returns `None` for
+/// section headers, blank lines, and lines outside both squash sections.
+pub fn squash_file_at_line(content: &str, line: usize) -> Option<String> {
+    let lines: Vec<&str> = content.lines().collect();
+    let target = *lines.get(line)?;
+
+    if is_squash_file_line(target) {
+        return Some(target.trim_end().to_string());
+    }
+
+    // Hunk header or content: walk upward to find the enclosing file line.
+    let is_hunk_line = target.starts_with("@@")
+        || target.starts_with('+')
+        || target.starts_with('-')
+        || target.starts_with(' ');
+    if is_hunk_line {
+        for i in (0..line).rev() {
+            let l = lines[i];
+            if is_squash_file_line(l) {
+                return Some(l.trim_end().to_string());
+            }
+            if l == "SELECTED CHANGES:" || l == "REMAINING CHANGES:" || l.is_empty() {
+                break;
+            }
+        }
+    }
+
+    None
+}
+
+/// Resolve the hunk (file + `@@` header + content) at a cursor position
+/// inside a squash window buffer. Returns `Some` when the cursor is on a hunk
+/// header (`@@`) or hunk content line. Returns `None` for file-path lines,
+/// section headers, and blank lines.
+pub fn squash_hunk_at_line(content: &str, line: usize) -> Option<SquashHunk> {
+    let lines: Vec<&str> = content.lines().collect();
+    let target = *lines.get(line)?;
+
+    // Determine which line is the @@ header for this cursor position.
+    let hunk_header_line = if target.starts_with("@@") {
+        line
+    } else if target.starts_with('+') || target.starts_with('-') || target.starts_with(' ') {
+        // Walk backward to the @@ header of this hunk.
+        (0..line).rev().find(|&i| lines[i].starts_with("@@"))?
+    } else {
+        return None;
+    };
+
+    let header = lines[hunk_header_line].to_string();
+
+    // Walk backward from the @@ line to find the enclosing file-path line.
+    let file = (0..hunk_header_line).rev().find_map(|i| {
+        let l = lines[i];
+        if is_squash_file_line(l) {
+            Some(l.trim_end().to_string())
+        } else if l == "SELECTED CHANGES:" || l == "REMAINING CHANGES:" {
+            None
+        } else {
+            None
+        }
+    })?;
+
+    // Collect content lines (everything after @@ until blank or non-content line).
+    let content_start = hunk_header_line + 1;
+    let content_end = (content_start..lines.len())
+        .find(|&i| {
+            let l = lines[i];
+            l.is_empty()
+                || l.starts_with("@@")
+                || (!l.starts_with('+') && !l.starts_with('-') && !l.starts_with(' '))
+        })
+        .unwrap_or(lines.len());
+
+    let hunk_content = lines[content_start..content_end].join("\n");
+
+    Some(SquashHunk {
+        file,
+        header,
+        content: hunk_content,
+    })
+}
+
 /// Resolve the file path at a given 0-indexed line of a `status.jujutsu`
 /// buffer. Handles:
 /// - `M src/main.rs` style (status flag lines)

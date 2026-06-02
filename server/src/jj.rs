@@ -401,6 +401,59 @@ impl Jj {
         Ok(())
     }
 
+    /// Squash all changes from `from` into `into` without selecting individual
+    /// files or hunks (`jj squash --from FROM --into INTO --keep-emptied`).
+    /// Used by `badjuju.squash.select_all` and `badjuju.squash.select_none`.
+    pub fn squash_from_into_keep_emptied(&self, from: &str, into: &str) -> Result<(), JjError> {
+        self.run(&[
+            "squash",
+            "--use-destination-message",
+            "--keep-emptied",
+            "--from",
+            from,
+            "--into",
+            into,
+        ])?;
+        Ok(())
+    }
+
+    /// Invoke `jj squash --interactive --tool badjuju-squash` with a sidecar
+    /// file at `sidecar`. The badjuju binary at `exe` handles the merge-tool
+    /// invocation via the `squash-tool` subcommand.
+    pub fn squash_from_into_interactive(
+        &self,
+        from: &str,
+        into: &str,
+        exe: &std::path::Path,
+        sidecar: &std::path::Path,
+    ) -> Result<(), JjError> {
+        let exe_str = exe.to_string_lossy();
+        let sidecar_str = sidecar.to_string_lossy();
+        let exe_toml = exe_str.replace('\\', "\\\\").replace('"', "\\\"");
+        let sidecar_toml = sidecar_str.replace('\\', "\\\\").replace('"', "\\\"");
+        let program_cfg = format!(r#"merge-tools.badjuju-squash.program="{exe_toml}""#);
+        let edit_args_cfg = format!(
+            r#"merge-tools.badjuju-squash.edit-args=["squash-tool","$left","$right","--selection","{sidecar_toml}"]"#,
+        );
+        self.run(&[
+            "squash",
+            "--use-destination-message",
+            "--keep-emptied",
+            "--from",
+            from,
+            "--into",
+            into,
+            "--interactive",
+            "--tool",
+            "badjuju-squash",
+            "--config",
+            &program_cfg,
+            "--config",
+            &edit_args_cfg,
+        ])?;
+        Ok(())
+    }
+
     /// Squash a single file's changes from `source` into `dest` (typically a child).
     /// Uses `--use-destination-message` to avoid opening an editor and
     /// `--keep-emptied` so the source revision survives even when it becomes empty.

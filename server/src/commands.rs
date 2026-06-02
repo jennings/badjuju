@@ -714,6 +714,202 @@ pub fn run_squash_window(
     Ok((uri, window))
 }
 
+/// Re-render a squash window after hunks have moved between REMAINING and
+/// SELECTED. Computes the current REMAINING from `jj diff --from <from>- --to
+/// <from>` and derives SELECTED as `baseline − remaining`. Returns
+/// `(uri, new_content)`.
+///
+/// If `<from>` or `<into>` no longer exist (abandoned externally), writes a
+/// "SQUASH TARGET NO LONGER EXISTS" notice instead.
+pub fn regenerate_squash_window(
+    jj: &Jj,
+    window: &SquashWindow,
+) -> Result<(String, String), CommandError> {
+    let from_ok = jj.change_id_of(&window.from).is_ok();
+    let into_ok = jj.change_id_of(&window.into).is_ok();
+
+    let path = path_from_uri(&window.uri).ok_or_else(|| {
+        CommandError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "bad squash window URI",
+        ))
+    })?;
+
+    if !from_ok || !into_ok {
+        let content = "SQUASH TARGET NO LONGER EXISTS\n\nThe squash source or destination was \
+                       abandoned or rewritten externally.\nClose this window.\n"
+            .to_string();
+        std::fs::write(&path, &content)?;
+        return Ok((window.uri.clone(), content));
+    }
+
+    // Remaining = still in <from>
+    let parent_rev = format!("{}-", window.from);
+    let remaining_diff = jj.diff_from_to_git(&parent_rev, &window.from)?;
+    let remaining_hunks = parse_git_diff_hunks(&remaining_diff);
+
+    // Selected = baseline hunks no longer in <from>
+    let selected_hunks: Vec<Hunk> = window
+        .baseline_hunks
+        .iter()
+        .filter(|h| {
+            !remaining_hunks
+                .iter()
+                .any(|r| r.file == h.file && r.header == h.header)
+        })
+        .cloned()
+        .collect();
+
+    let from_commit_id = jj.commit_id_of(&window.from)?;
+    let into_commit_id = jj.commit_id_of(&window.into)?;
+    let from_desc = jj.describe_get(&window.from)?;
+    let into_desc = jj.describe_get(&window.into)?;
+
+    let from_desc_first = from_desc.trim().lines().next().unwrap_or("(empty)");
+    let from_desc_display = if from_desc_first.is_empty() {
+        "(empty)"
+    } else {
+        from_desc_first
+    };
+    let into_desc_first = into_desc.trim().lines().next().unwrap_or("(empty)");
+    let into_desc_display = if into_desc_first.is_empty() {
+        "(empty)"
+    } else {
+        into_desc_first
+    };
+
+    let from_short = short_id(&window.from);
+    let from_commit_short = short_id(&from_commit_id);
+    let into_short = short_id(&window.into);
+    let into_commit_short = short_id(&into_commit_id);
+
+    let selected_section = render_hunk_section(&selected_hunks);
+    let remaining_section = render_hunk_section(&remaining_hunks);
+
+    let content = format!(
+        "SQUASHING:\n\
+         From: {from_short} {from_commit_short} {from_desc_display}\n\
+         To:   {into_short} {into_commit_short} {into_desc_display}\n\
+         \n\
+         SELECTED CHANGES:\n\
+         {selected_section}\
+         REMAINING CHANGES:\n\
+         {remaining_section}\
+         {}",
+        jj.command_reference().diff(),
+    );
+
+    std::fs::write(&path, &content)?;
+    Ok((window.uri.clone(), content))
+}
+
+/// Toggle a single hunk between REMAINING and SELECTED. For
+/// `SquashSection::Remaining`, squashes the hunk from `<from>` into `<into>`
+/// interactively. For `SquashSection::Selected`, squashes it back. Returns the
+/// regenerated `(uri, content)` of the squash window.
+pub fn run_squash_toggle_hunk(
+    jj: &Jj,
+    workspace: &Path,
+    window: &SquashWindow,
+    hunk: &cursor::SquashHunk,
+    section: cursor::SquashSection,
+) -> Result<(String, String), CommandError> {
+    let badjuju_exe = std::env::current_exe().map_err(CommandError::Io)?;
+    let sidecar_path = workspace
+        .join(".jj")
+        .join("badjuju")
+        .join("squash_selection.json");
+
+    match section {
+        cursor::SquashSection::Remaining => {
+            let sel = serde_json::json!({
+                "file": hunk.file,
+                "hunk_header": hunk.header,
+                "hunk_content": hunk.content,
+                "direction": "include",
+            });
+            std::fs::write(&sidecar_path, sel.to_string())?;
+            jj.squash_from_into_interactive(
+                &window.from,
+                &window.into,
+                &badjuju_exe,
+                &sidecar_path,
+            )?;
+        }
+        cursor::SquashSection::Selected => {
+            // Find the hunk as it appears in <into>'s diff (line numbers may differ).
+            let into_parent = format!("{}-", window.into);
+            let into_diff = jj.diff_from_to_git(&into_parent, &window.into)?;
+            let into_hunks = parse_git_diff_hunks(&into_diff);
+            let effective = into_hunks
+                .iter()
+                .find(|h| h.file == hunk.file && hunks_content_match(&h.content, &hunk.content))
+                .cloned()
+                .unwrap_or_else(|| Hunk {
+                    file: hunk.file.clone(),
+                    header: hunk.header.clone(),
+                    content: hunk.content.clone(),
+                });
+            let sel = serde_json::json!({
+                "file": effective.file,
+                "hunk_header": effective.header,
+                "hunk_content": effective.content,
+                "direction": "include",
+            });
+            std::fs::write(&sidecar_path, sel.to_string())?;
+            jj.squash_from_into_interactive(
+                &window.into,
+                &window.from,
+                &badjuju_exe,
+                &sidecar_path,
+            )?;
+        }
+    }
+
+    regenerate_squash_window(jj, window)
+}
+
+/// Toggle an entire file between REMAINING and SELECTED using file-level squash.
+pub fn run_squash_toggle_file(
+    jj: &Jj,
+    window: &SquashWindow,
+    file: &str,
+    section: cursor::SquashSection,
+) -> Result<(String, String), CommandError> {
+    match section {
+        cursor::SquashSection::Remaining => {
+            jj.squash_file_into(&window.from, &window.into, file)?;
+        }
+        cursor::SquashSection::Selected => {
+            jj.squash_file_into(&window.into, &window.from, file)?;
+        }
+    }
+    regenerate_squash_window(jj, window)
+}
+
+/// Move all remaining hunks to SELECTED (`jj squash --from <from> --into <into>`).
+pub fn run_squash_select_all(
+    jj: &Jj,
+    window: &SquashWindow,
+) -> Result<(String, String), CommandError> {
+    jj.squash_from_into_keep_emptied(&window.from, &window.into)?;
+    regenerate_squash_window(jj, window)
+}
+
+/// Move all selected hunks back to REMAINING (`jj squash --from <into> --into <from>`).
+pub fn run_squash_select_none(
+    jj: &Jj,
+    window: &SquashWindow,
+) -> Result<(String, String), CommandError> {
+    jj.squash_from_into_keep_emptied(&window.into, &window.from)?;
+    regenerate_squash_window(jj, window)
+}
+
+/// Compare hunk content lines (ignoring trailing whitespace differences).
+fn hunks_content_match(a: &str, b: &str) -> bool {
+    a.trim_end() == b.trim_end()
+}
+
 /// Render baseline hunks as plain-text grouped by file path, ready to embed
 /// in a REMAINING CHANGES section. Files are separated by a blank line.
 fn render_hunk_section(hunks: &[Hunk]) -> String {

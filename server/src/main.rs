@@ -5,6 +5,7 @@ use tracing_subscriber::EnvFilter;
 use badjuju::commands;
 use badjuju::jj::Jj;
 use badjuju::server::Backend;
+use badjuju::squash_tool;
 use badjuju::workspace::find_workspace_root;
 
 #[derive(Parser)]
@@ -31,6 +32,16 @@ enum Command {
         /// Revision to diff (defaults to @)
         #[arg(long)]
         revision: Option<String>,
+    },
+    /// Merge-tool helper invoked by jj squash --interactive. Not for direct use.
+    SquashTool {
+        /// Left (base) directory provided by jj
+        left: std::path::PathBuf,
+        /// Right (source) directory provided by jj; mutated in place
+        right: std::path::PathBuf,
+        /// Path to the sidecar JSON file containing the hunk selection
+        #[arg(long)]
+        selection: std::path::PathBuf,
     },
 }
 
@@ -104,6 +115,16 @@ async fn main() {
                         std::process::exit(1);
                     });
             print_path(&uri);
+        }
+        Command::SquashTool {
+            left,
+            right,
+            selection,
+        } => {
+            if let Err(e) = squash_tool::run(&left, &right, &selection) {
+                eprintln!("badjuju squash-tool: {e}");
+                std::process::exit(1);
+            }
         }
     }
 }
