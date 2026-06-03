@@ -1054,6 +1054,16 @@ impl LanguageServer for Backend {
                 } else if let Some(revision) = cursor::commit_id_at_line(&content, line) {
                     actions.extend(commit_actions(&revision));
                     actions.extend(squash_commit_actions(&uri, line, pending_squash.as_deref()));
+                } else if let Some(revset) = content
+                    .lines()
+                    .nth(line)
+                    .and_then(cursor::status_summary_header_revset)
+                {
+                    // Top-section `@  : …` / `@- : …` summary rows have no
+                    // embedded change_id but represent real revisions; show
+                    // commit + squash-flow actions targeting them by revset.
+                    actions.extend(commit_actions(&revset));
+                    actions.extend(squash_commit_actions(&uri, line, pending_squash.as_deref()));
                 }
             }
             BufferKind::Squash => {

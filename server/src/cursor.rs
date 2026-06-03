@@ -151,6 +151,9 @@ fn revision_at_line_status(content: &str, line: usize) -> String {
     if parse_status_header_line(current).is_some() {
         return "@".to_string();
     }
+    if let Some(rev) = status_summary_header_revset(current) {
+        return rev;
+    }
     let start = if line >= lines.len() {
         lines.len().saturating_sub(1)
     } else {
@@ -446,6 +449,29 @@ pub fn log_shortcut_at_line(content: &str, line: usize) -> Option<LogShortcut> {
 pub fn commit_id_at_line(content: &str, line: usize) -> Option<String> {
     let line_text = content.lines().nth(line)?;
     match_commit_header(line_text).map(|s| s.to_string())
+}
+
+/// Recognise a status-buffer top-section "summary header" line of the form
+/// `@  : description` (working copy) or `@- : description` (parent). Returns
+/// the jj revset (`"@"`, `"@-"`, etc.) suitable for use as a literal revision
+/// argument. The summary header is rendered without a change_id, so
+/// [`match_commit_header`] (and therefore [`commit_id_at_line`]) doesn't
+/// claim it — this helper plugs that gap for code actions and cursor-form
+/// resolution that target these summary rows.
+pub fn status_summary_header_revset(line: &str) -> Option<String> {
+    if !line.starts_with('@') {
+        return None;
+    }
+    let (before_colon, _) = line.split_once(':')?;
+    let revset = before_colon.trim();
+    if revset == "@" {
+        return Some("@".to_string());
+    }
+    let rest = revset.strip_prefix('@')?;
+    if !rest.is_empty() && rest.chars().all(|c| c == '-') {
+        return Some(revset.to_string());
+    }
+    None
 }
 
 // --- internal parsers ----------------------------------------------------
@@ -806,13 +832,23 @@ mod tests {
     }
 
     #[test]
-    fn revision_at_line_status_returns_at_when_above_any_commit() {
+    fn revision_at_line_status_on_parent_summary_header_returns_at_minus() {
         let s = status_buffer();
-        // Line 1 = "@- : (empty)" — not a commit header, not a stat line.
-        // Walking up hits only @  : / @- : lines which don't match
-        // match_commit_header → falls through to "@" default.
+        // Line 1 = "@- : (empty)" — the summary parent header line.
+        // status_summary_header_revset claims it directly, so the revision
+        // is `@-` (not the @ default).
         assert_eq!(
             revision_at_line(&s, 1, BufferKind::Status).as_deref(),
+            Some("@-")
+        );
+    }
+
+    #[test]
+    fn revision_at_line_status_on_at_summary_header_returns_at() {
+        let s = status_buffer();
+        // Line 0 = "@  : my working copy change" — the summary @ header line.
+        assert_eq!(
+            revision_at_line(&s, 0, BufferKind::Status).as_deref(),
             Some("@")
         );
     }
@@ -1365,5 +1401,47 @@ mod tests {
     #[test]
     fn commit_id_at_line_returns_none_on_empty() {
         assert_eq!(commit_id_at_line("", 0), None);
+    }
+
+    // --- status_summary_header_revset ---
+
+    #[test]
+    fn status_summary_header_revset_matches_at_working_copy_line() {
+        assert_eq!(
+            status_summary_header_revset("@  : (empty) my work").as_deref(),
+            Some("@")
+        );
+    }
+
+    #[test]
+    fn status_summary_header_revset_matches_at_parent_line() {
+        assert_eq!(
+            status_summary_header_revset("@- : (empty) parent").as_deref(),
+            Some("@-")
+        );
+    }
+
+    #[test]
+    fn status_summary_header_revset_matches_grandparent_line() {
+        assert_eq!(
+            status_summary_header_revset("@-- : grandparent").as_deref(),
+            Some("@--")
+        );
+    }
+
+    #[test]
+    fn status_summary_header_revset_with_bookmarks() {
+        assert_eq!(
+            status_summary_header_revset("@- : <main@origin> parent desc").as_deref(),
+            Some("@-")
+        );
+    }
+
+    #[test]
+    fn status_summary_header_revset_rejects_non_at_lines() {
+        assert_eq!(status_summary_header_revset("M src/main.rs"), None);
+        assert_eq!(status_summary_header_revset("STACK: @"), None);
+        assert_eq!(status_summary_header_revset(""), None);
+        assert_eq!(status_summary_header_revset("@  qpvuntsm 1234abcd"), None);
     }
 }

@@ -1847,6 +1847,125 @@ fn lsp_code_action_with_pending_squash_shows_cancel() {
     );
 }
 
+#[test]
+fn lsp_code_action_on_status_non_at_commit_with_pending_squash_shows_into() {
+    // Regression for #23: in the status buffer's stack section, code actions
+    // on a non-@ commit row (e.g. @-) must still surface "Squash into this
+    // revision" when a squash source is pending.
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    Command::new("jj")
+        .args(["describe", "-m", "first"])
+        .current_dir(dir.path())
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new", "-m", "second"])
+        .current_dir(dir.path())
+        .output()
+        .expect("new failed");
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+    session.did_open(&status_uri, "jujutsu", &status_content);
+
+    // Pending source: @.
+    let resp = session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@"]));
+    assert!(resp.get("error").is_none(), "squash.commit failed: {resp}");
+
+    // Find the @- commit row (second commit-header line).
+    let commit_lines: Vec<usize> = status_content
+        .lines()
+        .enumerate()
+        .filter_map(|(i, l)| {
+            let first = l.chars().next()?;
+            matches!(first, '@' | '○' | '●' | '◆' | '*').then_some(i)
+        })
+        .collect();
+    assert!(
+        commit_lines.len() >= 2,
+        "test setup needs at least two commit rows in status:\n{status_content}"
+    );
+    let dest_line = commit_lines[1];
+
+    let actions = code_action_at(&mut session, &status_uri, dest_line);
+    let titles: Vec<&str> = actions.iter().filter_map(|a| a["title"].as_str()).collect();
+    assert!(
+        titles.iter().any(|t| *t == "Squash into this revision"),
+        "expected 'Squash into this revision' on @- row in status when squash is pending, got: {titles:?}"
+    );
+}
+
+#[test]
+fn lsp_code_action_on_different_commit_with_pending_squash_shows_into() {
+    // Regression for #23: after `s` on commit A sets the pending source,
+    // requesting code actions on a different commit row (commit B) must
+    // include "Squash into this revision". The previous behavior only
+    // surfaced the "into" action on the same row as the source.
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    Command::new("jj")
+        .args(["describe", "-m", "first"])
+        .current_dir(dir.path())
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new", "-m", "second"])
+        .current_dir(dir.path())
+        .output()
+        .expect("new failed");
+    Command::new("jj")
+        .args(["new", "-m", "third"])
+        .current_dir(dir.path())
+        .output()
+        .expect("new failed");
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let log_uri = session.execute_command("badjuju.log");
+    let log_content = read_file(&log_uri);
+    session.did_open(&log_uri, "jujutsu", &log_content);
+
+    // Collect all commit-header line indices to find a second commit row.
+    let commit_lines: Vec<usize> = log_content
+        .lines()
+        .enumerate()
+        .filter_map(|(i, l)| {
+            let first = l.chars().next()?;
+            matches!(first, '@' | '○' | '●' | '◆' | '*').then_some(i)
+        })
+        .collect();
+    assert!(
+        commit_lines.len() >= 2,
+        "test setup needs at least two commits in the log, got: {log_content}"
+    );
+    let source_line = commit_lines[0];
+    let dest_line = commit_lines[1];
+
+    // Select the source via cursor-form arg pointing at the first commit row.
+    let resp = session.execute_command_with_args(
+        "badjuju.squash.commit",
+        serde_json::json!([{
+            "cursor": { "uri": &log_uri, "line": source_line }
+        }]),
+    );
+    assert!(resp.get("error").is_none(), "squash.commit failed: {resp}");
+
+    // Ask for code actions on the *different* commit row (the destination).
+    let actions = code_action_at(&mut session, &log_uri, dest_line);
+    let titles: Vec<&str> = actions.iter().filter_map(|a| a["title"].as_str()).collect();
+    assert!(
+        titles.iter().any(|t| *t == "Squash into this revision"),
+        "expected 'Squash into this revision' on different commit row when squash is pending, got: {titles:?}"
+    );
+}
+
 /// Open a squash window between two commits and return the URI + content.
 /// Helper shared by squash window tests.
 fn open_squash_window(dir: &std::path::Path) -> (std::string::String, std::string::String) {
