@@ -1313,6 +1313,135 @@ fn lsp_did_open_empty_status_jujutsu_auto_populates_disk() {
 }
 
 #[test]
+fn lsp_text_document_content_serves_file_blob_at_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    // Pin a known file at a known commit-id.
+    std::fs::write(dir.path().join("readme.txt"), "hello world\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "add readme"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let commit_id = String::from_utf8(
+        Command::new("jj")
+            .args([
+                "log",
+                "-r",
+                "@",
+                "--no-graph",
+                "--template",
+                "commit_id",
+                "--limit",
+                "1",
+            ])
+            .current_dir(dir.path())
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    // Mutate the working copy on a child change — the resolver must still
+    // see the pinned commit's content, not the current @ contents.
+    Command::new("jj")
+        .args(["new"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::fs::write(dir.path().join("readme.txt"), "different\n").unwrap();
+
+    let file_uri = format!("badjuju-file:///commit/{commit_id}/readme.txt");
+    let resp = session.request(
+        "workspace/textDocumentContent",
+        serde_json::json!({ "uri": file_uri }),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "textDocumentContent returned error: {resp}"
+    );
+    let text = resp["result"]["text"].as_str().unwrap_or("");
+    assert_eq!(text, "hello world\n");
+}
+
+#[test]
+fn lsp_text_document_content_diff_uri_still_works() {
+    // Regression: the badjuju-diff:// scheme must keep working after the
+    // multi-scheme dispatch refactor.
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    std::fs::write(dir.path().join("foo.txt"), "x\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "add foo"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let commit_id = String::from_utf8(
+        Command::new("jj")
+            .args([
+                "log",
+                "-r",
+                "@",
+                "--no-graph",
+                "--template",
+                "commit_id",
+                "--limit",
+                "1",
+            ])
+            .current_dir(dir.path())
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let diff_uri = format!("badjuju-diff:///commit/{commit_id}");
+    let resp = session.request(
+        "workspace/textDocumentContent",
+        serde_json::json!({ "uri": diff_uri }),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "diff textDocumentContent returned error: {resp}"
+    );
+    let text = resp["result"]["text"].as_str().unwrap_or("");
+    assert!(
+        text.starts_with("COMMIT_ID:"),
+        "expected COMMIT_ID header in diff content; got:\n{text}"
+    );
+}
+
+#[test]
+fn lsp_text_document_content_unknown_scheme_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let resp = session.request(
+        "workspace/textDocumentContent",
+        serde_json::json!({ "uri": "file:///etc/passwd" }),
+    );
+    assert!(
+        resp.get("error").is_some(),
+        "expected error for unknown URI scheme; got: {resp}"
+    );
+}
+
+#[test]
 fn lsp_goto_definition_on_commit_line_opens_diff() {
     let dir = tempfile::tempdir().unwrap();
     init_jj_repo(dir.path());

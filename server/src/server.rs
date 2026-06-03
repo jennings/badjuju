@@ -58,6 +58,41 @@ fn parse_diff_uri(uri: &str) -> std::result::Result<DiffUriKind<'_>, String> {
     }
 }
 
+/// Parsed `badjuju-file:` URI carrying a (commit-id, repo-relative path) pair.
+#[derive(Debug, PartialEq, Eq)]
+struct FileUriParts<'a> {
+    commit_id: &'a str,
+    path: &'a str,
+}
+
+/// Parse a `badjuju-file:` URI of the form
+/// `badjuju-file:///commit/<commit-id>/<repo-relative-path>`. Accepts the
+/// one-slash form too (`badjuju-file:/commit/...`) for the same reason
+/// `parse_diff_uri` does: VS Code's `Uri.toString()` normalizes
+/// empty-authority URIs to single-slash.
+fn parse_file_uri(uri: &str) -> std::result::Result<FileUriParts<'_>, String> {
+    let path = uri
+        .strip_prefix("badjuju-file:///")
+        .or_else(|| uri.strip_prefix("badjuju-file:/"))
+        .ok_or_else(|| format!("unsupported URI scheme: {uri}"))?;
+    let after_commit = path
+        .strip_prefix("commit/")
+        .ok_or_else(|| format!("unrecognized badjuju-file path: {path}"))?;
+    let (commit_id, file_path) = after_commit
+        .split_once('/')
+        .ok_or_else(|| format!("missing path in badjuju-file URI: {uri}"))?;
+    if commit_id.is_empty() {
+        return Err("empty commit-id in URI".to_string());
+    }
+    if file_path.is_empty() {
+        return Err("empty path in URI".to_string());
+    }
+    Ok(FileUriParts {
+        commit_id,
+        path: file_path,
+    })
+}
+
 /// Custom notification: `workspace/textDocumentContent/refresh`.
 enum WorkspaceTextDocumentContentRefresh {}
 impl tower_lsp::lsp_types::notification::Notification for WorkspaceTextDocumentContentRefresh {
@@ -297,7 +332,9 @@ impl Backend {
     }
 
     /// Handler for `workspace/textDocumentContent` (LSP 3.18).
-    /// Serves content for `badjuju-diff:///change/<id>` and `badjuju-diff:///commit/<id>` URIs.
+    /// Serves content for two URI schemes:
+    /// - `badjuju-diff:///change/<id>` and `badjuju-diff:///commit/<id>` — rendered diff.
+    /// - `badjuju-file:///commit/<id>/<repo-rel-path>` — file content at commit-id.
     pub async fn text_document_content(
         &self,
         params: TextDocumentContentParams,
@@ -307,14 +344,20 @@ impl Backend {
         let jj = state.jj().ok_or_else(Error::invalid_request)?;
         drop(state);
 
-        let kind = parse_diff_uri(uri).map_err(lsp_err)?;
-        let text = match kind {
-            DiffUriKind::Change(id) => {
-                commands::diff_content_for_change(&jj, id).map_err(lsp_err)?
+        let text = if uri.starts_with("badjuju-diff:") {
+            match parse_diff_uri(uri).map_err(lsp_err)? {
+                DiffUriKind::Change(id) => {
+                    commands::diff_content_for_change(&jj, id).map_err(lsp_err)?
+                }
+                DiffUriKind::Commit(id) => {
+                    commands::diff_content_for_commit(&jj, id).map_err(lsp_err)?
+                }
             }
-            DiffUriKind::Commit(id) => {
-                commands::diff_content_for_commit(&jj, id).map_err(lsp_err)?
-            }
+        } else if uri.starts_with("badjuju-file:") {
+            let parts = parse_file_uri(uri).map_err(lsp_err)?;
+            commands::file_content_at_commit(&jj, parts.commit_id, parts.path).map_err(lsp_err)?
+        } else {
+            return Err(lsp_err(format!("unsupported URI scheme: {uri}")));
         };
 
         Ok(TextDocumentContentResult { text })
@@ -2064,6 +2107,62 @@ mod tests {
     #[test]
     fn parse_diff_uri_unknown_path_errors() {
         assert!(parse_diff_uri("badjuju-diff:///foobar/x").is_err());
+    }
+
+    #[test]
+    fn parse_file_uri_three_slash() {
+        assert_eq!(
+            parse_file_uri("badjuju-file:///commit/deadbeef/src/main.rs").unwrap(),
+            FileUriParts {
+                commit_id: "deadbeef",
+                path: "src/main.rs",
+            }
+        );
+    }
+
+    #[test]
+    fn parse_file_uri_one_slash() {
+        // VS Code normalizes empty-authority URIs to single-slash.
+        assert_eq!(
+            parse_file_uri("badjuju-file:/commit/deadbeef/src/main.rs").unwrap(),
+            FileUriParts {
+                commit_id: "deadbeef",
+                path: "src/main.rs",
+            }
+        );
+    }
+
+    #[test]
+    fn parse_file_uri_with_nested_path() {
+        assert_eq!(
+            parse_file_uri("badjuju-file:///commit/abc/a/b/c.rs").unwrap(),
+            FileUriParts {
+                commit_id: "abc",
+                path: "a/b/c.rs",
+            }
+        );
+    }
+
+    #[test]
+    fn parse_file_uri_wrong_scheme_errors() {
+        assert!(parse_file_uri("file:///foo").is_err());
+        assert!(parse_file_uri("badjuju-diff:///commit/abc/file.rs").is_err());
+    }
+
+    #[test]
+    fn parse_file_uri_empty_commit_errors() {
+        assert!(parse_file_uri("badjuju-file:///commit//file.rs").is_err());
+    }
+
+    #[test]
+    fn parse_file_uri_missing_path_errors() {
+        assert!(parse_file_uri("badjuju-file:///commit/abc").is_err());
+        assert!(parse_file_uri("badjuju-file:///commit/abc/").is_err());
+    }
+
+    #[test]
+    fn parse_file_uri_unknown_segment_errors() {
+        assert!(parse_file_uri("badjuju-file:///change/abc/file.rs").is_err());
     }
 
     #[test]
