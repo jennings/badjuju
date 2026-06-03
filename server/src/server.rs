@@ -235,25 +235,17 @@ impl Backend {
     }
 
     pub async fn refresh_open_artifacts(&self, jj: &Jj, workspace: &std::path::Path) {
-        let (
-            open_status_uri,
-            open_log_uri,
-            virtual_diffs_enabled,
-            pending_squash,
-            open_squash_window,
-        ) = {
+        let (open_status_uri, open_log_uri, virtual_diffs_enabled, open_squash_window) = {
             let state = self.state.read().await;
             (
                 state.open_status_uri.clone(),
                 state.open_log_uri.clone(),
                 state.virtual_diffs_enabled,
-                state.pending_squash_source.clone(),
                 state.open_squash_window.clone(),
             )
         };
-        let pending = pending_squash.as_deref();
         if open_status_uri.is_some() {
-            match commands::run_status_with_content(jj, workspace, pending) {
+            match commands::run_status_with_content(jj, workspace) {
                 Ok((uri, content)) => {
                     if !virtual_diffs_enabled {
                         apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
@@ -267,7 +259,7 @@ impl Backend {
             }
         }
         if open_log_uri.is_some() {
-            match commands::regenerate_log_if_present_with_content(jj, workspace, pending) {
+            match commands::regenerate_log_if_present_with_content(jj, workspace) {
                 Ok(Some((uri, content))) => {
                     if !virtual_diffs_enabled {
                         apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
@@ -295,6 +287,7 @@ impl Backend {
                 }
             }
         }
+        publish_pending_squash_diagnostics(&self.client, &self.state).await;
     }
 
     /// Handler for `workspace/textDocumentContent` (LSP 3.18).
@@ -366,6 +359,59 @@ async fn apply_edit_if_open(client: &Client, state: &Arc<RwLock<State>>, uri: &s
         .await;
 }
 
+/// Publish (or clear) the persistent "pending squash source" diagnostic on the
+/// status and log buffers. Anchored to the source change's row via
+/// [`commands::find_change_id_line`]; cleared with an empty diagnostic list when
+/// no source is pending or when the source isn't visible in the rendered buffer.
+///
+/// Called from every site that mutates `pending_squash_source` and from every
+/// path that regenerates status / log (line numbers shift on regeneration).
+async fn publish_pending_squash_diagnostics(client: &Client, state: &Arc<RwLock<State>>) {
+    let (pending, open_status_uri, open_log_uri) = {
+        let s = state.read().await;
+        (
+            s.pending_squash_source.clone(),
+            s.open_status_uri.clone(),
+            s.open_log_uri.clone(),
+        )
+    };
+    for uri_opt in [open_status_uri, open_log_uri].into_iter().flatten() {
+        let Ok(uri_url) = Url::parse(&uri_opt) else {
+            continue;
+        };
+        let diags = if let Some(change_id) = pending.as_deref() {
+            let content = {
+                let s = state.read().await;
+                s.documents.get(&uri_opt).cloned()
+            }
+            .or_else(|| read_uri_from_disk(&uri_opt));
+            content
+                .as_deref()
+                .and_then(|c| commands::find_change_id_line(c, change_id))
+                .map(|line| {
+                    vec![Diagnostic {
+                        range: Range {
+                            start: Position { line, character: 0 },
+                            end: Position {
+                                line,
+                                character: u32::MAX,
+                            },
+                        },
+                        severity: Some(DiagnosticSeverity::HINT),
+                        source: Some("badjuju".into()),
+                        message: "Pending squash source. Press s on destination, S to cancel."
+                            .into(),
+                        ..Default::default()
+                    }]
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        client.publish_diagnostics(uri_url, diags, None).await;
+    }
+}
+
 /// Spawns a debounced watcher on `.jj/repo/op_heads/heads/`. On each external
 /// op-head change (i.e. not caused by bad-juju itself), refreshes all open
 /// status, log, and change-diff buffers.
@@ -432,18 +478,16 @@ fn spawn_op_head_watcher(
                     if state.write().await.take_if_self_caused(&op_id) {
                         continue;
                     }
-                    let (open_status_uri, open_log_uri, virtual_diffs_enabled, pending_squash) = {
+                    let (open_status_uri, open_log_uri, virtual_diffs_enabled) = {
                         let s = state.read().await;
                         (
                             s.open_status_uri.clone(),
                             s.open_log_uri.clone(),
                             s.virtual_diffs_enabled,
-                            s.pending_squash_source.clone(),
                         )
                     };
-                    let pending = pending_squash.as_deref();
                     if open_status_uri.is_some() {
-                        match commands::run_status_with_content(&jj, &workspace, pending) {
+                        match commands::run_status_with_content(&jj, &workspace) {
                             Ok((uri, content)) => {
                                 if !virtual_diffs_enabled {
                                     apply_edit_if_open(&client, &state, &uri, &content).await;
@@ -460,7 +504,7 @@ fn spawn_op_head_watcher(
                         }
                     }
                     if open_log_uri.is_some() {
-                        match commands::regenerate_log_if_present_with_content(&jj, &workspace, pending) {
+                        match commands::regenerate_log_if_present_with_content(&jj, &workspace) {
                             Ok(Some((uri, content))) => {
                                 if !virtual_diffs_enabled {
                                     apply_edit_if_open(&client, &state, &uri, &content).await;
@@ -513,6 +557,7 @@ fn spawn_op_head_watcher(
                             }
                         }
                     }
+                    publish_pending_squash_diagnostics(&client, &state).await;
                 }
                 _ = shutdown.notified() => {
                     let _ = stop_tx.send(());
@@ -1153,23 +1198,12 @@ impl LanguageServer for Backend {
             }
         };
 
-        let (pending_squash, virtual_diffs_enabled) = {
-            let state = self.state.read().await;
-            (
-                state.pending_squash_source.clone(),
-                state.virtual_diffs_enabled,
-            )
-        };
-        let pending = pending_squash.as_deref();
+        let virtual_diffs_enabled = self.state.read().await.virtual_diffs_enabled;
 
         let regen: std::result::Result<Option<(String, String)>, commands::CommandError> =
             match kind {
-                BufferKind::Status => {
-                    commands::run_status_with_content(&jj, &workspace, pending).map(Some)
-                }
-                BufferKind::Log => {
-                    commands::run_log_with_content(&jj, &workspace, "", pending).map(Some)
-                }
+                BufferKind::Status => commands::run_status_with_content(&jj, &workspace).map(Some),
+                BufferKind::Log => commands::run_log_with_content(&jj, &workspace, "").map(Some),
                 BufferKind::Diff if !virtual_diffs_enabled => {
                     if let Some(change_id) = commands::parse_change_id_from_uri(&uri) {
                         commands::run_diff_change_with_content(&jj, &workspace, &change_id)
@@ -1617,9 +1651,13 @@ impl LanguageServer for Backend {
                         state.pending_squash_source = None;
                         state.open_squash_window = Some(window);
                     }
+                    publish_pending_squash_diagnostics(&self.client, &self.state).await;
                     Ok(Some(serde_json::Value::String(squash_uri)))
                 } else {
                     // Source selection: resolve the cursor to a source change-id.
+                    let cursor_uri = commands::parse_cursor_arg(params.arguments.first())
+                        .map_err(lsp_err)?
+                        .map(|cp| cp.uri.clone());
                     let revision =
                         commands::resolve_revision_arg(params.arguments.first(), |uri| {
                             documents
@@ -1633,34 +1671,37 @@ impl LanguageServer for Backend {
 
                     self.state.write().await.pending_squash_source = Some(change_id.clone());
 
-                    let (uri, content) =
-                        commands::run_status_with_content(&jj, &workspace, Some(&change_id))
-                            .map_err(lsp_err)?;
-                    apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
-                    if let Ok(Some((log_uri, log_content))) =
-                        commands::regenerate_log_if_present_with_content(
-                            &jj,
-                            &workspace,
-                            Some(&change_id),
+                    // Persistent indicator + transient announcement. The buffer
+                    // itself is intentionally NOT rewritten — folds the user has
+                    // opened survive across `s`.
+                    publish_pending_squash_diagnostics(&self.client, &self.state).await;
+                    let short = &change_id[..change_id.len().min(8)];
+                    self.client
+                        .show_message(
+                            MessageType::INFO,
+                            format!(
+                                "Pending squash source: {short}. Press s on destination, S to cancel."
+                            ),
                         )
-                    {
-                        apply_edit_if_open(&self.client, &self.state, &log_uri, &log_content).await;
-                    }
-                    Ok(Some(serde_json::Value::String(uri)))
+                        .await;
+                    // Return the URI the user pressed `s` from so the client can
+                    // refocus its existing buffer (a no-op when already focused).
+                    // No file content is shipped.
+                    let result_uri = cursor_uri.unwrap_or_default();
+                    Ok(Some(serde_json::Value::String(result_uri)))
                 }
             }
             "badjuju.squash.cancel" => {
+                let cursor_uri = commands::parse_cursor_arg(params.arguments.first())
+                    .map_err(lsp_err)?
+                    .map(|cp| cp.uri.clone());
                 self.state.write().await.pending_squash_source = None;
-
-                let (uri, content) =
-                    commands::run_status_with_content(&jj, &workspace, None).map_err(lsp_err)?;
-                apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
-                if let Ok(Some((log_uri, log_content))) =
-                    commands::regenerate_log_if_present_with_content(&jj, &workspace, None)
-                {
-                    apply_edit_if_open(&self.client, &self.state, &log_uri, &log_content).await;
-                }
-                Ok(Some(serde_json::Value::String(uri)))
+                publish_pending_squash_diagnostics(&self.client, &self.state).await;
+                self.client
+                    .show_message(MessageType::INFO, "Squash cancelled.")
+                    .await;
+                let result_uri = cursor_uri.unwrap_or_default();
+                Ok(Some(serde_json::Value::String(result_uri)))
             }
             "badjuju.squash.toggle" => {
                 let cp = commands::parse_cursor_arg(params.arguments.first())

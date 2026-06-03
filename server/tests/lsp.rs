@@ -1657,9 +1657,10 @@ fn lsp_apply_edit_suppressed_when_virtual_diffs_enabled() {
 }
 
 #[test]
-fn lsp_squash_commit_adds_pending_header_to_status() {
-    // badjuju.squash.commit must set pending_squash_source and regenerate
-    // status.jujutsu with a "Preparing to squash" header.
+fn lsp_squash_commit_does_not_rewrite_status_buffer() {
+    // Source selection must signal pending state out-of-band (diagnostics +
+    // showMessage), not by rewriting status.jujutsu. This keeps user-opened
+    // folds intact across `s`.
     let dir = tempfile::tempdir().unwrap();
     init_jj_repo(dir.path());
     Command::new("jj")
@@ -1671,24 +1672,31 @@ fn lsp_squash_commit_adds_pending_header_to_status() {
     let root_uri = format!("file://{}", dir.path().display());
     let mut session = LspSession::start(dir.path());
     session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let before = read_file(&status_uri);
 
     let resp = session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@"]));
     assert!(
         resp.get("error").is_none(),
         "squash.commit returned error: {resp}"
     );
-    let status_uri = resp["result"].as_str().unwrap();
-    let status = read_file(status_uri);
+
+    let after = read_file(&status_uri);
+    assert_eq!(
+        before, after,
+        "status.jujutsu must not be rewritten on source selection"
+    );
     assert!(
-        status.contains("Preparing to squash"),
-        "expected 'Preparing to squash' header in status:\n{status}"
+        !after.contains("Preparing to squash"),
+        "no inline marker should be injected into status:\n{after}"
     );
 }
 
 #[test]
-fn lsp_squash_cancel_removes_pending_header_from_status() {
-    // After squash.commit, squash.cancel must clear pending_squash_source and
-    // regenerate status.jujutsu without the "Preparing to squash" header.
+fn lsp_squash_cancel_does_not_rewrite_status_buffer() {
+    // Cancel clears server-side pending state via diagnostics + showMessage;
+    // status.jujutsu is not regenerated.
     let dir = tempfile::tempdir().unwrap();
     init_jj_repo(dir.path());
     Command::new("jj")
@@ -1701,16 +1709,23 @@ fn lsp_squash_cancel_removes_pending_header_from_status() {
     let mut session = LspSession::start(dir.path());
     session.initialize(&root_uri);
 
+    let status_uri = session.execute_command("badjuju.status");
+    let before = read_file(&status_uri);
+
     let resp = session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@"]));
     assert!(resp.get("error").is_none(), "squash.commit failed: {resp}");
 
     let resp = session.execute_command_with_args("badjuju.squash.cancel", serde_json::json!([]));
     assert!(resp.get("error").is_none(), "squash.cancel failed: {resp}");
-    let status_uri = resp["result"].as_str().unwrap();
-    let status = read_file(status_uri);
+
+    let after = read_file(&status_uri);
+    assert_eq!(
+        before, after,
+        "status.jujutsu must not be rewritten on cancel"
+    );
     assert!(
-        !status.contains("Preparing to squash"),
-        "expected no 'Preparing to squash' header after cancel:\n{status}"
+        !after.contains("Preparing to squash"),
+        "no inline marker should appear in status:\n{after}"
     );
 }
 
@@ -1800,11 +1815,12 @@ fn lsp_code_action_with_pending_squash_shows_cancel() {
     let mut session = LspSession::start(dir.path());
     session.initialize(&root_uri);
 
-    let resp = session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@"]));
-    assert!(resp.get("error").is_none(), "squash.commit failed: {resp}");
-    let status_uri = resp["result"].as_str().unwrap().to_string();
+    let status_uri = session.execute_command("badjuju.status");
     let status_content = read_file(&status_uri);
     session.did_open(&status_uri, "jujutsu", &status_content);
+
+    let resp = session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@"]));
+    assert!(resp.get("error").is_none(), "squash.commit failed: {resp}");
 
     let (commit_line, _) = first_commit_line(&status_content)
         .unwrap_or_else(|| panic!("no commit line in status:\n{status_content}"));

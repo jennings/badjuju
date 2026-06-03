@@ -154,20 +154,34 @@ pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
 
 /// Run `badjuju.status`: write status.jujutsu and return its URI.
 pub fn run_status(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
-    run_status_with_content(jj, workspace, None).map(|(uri, _)| uri)
+    run_status_with_content(jj, workspace).map(|(uri, _)| uri)
 }
 
 /// Same as [`run_status`], but additionally returns the content written to
 /// disk so callers can ship it to clients without re-reading the file.
-///
-/// `pending_squash` is the full change-id of a pending squash source; when
-/// set a "Preparing to squash…" line is prepended to the buffer.
 pub fn run_status_with_content(
     jj: &Jj,
     workspace: &Path,
-    pending_squash: Option<&str>,
 ) -> Result<(String, String), CommandError> {
-    write_status_with_content(jj, workspace, None, pending_squash)
+    write_status_with_content(jj, workspace, None)
+}
+
+/// Locate the (zero-based) line of a change-id row in rendered status or
+/// log content. Matches the second whitespace-separated token of each line
+/// (jj's standard log template puts the graph glyph at index 0 and the
+/// short change-id at index 1) and accepts any short-id that is a prefix
+/// of the full change-id we're looking for.
+///
+/// Returns `None` when the change-id doesn't appear in the buffer (e.g.
+/// the source is outside the current revset).
+pub fn find_change_id_line(content: &str, change_id: &str) -> Option<u32> {
+    for (idx, line) in content.lines().enumerate() {
+        let token = line.split_whitespace().nth(1).unwrap_or("");
+        if !token.is_empty() && change_id.starts_with(token) {
+            return Some(idx as u32);
+        }
+    }
+    None
 }
 
 /// Build a single `@  :` or `@- :` header line for the status buffer.
@@ -194,24 +208,6 @@ fn header_line_for(jj: &Jj, rev: &str, marker: &str) -> Result<String, CommandEr
             .join(" ");
         Ok(format!("{marker}: {bk_str} {desc_display}"))
     }
-}
-
-/// Build the one-line "Preparing to squash…" header rendered when a squash source
-/// is pending. Uses short (8-char) IDs to keep the line readable.
-fn render_squash_pending_line(jj: &Jj, change_id: &str) -> String {
-    let commit_id = jj
-        .commit_id_of(change_id)
-        .unwrap_or_else(|_| "?".to_string());
-    let desc_raw = jj.describe_get(change_id).unwrap_or_default();
-    let desc_first = desc_raw.trim().lines().next().unwrap_or("");
-    let desc_display = if desc_first.is_empty() {
-        "(empty)"
-    } else {
-        desc_first
-    };
-    let ch = &change_id[..change_id.len().min(8)];
-    let co = &commit_id[..commit_id.len().min(8)];
-    format!("Preparing to squash changes from revision: {ch} {co} {desc_display}")
 }
 
 /// Strip diff header lines and return only hunk content for a file in a revision.
@@ -300,19 +296,15 @@ pub fn write_status(
     workspace: &Path,
     message: Option<&str>,
 ) -> Result<String, CommandError> {
-    write_status_with_content(jj, workspace, message, None).map(|(uri, _)| uri)
+    write_status_with_content(jj, workspace, message).map(|(uri, _)| uri)
 }
 
 /// Same as [`write_status`], but additionally returns the content written to
 /// disk so callers can ship it to clients without re-reading the file.
-///
-/// `pending_squash` is the full change-id of a pending squash source; when set
-/// a "Preparing to squash…" line is prepended before the rest of the buffer.
 pub fn write_status_with_content(
     jj: &Jj,
     workspace: &Path,
     message: Option<&str>,
-    pending_squash: Option<&str>,
 ) -> Result<(String, String), CommandError> {
     let at_header = header_line_for(jj, "@", "@  ")?;
 
@@ -330,10 +322,6 @@ pub fn write_status_with_content(
     let changes = changes_sections(jj)?;
     let stack = jj.log_with_stat(STATUS_REVSET, true)?;
 
-    let pending_block = pending_squash
-        .map(|id| format!("{}\n\n", render_squash_pending_line(jj, id)))
-        .unwrap_or_default();
-
     let prelude = match message {
         Some(m) => format!("MESSAGE: {}\n\n", m.trim()),
         None => String::new(),
@@ -341,8 +329,7 @@ pub fn write_status_with_content(
 
     let content = if changes.is_empty() {
         format!(
-            "{}{}{}\n\nSTACK: {}\n\n{}\n\n{}",
-            pending_block,
+            "{}{}\n\nSTACK: {}\n\n{}\n\n{}",
             prelude,
             header_block,
             STATUS_REVSET,
@@ -351,8 +338,7 @@ pub fn write_status_with_content(
         )
     } else {
         format!(
-            "{}{}{}\n\n{}\n\nSTACK: {}\n\n{}\n\n{}",
-            pending_block,
+            "{}{}\n\n{}\n\nSTACK: {}\n\n{}\n\n{}",
             prelude,
             header_block,
             changes,
@@ -533,18 +519,14 @@ pub fn run_unsquash(
 
 /// Run `badjuju.log`: write log.jujutsu and return its URI.
 pub fn run_log(jj: &Jj, workspace: &Path, revset: &str) -> Result<String, CommandError> {
-    run_log_with_content(jj, workspace, revset, None).map(|(uri, _)| uri)
+    run_log_with_content(jj, workspace, revset).map(|(uri, _)| uri)
 }
 
 /// Same as [`run_log`], but additionally returns the content written to disk.
-///
-/// `pending_squash` is the full change-id of a pending squash source; when set
-/// a "Preparing to squash…" line is prepended before the rest of the buffer.
 pub fn run_log_with_content(
     jj: &Jj,
     workspace: &Path,
     revset: &str,
-    pending_squash: Option<&str>,
 ) -> Result<(String, String), CommandError> {
     let revset = if revset.is_empty() {
         DEFAULT_LOG_REVSET
@@ -553,13 +535,8 @@ pub fn run_log_with_content(
     };
     let output = jj.log_with_stat(revset, true)?;
 
-    let pending_block = pending_squash
-        .map(|id| format!("{}\n\n", render_squash_pending_line(jj, id)))
-        .unwrap_or_default();
-
     let content = format!(
-        "{}REVSET: {}\n{}\n\nOUTPUT:\n\n{}\n\n{}",
-        pending_block,
+        "REVSET: {}\n{}\n\nOUTPUT:\n\n{}\n\n{}",
         revset,
         render_log_shortcuts(),
         output.trim_end(),
@@ -1874,18 +1851,15 @@ pub fn on_describe_save(jj: &Jj, workspace: &Path, content: &str) -> Result<(), 
 /// has been opened in this workspace). Preserves the persisted REVSET header
 /// so the same query is re-run. No-op when the file is absent.
 pub fn regenerate_log_if_present(jj: &Jj, workspace: &Path) -> Result<(), CommandError> {
-    regenerate_log_if_present_with_content(jj, workspace, None).map(|_| ())
+    regenerate_log_if_present_with_content(jj, workspace).map(|_| ())
 }
 
 /// Same as [`regenerate_log_if_present`], but returns `Some((uri, content))`
 /// when the file was regenerated and `None` when the file was absent so
 /// callers can deliver the new content to file-based clients.
-///
-/// `pending_squash` is forwarded to [`run_log_with_content`].
 pub fn regenerate_log_if_present_with_content(
     jj: &Jj,
     workspace: &Path,
-    pending_squash: Option<&str>,
 ) -> Result<Option<(String, String)>, CommandError> {
     let log_path = workspace.join(".jj").join("badjuju").join("log.jujutsu");
     if !log_path.exists() {
@@ -1893,7 +1867,7 @@ pub fn regenerate_log_if_present_with_content(
     }
     let content = std::fs::read_to_string(&log_path)?;
     let revset = parse_log_revset(&content).unwrap_or_else(|| DEFAULT_LOG_REVSET.to_string());
-    let result = run_log_with_content(jj, workspace, &revset, pending_squash)?;
+    let result = run_log_with_content(jj, workspace, &revset)?;
     Ok(Some(result))
 }
 
@@ -4196,5 +4170,49 @@ COMMAND REFERENCE:
         assert!(buf.contains("JJ: original-header: @@ -1,1 +1,1 @@"));
         assert!(buf.contains("\nsrc/a.rs\n@@ -1,1 +1,1 @@\n-old\n+new"));
         assert!(buf.contains("COMMAND REFERENCE:"));
+    }
+
+    #[test]
+    fn find_change_id_line_matches_short_prefix_in_stack_row() {
+        // Status buffer STACK section format: `<graph>  <short-id> <commit-id> ...`.
+        // The short-id rendered by jj is a prefix of the full change-id we look up.
+        let content = "\
+@  : working copy
+@- : parent
+
+STACK: ancestors(reachable(@, mutable()), 2)
+
+@  abcd1234 def67890 1min stephen@example.com
+│  working copy description
+○  ffff5678 cccc9999 2min stephen@example.com
+│  parent description
+
+COMMAND REFERENCE:
+";
+        let full_change_id = "abcd1234aaaaaaaaaaaaaaaaaaaaaaaa";
+        let line = find_change_id_line(content, full_change_id).expect("expected match");
+        assert_eq!(
+            content.lines().nth(line as usize).unwrap(),
+            "@  abcd1234 def67890 1min stephen@example.com"
+        );
+
+        // The other commit on a different row should also be findable.
+        let other = "ffff5678bbbbbbbbbbbbbbbbbbbbbbbb";
+        let other_line = find_change_id_line(content, other).expect("expected match");
+        assert_eq!(
+            content.lines().nth(other_line as usize).unwrap(),
+            "○  ffff5678 cccc9999 2min stephen@example.com"
+        );
+    }
+
+    #[test]
+    fn find_change_id_line_returns_none_when_not_in_content() {
+        let content = "\
+STACK:
+
+@  abcd1234 def67890 ...
+";
+        let absent = "9999999999999999";
+        assert!(find_change_id_line(content, absent).is_none());
     }
 }
