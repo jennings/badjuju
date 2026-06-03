@@ -999,6 +999,7 @@ impl LanguageServer for Backend {
                 }),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -1183,6 +1184,76 @@ impl LanguageServer for Backend {
             }
             Err(_) => Ok(None),
         }
+    }
+
+    async fn goto_implementation(
+        &self,
+        params: request::GotoImplementationParams,
+    ) -> Result<Option<request::GotoImplementationResponse>> {
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let line = params.text_document_position_params.position.line as usize;
+
+        let Some(kind) = BufferKind::from_uri(&uri) else {
+            return Ok(None);
+        };
+
+        let content = {
+            let state = self.state.read().await;
+            state
+                .documents
+                .get(&uri)
+                .cloned()
+                .or_else(|| read_uri_from_disk(&uri))
+        };
+        let Some(content) = content else {
+            return Ok(None);
+        };
+
+        let Some(target) = cursor::file_target_at_line(&content, line, kind) else {
+            return Ok(None);
+        };
+
+        let workspace = {
+            let state = self.state.read().await;
+            match state.workspace_root.clone() {
+                Some(root) => root,
+                None => return Ok(None),
+            }
+        };
+
+        let abs = workspace.join(&target.path);
+        if !abs.exists() {
+            self.client
+                .show_message(
+                    MessageType::WARNING,
+                    format!("{} is not present in the working copy", target.path),
+                )
+                .await;
+            return Ok(None);
+        }
+
+        let target_uri = Url::from_file_path(&abs)
+            .map_err(|_| lsp_err(format!("bad path: {}", abs.display())))?;
+        let line_idx = target
+            .line_in_file
+            .map(|n| n.saturating_sub(1))
+            .unwrap_or(0);
+        let position = Position {
+            line: line_idx,
+            character: 0,
+        };
+        let location = Location {
+            uri: target_uri,
+            range: Range {
+                start: position,
+                end: position,
+            },
+        };
+        Ok(Some(request::GotoImplementationResponse::Scalar(location)))
     }
 
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {

@@ -1313,6 +1313,147 @@ fn lsp_did_open_empty_status_jujutsu_auto_populates_disk() {
 }
 
 #[test]
+fn lsp_goto_implementation_opens_file_in_working_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    std::fs::write(dir.path().join("readme.txt"), "line1\nline2\nline3\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "add readme"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+    session.did_open(&status_uri, "jujutsu", &status_content);
+
+    // Find a line in the WORKING COPY CHANGES section that names readme.txt.
+    let (file_line, _) = status_content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| *l == "readme.txt")
+        .map(|(i, l)| (i, l.to_string()))
+        .expect("expected readme.txt in status buffer");
+
+    let resp = session.request(
+        "textDocument/implementation",
+        serde_json::json!({
+            "textDocument": { "uri": status_uri },
+            "position": { "line": file_line, "character": 0 }
+        }),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "goto_implementation returned error: {resp}"
+    );
+    let target_uri = resp["result"]["uri"].as_str().unwrap_or("");
+    assert!(
+        target_uri.starts_with("file://"),
+        "expected file:// URI: {target_uri}"
+    );
+    assert!(
+        target_uri.ends_with("/readme.txt"),
+        "expected target to be readme.txt: {target_uri}"
+    );
+    // Bare filename row → no hunk above → line 0.
+    assert_eq!(resp["result"]["range"]["start"]["line"], 0);
+}
+
+#[test]
+fn lsp_goto_implementation_missing_file_warns_and_returns_none() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    // Commit a file then move on and delete it from the working copy.
+    std::fs::write(dir.path().join("gone.txt"), "v1\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "add gone"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    // Move forward and delete the file from the working copy. @ now has a
+    // "D gone.txt" change; the file is absent on disk.
+    Command::new("jj")
+        .args(["new", "-m", "remove gone"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::fs::remove_file(dir.path().join("gone.txt")).unwrap();
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+    session.did_open(&status_uri, "jujutsu", &status_content);
+
+    let (file_line, _) = status_content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.trim_end() == "gone.txt")
+        .map(|(i, l)| (i, l.to_string()))
+        .expect("expected gone.txt line in status buffer");
+
+    // Send the request manually so we can capture the show_message
+    // notification that the handler emits *before* its response — the normal
+    // `request` helper consumes and discards intermediate notifications.
+    let id = session.next_id;
+    session.next_id += 1;
+    session.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "textDocument/implementation",
+        "params": {
+            "textDocument": { "uri": &status_uri },
+            "position": { "line": file_line, "character": 0 }
+        }
+    }));
+    let expected_id = serde_json::json!(id);
+    let mut warn_msg: Option<serde_json::Value> = None;
+    let resp = loop {
+        let msg = session.recv();
+        if msg.get("id") == Some(&expected_id) {
+            break msg;
+        }
+        if msg.get("method").and_then(|v| v.as_str()) == Some("window/showMessage") {
+            warn_msg = Some(msg);
+        }
+    };
+    // tower_lsp's async pipeline can deliver the response before the
+    // show_message notification awaited just prior. Drain briefly to catch
+    // any straggler notification.
+    if warn_msg.is_none()
+        && let Some(msg) = session.try_recv(Duration::from_millis(500))
+        && msg.get("method").and_then(|v| v.as_str()) == Some("window/showMessage")
+    {
+        warn_msg = Some(msg);
+    }
+    assert!(
+        resp.get("error").is_none(),
+        "goto_implementation returned error: {resp}"
+    );
+    assert!(
+        resp["result"].is_null(),
+        "expected null result for missing file; got: {}",
+        resp["result"]
+    );
+    let msg = warn_msg.expect("expected window/showMessage warning for missing file");
+    let typ = msg["params"]["type"].as_u64().unwrap_or(0);
+    let text = msg["params"]["message"].as_str().unwrap_or("");
+    // MessageType::WARNING == 2 (per the LSP spec).
+    assert_eq!(typ, 2, "expected WARNING (2); got type={typ}");
+    assert!(
+        text.contains("gone.txt"),
+        "expected message to mention gone.txt; got: {text}"
+    );
+}
+
+#[test]
 fn lsp_text_document_content_serves_file_blob_at_commit() {
     let dir = tempfile::tempdir().unwrap();
     init_jj_repo(dir.path());
