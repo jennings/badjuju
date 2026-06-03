@@ -146,6 +146,13 @@ describe('keymap.setup_for_buffer', function()
     assert.is_truthy(m.rhs and m.rhs:lower():match('bdelete'), 'q should invoke bdelete on squash')
   end)
 
+  it('<Tab> on squash window maps to za (fold toggle)', function()
+    local buf = open_named('.jj/badjuju/squash/foo-bar.jujutsu')
+    local found, m = has_buffer_map(buf, '<Tab>')
+    assert.is_true(found, 'expected squash window map for <Tab>')
+    assert.are.equal('za', m.rhs, '<Tab> should invoke za (toggle fold)')
+  end)
+
   it('does nothing for unrelated jujutsu buffers', function()
     local buf = open_named('describe.jujutsu')
     for _, key in ipairs({ 'R', 'r', 'n', 'L', 'd', 'q', 'u', '=', 'a' }) do

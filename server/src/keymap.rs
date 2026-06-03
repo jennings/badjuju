@@ -149,12 +149,12 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         description: "refresh",
         windows: &["status", "log", "diff"],
     },
-    // Fold toggle (status only)
+    // Fold toggle
     KeymapEntry {
         key: "Tab",
         action: "(editor)",
         description: "toggle fold at cursor",
-        windows: &["status"],
+        windows: &["status", "squash"],
     },
     // Close (all main windows)
     KeymapEntry {
@@ -336,12 +336,12 @@ static VIM_ENTRIES: &[KeymapEntry] = &[
         description: "refresh",
         windows: &["status", "log", "diff"],
     },
-    // Fold toggle (status only)
+    // Fold toggle
     KeymapEntry {
         key: "Tab",
         action: "(editor)",
         description: "toggle fold at cursor",
-        windows: &["status"],
+        windows: &["status", "squash"],
     },
     // Close
     KeymapEntry {
@@ -507,10 +507,25 @@ mod tests {
     #[test]
     fn render_squash_has_toggle_select_close() {
         let text = render_command_reference(&KeymapProfile::Magit, "squash");
-        for key in ["s", "a", "A", "q"] {
+        for key in ["s", "a", "A", "q", "Tab"] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in squash:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn render_squash_has_tab_fold_toggle() {
+        for profile in [KeymapProfile::Magit, KeymapProfile::Vim] {
+            let text = render_command_reference(&profile, "squash");
+            assert!(
+                text.lines().any(|l| l.starts_with("Tab")),
+                "missing Tab fold toggle in {profile:?} squash:\n{text}"
+            );
+            assert!(
+                text.contains("toggle fold"),
+                "missing fold description in {profile:?} squash:\n{text}"
             );
         }
     }

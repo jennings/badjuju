@@ -389,6 +389,7 @@ function M.setup_for_buffer(bufnr)
     nmap(bufnr, 's', run_squash_toggle, 'badjuju: toggle hunk or file in squash window')
     nmap(bufnr, 'a', run_squash_select_all, 'badjuju: select all changes')
     nmap(bufnr, 'A', run_squash_select_none, 'badjuju: deselect all changes')
+    nmap(bufnr, '<Tab>', 'za', 'badjuju: toggle fold at cursor')
     nmap(bufnr, 'q', '<Cmd>bdelete<CR>', 'badjuju: close squash buffer')
     nmap(bufnr, '?', function() show_help('squash') end, 'badjuju: show help')
   elseif name:match('/%.jj/badjuju/describe%.jujutsu$') then
