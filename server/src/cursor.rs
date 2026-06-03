@@ -410,7 +410,7 @@ pub fn file_at_line(content: &str, line: usize) -> Option<String> {
     // Diff hunk lines (@@) or add/remove/context lines inside a CHANGES block:
     // walk upward to the nearest plain path line in the same section, skipping
     // hunk markers and diff context lines (space-prefixed unchanged lines).
-    if is_diff_hunk_line(line_text) {
+    if is_diff_hunk_line(line_text) || line_text.starts_with(' ') {
         for i in (0..line).rev() {
             let text = lines[i];
             if is_diff_hunk_line(text) || text.starts_with(' ') {
@@ -449,6 +449,174 @@ pub fn log_shortcut_at_line(content: &str, line: usize) -> Option<LogShortcut> {
 pub fn commit_id_at_line(content: &str, line: usize) -> Option<String> {
     let line_text = content.lines().nth(line)?;
     match_commit_header(line_text).map(|s| s.to_string())
+}
+
+/// Uniform cursor → file target resolver for `Status`, `Log`, `Diff`, and
+/// `Squash` buffers. Returns the repo-relative path, the enclosing revision,
+/// and (when the cursor sits inside a unified-diff hunk) the corresponding
+/// 1-indexed line in the new-file side of that hunk.
+///
+/// `on_minus_line` is `true` only when the cursor row is a `-` deletion row;
+/// `line_in_file` is then the next slot in the new file where the deletion
+/// would land.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileCursorTarget {
+    /// Repo-relative path to the file.
+    pub path: String,
+    /// Revision expression the cursor is "inside" (`@`, `@-`, change-id, etc.).
+    pub revision: String,
+    /// 1-indexed line in the file on the *new* side of the hunk. `None` when
+    /// the cursor is on a bare filename row with no enclosing hunk header.
+    pub line_in_file: Option<u32>,
+    /// `true` iff the cursor row is a `-` deletion line.
+    pub on_minus_line: bool,
+}
+
+/// Resolve the file target at a 0-indexed cursor line.
+///
+/// Returns `None` when the cursor doesn't sit on a file row, a hunk header,
+/// or a hunk content row — e.g., blank lines, section headers, commit-info
+/// lines, the `COMMAND REFERENCE` block, or hunk-edit buffers.
+pub fn file_target_at_line(
+    content: &str,
+    line: usize,
+    kind: BufferKind,
+) -> Option<FileCursorTarget> {
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let target_line = line.min(lines.len() - 1);
+
+    let path = file_path_for_kind(content, &lines, target_line, kind)?;
+    let revision = revision_at_line(content, target_line, kind)?;
+    let (line_in_file, on_minus_line) = hunk_line_in_file(&lines, target_line);
+
+    Some(FileCursorTarget {
+        path,
+        revision,
+        line_in_file,
+        on_minus_line,
+    })
+}
+
+fn file_path_for_kind(
+    content: &str,
+    lines: &[&str],
+    target_line: usize,
+    kind: BufferKind,
+) -> Option<String> {
+    match kind {
+        BufferKind::Status | BufferKind::Log => file_at_line(content, target_line),
+        BufferKind::Diff => diff_file_at_line(lines, target_line),
+        BufferKind::Squash => squash_file_at_line(content, target_line),
+        BufferKind::HunkEdit => None,
+    }
+}
+
+/// Walk up to the nearest `+++ b/<path>` line. `/dev/null` (deleted file)
+/// returns `None` — the buffer's revision doesn't contain a meaningful
+/// source for that path.
+fn diff_file_at_line(lines: &[&str], target_line: usize) -> Option<String> {
+    for i in (0..=target_line).rev() {
+        let l = lines[i];
+        if let Some(rest) = l.strip_prefix("+++ ") {
+            let path = rest.trim().strip_prefix("b/")?;
+            if path == "/dev/null" {
+                return None;
+            }
+            return Some(path.to_string());
+        }
+    }
+    None
+}
+
+/// Resolve the (line_in_file, on_minus_line) pair for a cursor inside a
+/// unified-diff hunk. Walks up from `target_line` looking for the enclosing
+/// `@@ ... +<new_start>[,<n>] @@` header; returns `(None, false)` when the
+/// cursor isn't sitting in a hunk (e.g., a bare filename row, blank line,
+/// section header).
+fn hunk_line_in_file(lines: &[&str], target_line: usize) -> (Option<u32>, bool) {
+    let mut header_line: Option<usize> = None;
+    let mut header_new_start: u32 = 0;
+    for i in (0..=target_line).rev() {
+        let l = lines[i];
+        if let Some(new_start) = parse_hunk_header_new_start(l) {
+            header_line = Some(i);
+            header_new_start = new_start;
+            break;
+        }
+        // Hit a non-hunk-body line before finding @@ — cursor isn't in a hunk.
+        if is_hunk_boundary_line(l) {
+            return (None, false);
+        }
+    }
+    let header_line = match header_line {
+        Some(h) => h,
+        None => return (None, false),
+    };
+
+    let target = lines[target_line];
+    if target_line == header_line {
+        return (Some(header_new_start), false);
+    }
+    match target.chars().next() {
+        Some('+') | Some(' ') => {
+            let count = lines[header_line + 1..=target_line]
+                .iter()
+                .filter(|l| matches!(l.chars().next(), Some('+') | Some(' ')))
+                .count() as u32;
+            let line_in_file = header_new_start.saturating_add(count).saturating_sub(1);
+            (Some(line_in_file), false)
+        }
+        Some('-') => {
+            let count = lines[header_line + 1..target_line]
+                .iter()
+                .filter(|l| matches!(l.chars().next(), Some('+') | Some(' ')))
+                .count() as u32;
+            (Some(header_new_start.saturating_add(count)), true)
+        }
+        _ => (None, false),
+    }
+}
+
+/// Returns `true` when this line terminates the walk-up for an enclosing
+/// hunk header — i.e., a non-hunk-body line. Hunk body lines start with
+/// `@@`, ` `, `+`, or `-`, except for `+++ ` / `--- ` file headers which
+/// *are* boundaries.
+fn is_hunk_boundary_line(line: &str) -> bool {
+    if line.is_empty() {
+        return true;
+    }
+    if line.starts_with("@@") {
+        return false;
+    }
+    if line.starts_with("+++") || line.starts_with("---") {
+        return true;
+    }
+    if line.starts_with('+') || line.starts_with('-') || line.starts_with(' ') {
+        return false;
+    }
+    true
+}
+
+/// Parse the `+<new_start>` portion of a `@@ -OLD +NEW @@` hunk header.
+/// Returns `None` for lines that don't begin with `@@` or whose new-side
+/// numeric portion can't be parsed.
+fn parse_hunk_header_new_start(line: &str) -> Option<u32> {
+    if !line.starts_with("@@") {
+        return None;
+    }
+    let rest = &line[2..];
+    let plus_pos = rest.find(" +")?;
+    let after = &rest[plus_pos + 2..];
+    let num_end = after
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(after.len());
+    if num_end == 0 {
+        return None;
+    }
+    after[..num_end].parse().ok()
 }
 
 /// Recognise a status-buffer top-section "summary header" line of the form
@@ -1280,8 +1448,9 @@ mod tests {
         .join("\n");
         // @@ hunk header on line 5 → walks up to readme.txt on line 4
         assert_eq!(file_at_line(&s, 5).as_deref(), Some("readme.txt"));
-        // Diff context/add/remove lines also walk up
-        assert_eq!(file_at_line(&s, 6), None); // " unchanged" — space-prefixed, not a diff op
+        // Diff context/add/remove lines also walk up — including space-prefixed
+        // context lines (the new-side line number maps to the enclosing file).
+        assert_eq!(file_at_line(&s, 6).as_deref(), Some("readme.txt")); // " unchanged" context
         assert_eq!(file_at_line(&s, 7).as_deref(), Some("readme.txt")); // +new line
         assert_eq!(file_at_line(&s, 8).as_deref(), Some("readme.txt")); // -old line
     }
@@ -1443,5 +1612,345 @@ mod tests {
         assert_eq!(status_summary_header_revset("STACK: @"), None);
         assert_eq!(status_summary_header_revset(""), None);
         assert_eq!(status_summary_header_revset("@  qpvuntsm 1234abcd"), None);
+    }
+
+    // --- parse_hunk_header_new_start ---
+
+    #[test]
+    fn parse_hunk_header_new_start_two_part_form() {
+        assert_eq!(parse_hunk_header_new_start("@@ -1,3 +5,2 @@"), Some(5));
+    }
+
+    #[test]
+    fn parse_hunk_header_new_start_single_count_form() {
+        assert_eq!(parse_hunk_header_new_start("@@ -1 +7 @@"), Some(7));
+    }
+
+    #[test]
+    fn parse_hunk_header_new_start_with_trailing_context() {
+        assert_eq!(
+            parse_hunk_header_new_start("@@ -1,3 +5,2 @@ fn foo()"),
+            Some(5)
+        );
+    }
+
+    #[test]
+    fn parse_hunk_header_new_start_rejects_non_hunk_header() {
+        assert_eq!(parse_hunk_header_new_start("+ added"), None);
+        assert_eq!(parse_hunk_header_new_start("+++ b/foo"), None);
+        assert_eq!(parse_hunk_header_new_start(""), None);
+    }
+
+    // --- file_target_at_line: Status ---
+
+    fn status_with_diff_hunks() -> String {
+        // CHANGES section with embedded unified-diff hunks under bare filename rows.
+        [
+            "@  : my change",
+            "@- : parent",
+            "",
+            "WORKING COPY CHANGES (yyzmyynq):",
+            "src/main.rs",
+            "@@ -1,3 +5,3 @@",
+            " ctx-a",
+            "-removed",
+            "+added",
+            "",
+            "src/other.rs",
+            "@@ -10,1 +20,2 @@",
+            " keep",
+            "+inserted",
+            "",
+            "STACK: @",
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn file_target_status_on_filename_row() {
+        let s = status_with_diff_hunks();
+        // Line 4 = "src/main.rs"
+        let t = file_target_at_line(&s, 4, BufferKind::Status).unwrap();
+        assert_eq!(t.path, "src/main.rs");
+        assert_eq!(t.revision, "@");
+        assert_eq!(t.line_in_file, None);
+        assert!(!t.on_minus_line);
+    }
+
+    #[test]
+    fn file_target_status_on_hunk_header_row() {
+        let s = status_with_diff_hunks();
+        // Line 5 = "@@ -1,3 +5,3 @@"
+        let t = file_target_at_line(&s, 5, BufferKind::Status).unwrap();
+        assert_eq!(t.path, "src/main.rs");
+        assert_eq!(t.revision, "@");
+        assert_eq!(t.line_in_file, Some(5));
+        assert!(!t.on_minus_line);
+    }
+
+    #[test]
+    fn file_target_status_on_plus_minus_space_rows() {
+        let s = status_with_diff_hunks();
+        // Line 6 = " ctx-a" (context, counts as 1 from header)
+        let t = file_target_at_line(&s, 6, BufferKind::Status).unwrap();
+        assert_eq!(t.line_in_file, Some(5));
+        assert!(!t.on_minus_line);
+        // Line 7 = "-removed" (no +/space above in hunk → count = 1; new_start + 1 = 6)
+        let t = file_target_at_line(&s, 7, BufferKind::Status).unwrap();
+        assert_eq!(t.line_in_file, Some(6));
+        assert!(t.on_minus_line);
+        // Line 8 = "+added" — count of +/space inclusive: line 6 (' '), line 8 ('+') = 2.
+        // new_start + 2 - 1 = 6.
+        let t = file_target_at_line(&s, 8, BufferKind::Status).unwrap();
+        assert_eq!(t.line_in_file, Some(6));
+        assert!(!t.on_minus_line);
+    }
+
+    // --- file_target_at_line: Log ---
+
+    #[test]
+    fn file_target_log_on_stat_file_row() {
+        // Log buffer renders stat lines under commit headers with `--stat`.
+        let s = [
+            "REVSET: @",
+            "",
+            "OUTPUT:",
+            "",
+            "@  qpvuntsm 1234abcd hello (now me@x.com)",
+            "│  src/main.rs | 3 +++",
+        ]
+        .join("\n");
+        let t = file_target_at_line(&s, 5, BufferKind::Log).unwrap();
+        assert_eq!(t.path, "src/main.rs");
+        assert_eq!(t.revision, "qpvuntsm");
+        assert_eq!(t.line_in_file, None);
+        assert!(!t.on_minus_line);
+    }
+
+    #[test]
+    fn file_target_log_on_hunk_header_row() {
+        // Log buffers don't normally embed @@ hunks, but if they do (e.g.
+        // a future `--patch` mode), the function should still resolve the
+        // line. Use a CHANGES-style synthetic context with a bare filename
+        // row above so file_at_line finds the path.
+        let s = [
+            "REVSET: @",
+            "",
+            "OUTPUT:",
+            "",
+            "@  qpvuntsm 1234abcd hello (now me@x.com)",
+            "│  src/main.rs | 1 +",
+        ]
+        .join("\n");
+        // Stat-line row is a "file row" with no hunk above: cursor on the
+        // stat row itself returns no line_in_file.
+        let t = file_target_at_line(&s, 5, BufferKind::Log).unwrap();
+        assert_eq!(t.line_in_file, None);
+    }
+
+    #[test]
+    fn file_target_log_on_non_file_row_returns_none() {
+        let s = [
+            "REVSET: @",
+            "JJ: Mutable: ancestors(mutable())",
+            "",
+            "OUTPUT:",
+            "",
+            "@  qpvuntsm 1234abcd hello (now me@x.com)",
+        ]
+        .join("\n");
+        // The header / shortcut / commit-header rows aren't file rows.
+        assert_eq!(file_target_at_line(&s, 0, BufferKind::Log), None);
+        assert_eq!(file_target_at_line(&s, 1, BufferKind::Log), None);
+        assert_eq!(file_target_at_line(&s, 5, BufferKind::Log), None);
+    }
+
+    // --- file_target_at_line: Diff ---
+
+    fn diff_buffer() -> String {
+        [
+            "COMMIT_ID: 0102030405060708090a0b0c0d0e0f10",
+            "",
+            "DIFF:",
+            "",
+            "diff --git a/src/main.rs b/src/main.rs",
+            "index 1111..2222 100644",
+            "--- a/src/main.rs",
+            "+++ b/src/main.rs",
+            "@@ -1,3 +10,3 @@",
+            " ctx",
+            "-old",
+            "+new",
+            "diff --git a/README.md b/README.md",
+            "index 3333..4444 100644",
+            "--- a/README.md",
+            "+++ b/README.md",
+            "@@ -5,1 +5,2 @@",
+            " keep",
+            "+added",
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn file_target_diff_on_filename_row() {
+        let s = diff_buffer();
+        // Line 7 = "+++ b/src/main.rs"
+        let t = file_target_at_line(&s, 7, BufferKind::Diff).unwrap();
+        assert_eq!(t.path, "src/main.rs");
+        assert_eq!(t.revision, "0102030405060708090a0b0c0d0e0f10");
+        assert_eq!(t.line_in_file, None);
+        assert!(!t.on_minus_line);
+    }
+
+    #[test]
+    fn file_target_diff_on_hunk_header_row() {
+        let s = diff_buffer();
+        // Line 8 = "@@ -1,3 +10,3 @@"
+        let t = file_target_at_line(&s, 8, BufferKind::Diff).unwrap();
+        assert_eq!(t.path, "src/main.rs");
+        assert_eq!(t.line_in_file, Some(10));
+        assert!(!t.on_minus_line);
+    }
+
+    #[test]
+    fn file_target_diff_on_plus_minus_space_rows() {
+        let s = diff_buffer();
+        // Line 9 = " ctx" → context counts 1 → new_start + 1 - 1 = 10
+        let t = file_target_at_line(&s, 9, BufferKind::Diff).unwrap();
+        assert_eq!(t.line_in_file, Some(10));
+        assert!(!t.on_minus_line);
+        // Line 10 = "-old" → +/space strictly above = 1 (the ctx) → 10 + 1 = 11
+        let t = file_target_at_line(&s, 10, BufferKind::Diff).unwrap();
+        assert_eq!(t.line_in_file, Some(11));
+        assert!(t.on_minus_line);
+        // Line 11 = "+new" → +/space inclusive: ctx(1) + new(1) = 2 → 10 + 2 - 1 = 11
+        let t = file_target_at_line(&s, 11, BufferKind::Diff).unwrap();
+        assert_eq!(t.line_in_file, Some(11));
+        assert!(!t.on_minus_line);
+    }
+
+    #[test]
+    fn file_target_diff_hunk_walk_stops_at_file_boundary() {
+        let s = diff_buffer();
+        // Line 18 = "+added" — its enclosing hunk is line 16, file is README.md.
+        // Walk-up must not escape into src/main.rs's hunks.
+        let t = file_target_at_line(&s, 18, BufferKind::Diff).unwrap();
+        assert_eq!(t.path, "README.md");
+        // Inclusive count: " keep" + "+added" = 2 → new_start(5) + 2 - 1 = 6
+        assert_eq!(t.line_in_file, Some(6));
+    }
+
+    #[test]
+    fn file_target_diff_dev_null_returns_none() {
+        let s = [
+            "COMMIT_ID: abc",
+            "",
+            "DIFF:",
+            "",
+            "diff --git a/gone.txt b/gone.txt",
+            "deleted file mode 100644",
+            "index 0000..1111",
+            "--- a/gone.txt",
+            "+++ /dev/null",
+            "@@ -1,1 +0,0 @@",
+            "-removed",
+        ]
+        .join("\n");
+        // No meaningful path at this revision (file deleted).
+        assert_eq!(file_target_at_line(&s, 10, BufferKind::Diff), None);
+    }
+
+    // --- file_target_at_line: Squash ---
+
+    fn squash_buffer() -> String {
+        [
+            "SQUASHING:",
+            "From: abcdwxyz 11112222 source",
+            "To:   qpvuntsm 33334444 dest",
+            "",
+            "SELECTED CHANGES:",
+            "",
+            "REMAINING CHANGES:",
+            "src/main.rs",
+            "@@ -1,3 +5,3 @@",
+            " ctx",
+            "-removed",
+            "+added",
+            "",
+            "src/other.rs",
+            "@@ -10,1 +20,2 @@",
+            " keep",
+            "+inserted",
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn file_target_squash_on_filename_row() {
+        let s = squash_buffer();
+        // Line 7 = "src/main.rs"
+        let t = file_target_at_line(&s, 7, BufferKind::Squash).unwrap();
+        assert_eq!(t.path, "src/main.rs");
+        assert_eq!(t.revision, "abcdwxyz");
+        assert_eq!(t.line_in_file, None);
+        assert!(!t.on_minus_line);
+    }
+
+    #[test]
+    fn file_target_squash_on_hunk_header_row() {
+        let s = squash_buffer();
+        // Line 8 = "@@ -1,3 +5,3 @@"
+        let t = file_target_at_line(&s, 8, BufferKind::Squash).unwrap();
+        assert_eq!(t.path, "src/main.rs");
+        assert_eq!(t.revision, "abcdwxyz");
+        assert_eq!(t.line_in_file, Some(5));
+    }
+
+    #[test]
+    fn file_target_squash_on_plus_minus_space_rows() {
+        let s = squash_buffer();
+        // Line 9 = " ctx" — context counts 1 → 5
+        let t = file_target_at_line(&s, 9, BufferKind::Squash).unwrap();
+        assert_eq!(t.line_in_file, Some(5));
+        assert!(!t.on_minus_line);
+        // Line 10 = "-removed" → 5 + 1 = 6
+        let t = file_target_at_line(&s, 10, BufferKind::Squash).unwrap();
+        assert_eq!(t.line_in_file, Some(6));
+        assert!(t.on_minus_line);
+        // Line 11 = "+added" → 5 + 2 - 1 = 6
+        let t = file_target_at_line(&s, 11, BufferKind::Squash).unwrap();
+        assert_eq!(t.line_in_file, Some(6));
+        assert!(!t.on_minus_line);
+    }
+
+    // --- file_target_at_line: misc ---
+
+    #[test]
+    fn file_target_blank_line_returns_none() {
+        let s = squash_buffer();
+        // Line 12 = "" between files.
+        assert_eq!(file_target_at_line(&s, 12, BufferKind::Squash), None);
+    }
+
+    #[test]
+    fn file_target_hunk_edit_returns_none() {
+        // HunkEdit buffers are action-only; no file resolution.
+        let s = "@@ -1,1 +1,1 @@\n-old\n+new\n";
+        assert_eq!(file_target_at_line(s, 0, BufferKind::HunkEdit), None);
+    }
+
+    #[test]
+    fn file_target_empty_content_returns_none() {
+        assert_eq!(file_target_at_line("", 0, BufferKind::Status), None);
+    }
+
+    #[test]
+    fn file_target_off_the_end_clamps_to_last_line() {
+        let s = squash_buffer();
+        // Way past end — should clamp; last line is "+inserted" under src/other.rs.
+        let t = file_target_at_line(&s, 9999, BufferKind::Squash).unwrap();
+        assert_eq!(t.path, "src/other.rs");
+        assert_eq!(t.line_in_file, Some(21));
     }
 }
