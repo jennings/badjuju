@@ -1474,6 +1474,69 @@ pub fn diff_content_for_commit(jj: &Jj, commit_id: &str) -> Result<String, Comma
     ))
 }
 
+/// Resolve `revision` to a commit-id and return the virtual file-blob URI
+/// `badjuju-file:///commit/<commit-id>/<path>`. No disk write — virtual-
+/// capable clients (VS Code, Neovim) fetch the content via
+/// `workspace/textDocumentContent` and route it through
+/// [`file_content_at_commit`].
+pub fn file_blob_uri_virtual(jj: &Jj, revision: &str, path: &str) -> Result<String, CommandError> {
+    let commit_id = jj.commit_id_of(revision)?;
+    Ok(format!("badjuju-file:///commit/{commit_id}/{path}"))
+}
+
+/// Materialize the file's content at `revision` on disk for file-only clients
+/// (Helix). Writes to `.jj/badjuju/blobs/<hash>/<basename>` where:
+/// - `<hash>` is a 16-char hex digest of `(commit_id, path)` so distinct
+///   pairs land in distinct directories, and a re-fetch of the same pair
+///   reuses the same path.
+/// - `<basename>` preserves the source file's name (and therefore its
+///   extension) so editors infer language correctly.
+///
+/// Returns the resulting `file://` URI.
+pub fn file_blob_with_path(
+    jj: &Jj,
+    workspace: &Path,
+    revision: &str,
+    path: &str,
+) -> Result<String, CommandError> {
+    let commit_id = jj.commit_id_of(revision)?;
+    let content = jj.file_show(path, &commit_id)?;
+    let hash = blob_hash(&commit_id, path);
+    let basename = std::path::Path::new(path)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "file".to_string());
+    let dir = badjuju_dir(workspace)?;
+    let blob_dir = dir.join("blobs").join(&hash);
+    std::fs::create_dir_all(&blob_dir)?;
+    let file_path = blob_dir.join(&basename);
+    std::fs::write(&file_path, &content)?;
+    Ok(file_uri(&file_path))
+}
+
+/// Read a file's content at a specific commit-id. Used by the
+/// `workspace/textDocumentContent` handler for `badjuju-file://` URIs.
+pub fn file_content_at_commit(
+    jj: &Jj,
+    commit_id: &str,
+    path: &str,
+) -> Result<String, CommandError> {
+    Ok(jj.file_show(path, commit_id)?)
+}
+
+/// Deterministic 16-char hex hash of `(commit_id, path)`. Uses the std
+/// `DefaultHasher` (SipHash-1-3 with fixed keys) — sufficient to keep
+/// distinct `(commit, path)` pairs in distinct directories without
+/// pulling in a crypto dep. Not security-sensitive.
+fn blob_hash(commit_id: &str, path: &str) -> String {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    commit_id.hash(&mut h);
+    0u8.hash(&mut h);
+    path.hash(&mut h);
+    format!("{:016x}", h.finish())
+}
+
 /// Extract the change-id encoded in the filename of a `diff-change-*.jujutsu`
 /// URI. Used by `did_open` auto-populate to re-run the diff for the right
 /// change when a user manually opens an existing diff file.
@@ -2928,6 +2991,108 @@ mod tests {
             content.contains("DIFF:"),
             "expected DIFF section:\n{content}"
         );
+    }
+
+    #[test]
+    fn file_blob_uri_virtual_returns_commit_scoped_uri() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("readme.txt"), "hello\n").unwrap();
+        jj.describe_set("@", "add readme").unwrap();
+        let commit_id = jj.commit_id_of("@").unwrap();
+        let uri =
+            file_blob_uri_virtual(&jj, "@", "readme.txt").expect("file_blob_uri_virtual failed");
+        assert_eq!(
+            uri,
+            format!("badjuju-file:///commit/{commit_id}/readme.txt")
+        );
+    }
+
+    #[test]
+    fn file_blob_uri_virtual_invalid_revision_returns_error() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let result = file_blob_uri_virtual(&jj, "not-a-real-rev", "readme.txt");
+        assert!(matches!(result, Err(CommandError::Jj(_))));
+    }
+
+    #[test]
+    fn file_blob_with_path_writes_file_with_basename_extension() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("hello.rs"), "fn main() {}\n").unwrap();
+        jj.describe_set("@", "add hello").unwrap();
+        let uri =
+            file_blob_with_path(&jj, dir.path(), "@", "hello.rs").expect("file_blob_with_path");
+        assert!(uri.starts_with("file://"));
+        let path = uri.strip_prefix("file://").unwrap();
+        assert!(path.ends_with("/hello.rs"), "basename preserved: {path}");
+        assert!(
+            path.contains("/.jj/badjuju/blobs/"),
+            "under blobs dir: {path}"
+        );
+        let content = std::fs::read_to_string(path).unwrap();
+        assert_eq!(content, "fn main() {}\n");
+    }
+
+    #[test]
+    fn file_blob_with_path_distinct_pairs_hash_to_distinct_dirs() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("a.txt"), "A\n").unwrap();
+        std::fs::write(dir.path().join("b.txt"), "B\n").unwrap();
+        jj.describe_set("@", "two files").unwrap();
+        let uri_a = file_blob_with_path(&jj, dir.path(), "@", "a.txt").unwrap();
+        let uri_b = file_blob_with_path(&jj, dir.path(), "@", "b.txt").unwrap();
+        // Distinct paths under blobs/<hash>/ — same commit, different path → different hash.
+        let parent_a = std::path::Path::new(uri_a.strip_prefix("file://").unwrap())
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let parent_b = std::path::Path::new(uri_b.strip_prefix("file://").unwrap())
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        assert_ne!(
+            parent_a, parent_b,
+            "distinct (commit, path) → distinct dirs"
+        );
+    }
+
+    #[test]
+    fn file_blob_with_path_same_pair_is_idempotent() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
+        jj.describe_set("@", "add readme").unwrap();
+        let uri1 = file_blob_with_path(&jj, dir.path(), "@", "readme.txt").unwrap();
+        let uri2 = file_blob_with_path(&jj, dir.path(), "@", "readme.txt").unwrap();
+        assert_eq!(uri1, uri2, "same (commit, path) → same URI");
+    }
+
+    #[test]
+    fn file_content_at_commit_returns_content_at_revision() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("readme.txt"), "v1\n").unwrap();
+        jj.describe_set("@", "add readme").unwrap();
+        let commit_id = jj.commit_id_of("@").unwrap();
+        // Mutate the working copy on a child change — file_content_at_commit
+        // must still see the pinned commit's content.
+        jj.new_change("").unwrap();
+        std::fs::write(dir.path().join("readme.txt"), "v2\n").unwrap();
+        let content = file_content_at_commit(&jj, &commit_id, "readme.txt")
+            .expect("file_content_at_commit failed");
+        assert_eq!(content, "v1\n");
+    }
+
+    #[test]
+    fn file_content_at_commit_missing_path_returns_error() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let commit_id = jj.commit_id_of("@").unwrap();
+        let result = file_content_at_commit(&jj, &commit_id, "does-not-exist.txt");
+        assert!(matches!(result, Err(CommandError::Jj(_))));
     }
 
     #[test]
