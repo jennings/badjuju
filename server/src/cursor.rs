@@ -744,16 +744,22 @@ fn is_stat_summary_line(line: &str) -> bool {
 
 /// Strip the trailing ` | N <+/->` suffix from a stat line. Returns the
 /// portion before that suffix, or `None` if the line lacks it.
+///
+/// `jj log --stat` right-justifies the change-count column across a group of
+/// files, so smaller counts get leading whitespace after the pipe (e.g.
+/// `" |  4 +++"` next to `" | 41 ++++..."`). Skip that padding before
+/// scanning for digits.
 fn strip_stat_suffix(line: &str) -> Option<&str> {
     let bar = line.rfind(" | ")?;
     let tail = &line[bar + 3..];
-    let digits_end = tail
+    let after_pad = tail.trim_start_matches([' ', '\t']);
+    let digits_end = after_pad
         .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(tail.len());
+        .unwrap_or(after_pad.len());
     if digits_end == 0 {
         return None;
     }
-    let after_digits = &tail[digits_end..];
+    let after_digits = &after_pad[digits_end..];
     let after_ws = after_digits.trim_start_matches([' ', '\t']);
     if after_ws.len() == after_digits.len() {
         return None;
@@ -1952,5 +1958,28 @@ mod tests {
         let t = file_target_at_line(&s, 9999, BufferKind::Squash).unwrap();
         assert_eq!(t.path, "src/other.rs");
         assert_eq!(t.line_in_file, Some(21));
+    }
+
+    #[test]
+    fn file_target_status_stack_stat_row_with_right_justified_count() {
+        // jj log --stat right-justifies the change-count column across the
+        // group of files in one commit, so smaller counts get an extra space
+        // after the pipe (`|  4 +++` next to `| 41 ++++...`). Regression test
+        // for parse_stat_line dropping these rows and gri/gd reporting
+        // "No locations found" on them.
+        let s = [
+            "STACK: ancestors(reachable(@, mutable()), 2)",
+            "",
+            "○  opwrmymx 2e9e4d4e feat(neovim): ...",
+            "│  clients/neovim/lua/badjuju/keymap.lua |  4 +++",
+            "│  clients/neovim/tests/keymap_spec.lua  | 41 ++++++",
+        ]
+        .join("\n");
+        let t = file_target_at_line(&s, 3, BufferKind::Status).unwrap();
+        assert_eq!(t.path, "clients/neovim/lua/badjuju/keymap.lua");
+        assert_eq!(t.revision, "opwrmymx");
+        let t = file_target_at_line(&s, 4, BufferKind::Status).unwrap();
+        assert_eq!(t.path, "clients/neovim/tests/keymap_spec.lua");
+        assert_eq!(t.revision, "opwrmymx");
     }
 }

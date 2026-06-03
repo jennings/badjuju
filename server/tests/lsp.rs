@@ -1364,7 +1364,7 @@ fn lsp_goto_implementation_opens_file_in_working_copy() {
 }
 
 #[test]
-fn lsp_goto_implementation_missing_file_warns_and_returns_none() {
+fn lsp_goto_implementation_missing_file_returns_error() {
     let dir = tempfile::tempdir().unwrap();
     init_jj_repo(dir.path());
     // Commit a file then move on and delete it from the working copy.
@@ -1399,57 +1399,28 @@ fn lsp_goto_implementation_missing_file_warns_and_returns_none() {
         .map(|(i, l)| (i, l.to_string()))
         .expect("expected gone.txt line in status buffer");
 
-    // Send the request manually so we can capture the show_message
-    // notification that the handler emits *before* its response — the normal
-    // `request` helper consumes and discards intermediate notifications.
-    let id = session.next_id;
-    session.next_id += 1;
-    session.send(serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "textDocument/implementation",
-        "params": {
+    let resp = session.request(
+        "textDocument/implementation",
+        serde_json::json!({
             "textDocument": { "uri": &status_uri },
             "position": { "line": file_line, "character": 0 }
-        }
-    }));
-    let expected_id = serde_json::json!(id);
-    let mut warn_msg: Option<serde_json::Value> = None;
-    let resp = loop {
-        let msg = session.recv();
-        if msg.get("id") == Some(&expected_id) {
-            break msg;
-        }
-        if msg.get("method").and_then(|v| v.as_str()) == Some("window/showMessage") {
-            warn_msg = Some(msg);
-        }
-    };
-    // tower_lsp's async pipeline can deliver the response before the
-    // show_message notification awaited just prior. Drain briefly to catch
-    // any straggler notification.
-    if warn_msg.is_none()
-        && let Some(msg) = session.try_recv(Duration::from_millis(500))
-        && msg.get("method").and_then(|v| v.as_str()) == Some("window/showMessage")
-    {
-        warn_msg = Some(msg);
-    }
+        }),
+    );
+    // The handler returns an LSP error (not null + window/showMessage) so
+    // clients display the message instead of their generic "No locations
+    // found" path, which otherwise overwrites notifications in the Neovim
+    // cmdline.
+    let err = resp.get("error").unwrap_or_else(|| {
+        panic!("expected LSP error for missing file; got: {resp}");
+    });
+    let msg = err["message"].as_str().unwrap_or("");
     assert!(
-        resp.get("error").is_none(),
-        "goto_implementation returned error: {resp}"
+        msg.contains("gone.txt"),
+        "expected error message to mention gone.txt; got: {msg}"
     );
     assert!(
-        resp["result"].is_null(),
-        "expected null result for missing file; got: {}",
-        resp["result"]
-    );
-    let msg = warn_msg.expect("expected window/showMessage warning for missing file");
-    let typ = msg["params"]["type"].as_u64().unwrap_or(0);
-    let text = msg["params"]["message"].as_str().unwrap_or("");
-    // MessageType::WARNING == 2 (per the LSP spec).
-    assert_eq!(typ, 2, "expected WARNING (2); got type={typ}");
-    assert!(
-        text.contains("gone.txt"),
-        "expected message to mention gone.txt; got: {text}"
+        msg.contains("not present in the working copy"),
+        "expected error message to explain the cause; got: {msg}"
     );
 }
 
@@ -1618,6 +1589,205 @@ fn lsp_goto_definition_on_commit_line_opens_diff() {
     assert!(
         target_uri.ends_with(".jujutsu") && target_uri.contains("/diff-"),
         "expected diff URI (diff-change-*.jujutsu or diff-commit-*.jujutsu), got: {target_uri}"
+    );
+}
+
+#[test]
+fn lsp_goto_definition_on_status_file_row_returns_virtual_file_blob() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    std::fs::write(dir.path().join("readme.txt"), "line1\nline2\nline3\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "add readme"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    // virtualDiffs=true → badjuju-file:// URI scheme.
+    session.initialize_with_options(&root_uri, serde_json::json!({ "virtualDiffs": true }));
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+    session.did_open(&status_uri, "jujutsu", &status_content);
+
+    let (file_line, _) = status_content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| *l == "readme.txt")
+        .map(|(i, l)| (i, l.to_string()))
+        .expect("expected readme.txt in status buffer");
+
+    let resp = session.request(
+        "textDocument/definition",
+        serde_json::json!({
+            "textDocument": { "uri": status_uri },
+            "position": { "line": file_line, "character": 0 }
+        }),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "goto_definition returned error: {resp}"
+    );
+    let target_uri = resp["result"]["uri"].as_str().unwrap_or("");
+    assert!(
+        target_uri.starts_with("badjuju-file:///commit/"),
+        "expected badjuju-file URI; got: {target_uri}"
+    );
+    assert!(
+        target_uri.ends_with("/readme.txt"),
+        "expected URI to end with /readme.txt; got: {target_uri}"
+    );
+    // Bare filename row → line 0.
+    assert_eq!(resp["result"]["range"]["start"]["line"], 0);
+}
+
+#[test]
+fn lsp_goto_definition_on_status_file_row_file_mode_writes_blob_to_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    std::fs::write(dir.path().join("readme.txt"), "hello\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "add readme"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    // Default initialize (no virtualDiffs) → on-disk blob materialization.
+    session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+    session.did_open(&status_uri, "jujutsu", &status_content);
+
+    let (file_line, _) = status_content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| *l == "readme.txt")
+        .map(|(i, l)| (i, l.to_string()))
+        .expect("expected readme.txt in status buffer");
+
+    let resp = session.request(
+        "textDocument/definition",
+        serde_json::json!({
+            "textDocument": { "uri": status_uri },
+            "position": { "line": file_line, "character": 0 }
+        }),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "goto_definition returned error: {resp}"
+    );
+    let target_uri = resp["result"]["uri"].as_str().unwrap_or("");
+    assert!(
+        target_uri.starts_with("file://"),
+        "expected file:// URI; got: {target_uri}"
+    );
+    assert!(
+        target_uri.contains("/.jj/badjuju/blobs/"),
+        "expected blob path under .jj/badjuju/blobs/; got: {target_uri}"
+    );
+    assert!(
+        target_uri.ends_with("/readme.txt"),
+        "expected URI to end with /readme.txt; got: {target_uri}"
+    );
+    // Content was materialized on disk.
+    let blob_path = target_uri.strip_prefix("file://").unwrap();
+    let content = std::fs::read_to_string(blob_path).unwrap();
+    assert_eq!(content, "hello\n");
+}
+
+#[test]
+fn lsp_goto_definition_on_plus_hunk_row_returns_new_side_line() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    // Parent commit with the initial file.
+    std::fs::write(dir.path().join("readme.txt"), "alpha\nbeta\ngamma\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "parent"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    Command::new("jj")
+        .args(["new", "-m", "modify"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    // Working copy modifies the file so the WORKING COPY CHANGES section
+    // emits a hunk.
+    std::fs::write(dir.path().join("readme.txt"), "alpha\nDELTA\ngamma\n").unwrap();
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize_with_options(&root_uri, serde_json::json!({ "virtualDiffs": true }));
+
+    let status_uri = session.execute_command("badjuju.status");
+    let status_content = read_file(&status_uri);
+    session.did_open(&status_uri, "jujutsu", &status_content);
+
+    // Find a `+` line in the hunk — that's "+DELTA" on the new side.
+    let (plus_line, _) = status_content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.starts_with('+') && !l.starts_with("+++"))
+        .map(|(i, l)| (i, l.to_string()))
+        .expect("expected a `+` hunk line in status buffer");
+
+    let resp = session.request(
+        "textDocument/definition",
+        serde_json::json!({
+            "textDocument": { "uri": status_uri },
+            "position": { "line": plus_line, "character": 0 }
+        }),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "goto_definition returned error: {resp}"
+    );
+    let target_uri = resp["result"]["uri"].as_str().unwrap_or("");
+    assert!(
+        target_uri.starts_with("badjuju-file:///commit/"),
+        "expected badjuju-file URI on hunk row; got: {target_uri}"
+    );
+    // The `+DELTA` line is line 2 in the new file (1-indexed); LSP is 0-indexed.
+    assert_eq!(resp["result"]["range"]["start"]["line"], 1);
+}
+
+#[test]
+fn lsp_goto_definition_on_log_commit_header_still_opens_diff() {
+    // Regression: commit-header rows (no file context at the cursor) keep
+    // their legacy diff-opening behavior.
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let log_uri = session.execute_command("badjuju.log");
+    let log_content = read_file(&log_uri);
+    let (commit_line, _) = first_commit_line(&log_content)
+        .unwrap_or_else(|| panic!("no commit line in log buffer:\n{log_content}"));
+    session.did_open(&log_uri, "jujutsu", &log_content);
+
+    let resp = session.request(
+        "textDocument/definition",
+        serde_json::json!({
+            "textDocument": { "uri": log_uri },
+            "position": { "line": commit_line, "character": 0 }
+        }),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "goto_definition returned error: {resp}"
+    );
+    let target_uri = resp["result"]["uri"].as_str().unwrap_or("");
+    assert!(
+        target_uri.contains("/diff-") || target_uri.starts_with("badjuju-diff:"),
+        "expected diff URI for commit-header row; got: {target_uri}"
     );
 }
 

@@ -362,6 +362,55 @@ impl Backend {
 
         Ok(TextDocumentContentResult { text })
     }
+
+    /// Resolve `target.revision` to a commit-id and produce a goto-definition
+    /// location that opens the source file at that commit-id. Picks virtual
+    /// (`badjuju-file://`) vs disk (`file://` under `.jj/badjuju/blobs/`)
+    /// delivery based on the client's `virtualDiffs` capability.
+    async fn open_file_at_revision(
+        &self,
+        target: &cursor::FileCursorTarget,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let (jj, workspace, virtual_diffs_enabled) = {
+            let state = self.state.read().await;
+            match (state.jj(), state.workspace_root.clone()) {
+                (Some(jj), Some(root)) => (jj, root, state.virtual_diffs_enabled),
+                _ => return Ok(None),
+            }
+        };
+
+        let commit_id = match jj.commit_id_of(&target.revision) {
+            Ok(id) => id,
+            Err(_) => return Ok(None),
+        };
+
+        let blob_uri = if virtual_diffs_enabled {
+            commands::file_blob_uri_virtual(&jj, &commit_id, &target.path)
+        } else {
+            commands::file_blob_with_path(&jj, &workspace, &commit_id, &target.path)
+        };
+        let blob_uri = match blob_uri {
+            Ok(u) => u,
+            Err(_) => return Ok(None),
+        };
+        let target_uri = Url::parse(&blob_uri).map_err(|_| lsp_err("bad file-blob URI"))?;
+        let line_idx = target
+            .line_in_file
+            .map(|n| n.saturating_sub(1))
+            .unwrap_or(0);
+        let position = Position {
+            line: line_idx,
+            character: 0,
+        };
+        let location = Location {
+            uri: target_uri,
+            range: Range {
+                start: position,
+                end: position,
+            },
+        };
+        Ok(Some(GotoDefinitionResponse::Scalar(location)))
+    }
 }
 
 /// Send a `workspace/applyEdit` with full-document replacement to the client
@@ -1140,9 +1189,6 @@ impl LanguageServer for Backend {
         let Some(kind) = BufferKind::from_uri(&uri) else {
             return Ok(None);
         };
-        if matches!(kind, BufferKind::Diff) {
-            return Ok(None);
-        }
 
         let content = {
             let state = self.state.read().await;
@@ -1156,6 +1202,17 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
+        // File rows / hunk rows: open the file pinned to the viewed commit-id.
+        if let Some(target) = cursor::file_target_at_line(&content, line, kind) {
+            return self.open_file_at_revision(&target).await;
+        }
+
+        // Diff buffers only support file-row navigation; everything else stays put.
+        if matches!(kind, BufferKind::Diff) {
+            return Ok(None);
+        }
+
+        // Non-file rows (commit headers, summary headers): open the change diff.
         let Some(revision) = cursor::revision_at_line(&content, line, kind) else {
             return Ok(None);
         };
@@ -1227,13 +1284,14 @@ impl LanguageServer for Backend {
 
         let abs = workspace.join(&target.path);
         if !abs.exists() {
-            self.client
-                .show_message(
-                    MessageType::WARNING,
-                    format!("{} is not present in the working copy", target.path),
-                )
-                .await;
-            return Ok(None);
+            // Returning an LSP error (rather than show_message + Ok(None))
+            // ensures clients display this message instead of their generic
+            // "No locations found" path — which otherwise overwrites a
+            // window/showMessage notification in the Neovim cmdline.
+            return Err(lsp_err(format!(
+                "{} is not present in the working copy",
+                target.path
+            )));
         }
 
         let target_uri = Url::from_file_path(&abs)
