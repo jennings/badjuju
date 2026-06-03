@@ -26,6 +26,9 @@ of the bad-juju repo:
 redo server/install   # installs to ~/.cargo/bin/badjuju
 ```
 
+> No `redo` installed? Run `./do server/install` instead — the repo ships
+> a self-contained `./do` shell script as a drop-in fallback.
+
 #### Option A — lazy.nvim (recommended)
 
 ```lua

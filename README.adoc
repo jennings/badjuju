@@ -119,12 +119,19 @@ hx "$(badjuju status)"
 * https://pnpm.io/installation[pnpm] 10+
 * https://github.com/apenwarr/redo[redo] (apenwarr/redo — `brew install redo` on macOS)
 
+[NOTE]
+====
+If you don't want to install `redo`, the repo ships a self-contained `./do`
+shell script as a drop-in fallback. Every `redo <target>` in this document can
+be run as `./do <target>` instead (e.g. `./do all`, `./do test`, `./do check`).
+====
+
 == Building
 
 [source,shell]
 ----
 pnpm install
-redo
+redo               # or: ./do all
 ----
 
 == Testing

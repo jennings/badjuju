@@ -20,6 +20,10 @@ From a checkout of the bad-juju repo:
 redo server/install   # installs badjuju to ~/.cargo/bin/
 ```
 
+> No `redo` installed? Run `./do server/install` instead — the repo ships
+> a self-contained `./do` shell script as a drop-in fallback. Every `redo
+> <target>` below works as `./do <target>`.
+
 Make sure `~/.cargo/bin` is on your `PATH`.
 
 ### 2. Merge the language config

@@ -15,12 +15,16 @@ authoritative.
 
 ## Build & Test
 
+> Don't have `redo` installed? Run `./do <target>` instead of `redo <target>`
+> anywhere below. The repo ships `./do` as a self-contained shell-script
+> fallback — no install required.
+
 ```bash
 # Install JS dependencies
 pnpm install
 
 # Build all packages
-redo all              # or just: redo
+redo all              # or just: redo  (or: ./do all)
 
 # Run all tests
 redo test
