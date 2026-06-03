@@ -436,6 +436,11 @@ impl Jj {
         self.run(&["diff", "--revisions", rev, "--", path])
     }
 
+    /// Read a file's content at a specific revision (`jj file show -r REV PATH`).
+    pub fn file_show(&self, path: &str, revision: &str) -> Result<String, JjError> {
+        self.run(&["file", "show", path, "--revision", revision])
+    }
+
     /// Return `jj diff --from <from_rev> --to <to_rev> --git` output.
     /// Used to enumerate baseline hunks for the squash window.
     pub fn diff_from_to_git(&self, from_rev: &str, to_rev: &str) -> Result<String, JjError> {
@@ -1321,5 +1326,38 @@ mod tests {
         let jj = Jj::new("jj", dir.path());
         let result = jj.diff_file("@", "anything.txt");
         assert!(matches!(result, Err(JjError::JjFailed { .. })));
+    }
+
+    #[test]
+    fn file_show_returns_content_at_commit_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        std::fs::write(dir.path().join("hello.txt"), "hello world\n").unwrap();
+        jj.describe_set("@", "add hello").unwrap();
+        let commit_id = jj.commit_id_of("@").expect("commit_id_of failed");
+        // Move on so the working copy no longer holds the same file content.
+        jj.new_change("").unwrap();
+        std::fs::write(dir.path().join("hello.txt"), "different\n").unwrap();
+        let out = jj
+            .file_show("hello.txt", &commit_id)
+            .expect("file_show failed");
+        assert_eq!(out, "hello world\n");
+    }
+
+    #[test]
+    fn file_show_missing_path_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        let commit_id = jj.commit_id_of("@").expect("commit_id_of failed");
+        let result = jj.file_show("does-not-exist.txt", &commit_id);
+        match result {
+            Err(JjError::JjFailed { stderr, .. }) => {
+                assert!(
+                    stderr.contains("No such path"),
+                    "expected stderr to mention 'No such path'; got: {stderr}"
+                );
+            }
+            other => panic!("expected JjFailed with 'No such path'; got: {other:?}"),
+        }
     }
 }
