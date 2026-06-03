@@ -111,6 +111,41 @@ describe('keymap.setup_for_buffer', function()
     assert.is_true(has_buffer_map(buf, 'A'), 'expected A map on log.jujutsu')
   end)
 
+  it('q on status.jujutsu maps to bdelete (closes buffer, not editor)', function()
+    local buf = open_named('.jj/badjuju/status.jujutsu')
+    local found, m = has_buffer_map(buf, 'q')
+    assert.is_true(found, 'expected status.jujutsu map for q')
+    assert.is_truthy(
+      m.rhs and m.rhs:lower():match('bdelete'),
+      'q should invoke bdelete, got rhs=' .. tostring(m.rhs)
+    )
+    assert.is_falsy(
+      m.rhs and m.rhs:lower():match('<cmd>quit'),
+      'q must not invoke quit (would exit editor when last window)'
+    )
+  end)
+
+  it('q on diff.jujutsu maps to bdelete', function()
+    local buf = open_named('.jj/badjuju/diff.jujutsu')
+    local found, m = has_buffer_map(buf, 'q')
+    assert.is_true(found, 'expected diff.jujutsu map for q')
+    assert.is_truthy(m.rhs and m.rhs:lower():match('bdelete'), 'q should invoke bdelete on diff')
+  end)
+
+  it('q on diff-change-<id>.jujutsu maps to bdelete', function()
+    local buf = open_named('.jj/badjuju/diff-change-abcdef.jujutsu')
+    local found, m = has_buffer_map(buf, 'q')
+    assert.is_true(found, 'expected diff-change-*.jujutsu map for q')
+    assert.is_truthy(m.rhs and m.rhs:lower():match('bdelete'), 'q should invoke bdelete on change diff')
+  end)
+
+  it('q on squash window maps to bdelete', function()
+    local buf = open_named('.jj/badjuju/squash/foo-bar.jujutsu')
+    local found, m = has_buffer_map(buf, 'q')
+    assert.is_true(found, 'expected squash window map for q')
+    assert.is_truthy(m.rhs and m.rhs:lower():match('bdelete'), 'q should invoke bdelete on squash')
+  end)
+
   it('does nothing for unrelated jujutsu buffers', function()
     local buf = open_named('describe.jujutsu')
     for _, key in ipairs({ 'R', 'r', 'n', 'L', 'd', 'q', 'u', '=', 'a' }) do

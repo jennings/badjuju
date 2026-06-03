@@ -303,7 +303,7 @@ function M.setup_for_buffer(bufnr)
         'badjuju: unsquash file at cursor from parent into child')
     end
     nmap(bufnr, '<Tab>', 'za', 'badjuju: toggle fold at cursor')
-    nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
+    nmap(bufnr, 'q', '<Cmd>bdelete<CR>', 'badjuju: close buffer')
     nmap(bufnr, '?', function() show_help('status') end, 'badjuju: show help')
     -- Open the LSP code-action menu for the current cursor line. Server emits
     -- actions for commit headers (edit/abandon/describe/diff/new/rebase/bookmark)
@@ -383,13 +383,13 @@ function M.setup_for_buffer(bufnr)
   elseif name:match('/%.jj/badjuju/diff%.jujutsu$')
       or name:match('/%.jj/badjuju/diff%-[a-z]+%-[^/]+%.jujutsu$') then
     nmap(bufnr, 'R', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
-    nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close window')
+    nmap(bufnr, 'q', '<Cmd>bdelete<CR>', 'badjuju: close buffer')
     nmap(bufnr, '?', function() show_help('diff') end, 'badjuju: show help')
   elseif name:match('/%.jj/badjuju/squash/[^/]+%.jujutsu$') then
     nmap(bufnr, 's', run_squash_toggle, 'badjuju: toggle hunk or file in squash window')
     nmap(bufnr, 'a', run_squash_select_all, 'badjuju: select all changes')
     nmap(bufnr, 'A', run_squash_select_none, 'badjuju: deselect all changes')
-    nmap(bufnr, 'q', '<Cmd>quit<CR>', 'badjuju: close squash window')
+    nmap(bufnr, 'q', '<Cmd>bdelete<CR>', 'badjuju: close squash buffer')
     nmap(bufnr, '?', function() show_help('squash') end, 'badjuju: show help')
   elseif name:match('/%.jj/badjuju/describe%.jujutsu$') then
     nmap(bufnr, '?', function() show_help('describe') end, 'badjuju: show help')
