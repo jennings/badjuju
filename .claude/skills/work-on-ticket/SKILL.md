@@ -60,6 +60,30 @@ gh issue edit <n> --add-label "in progress"
 
 ## 3. Implement
 
+### Start the commit
+
+Check whether `@` is already an empty working copy:
+
+```bash
+jj log -r @ --no-graph -T 'if(empty, "empty", "non-empty")'
+```
+
+- **`empty`** — reuse it. Set the ticket's commit message in place:
+
+  ```bash
+  jj describe -m "feat(area): short imperative title"
+  ```
+
+- **`non-empty`** — start a new commit on top:
+
+  ```bash
+  jj new -m "feat(area): short imperative title"
+  ```
+
+Always pass `-m`. `jj describe` / `jj new` / `jj squash` without a
+message flag open `$EDITOR` and hang non-interactive sessions — see
+`CLAUDE.local.md`.
+
 One ticket per unit of work. A single ticket may span multiple commits,
 but a single commit must not span multiple tickets.
 
@@ -77,7 +101,9 @@ redo test      # build + run all unit tests
 
 ## 5. Commit message format
 
-Follow the project's style. Example:
+Once the work is verified, advance the working copy and update the commit
+description to its final form with `jj commit -m "..."`. Follow the project's
+style. Example:
 
 ```
 feat(area): Short descriptive title here in imperative voice
@@ -138,3 +164,18 @@ automatically.
 **Do not close the tracking issue manually either.** If this was
 the last sub-task, the second `Resolves #<tracking>` line in the
 commit message closes the parent when the commit lands on `main`.
+
+### Leave a clean working copy
+
+After labeling the ticket implemented, the working copy should be left on an
+empty commit. The `jj commit` should have handled this, but if it didn't,
+create a fresh empty commit on top so subsequent file edits don't accidentally
+land in the ticket commit:
+
+```bash
+jj new
+```
+
+No message, no flags — this leaves `@` empty, ready for the next
+ticket to either reuse via `jj describe` (Section 3) or branch from
+via `jj new -m "..."`.
