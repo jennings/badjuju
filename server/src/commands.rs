@@ -717,11 +717,19 @@ pub fn run_squash_window(
 /// <from>` and derives SELECTED as `baseline − remaining`. Returns
 /// `(uri, new_content)`.
 ///
-/// If `<from>` or `<into>` no longer exist (abandoned externally), writes a
+/// If `<from>` or `<into>` no longer exist (abandoned externally), returns a
 /// "SQUASH TARGET NO LONGER EXISTS" notice instead.
+///
+/// `write_to_disk` controls whether the rendered content is also written to
+/// the squash file on disk. Virtual-diffs-capable clients (VS Code, Neovim)
+/// pass `false`: applyEdit alone delivers the new content, and skipping the
+/// disk-write avoids triggering Neovim's autoreload — which would re-run the
+/// ftplugin and reset user-opened folds. File-based clients (Helix) pass
+/// `true` so a cold reopen of the buffer sees fresh content.
 pub fn regenerate_squash_window(
     jj: &Jj,
     window: &SquashWindow,
+    write_to_disk: bool,
 ) -> Result<(String, String), CommandError> {
     let from_ok = jj.change_id_of(&window.from).is_ok();
     let into_ok = jj.change_id_of(&window.into).is_ok();
@@ -737,7 +745,9 @@ pub fn regenerate_squash_window(
         let content = "SQUASH TARGET NO LONGER EXISTS\n\nThe squash source or destination was \
                        abandoned or rewritten externally.\nClose this window.\n"
             .to_string();
-        std::fs::write(&path, &content)?;
+        if write_to_disk {
+            std::fs::write(&path, &content)?;
+        }
         return Ok((window.uri.clone(), content));
     }
 
@@ -797,7 +807,9 @@ pub fn regenerate_squash_window(
         jj.command_reference().squash(),
     );
 
-    std::fs::write(&path, &content)?;
+    if write_to_disk {
+        std::fs::write(&path, &content)?;
+    }
     Ok((window.uri.clone(), content))
 }
 
@@ -811,6 +823,7 @@ pub fn run_squash_toggle_hunk(
     window: &SquashWindow,
     hunk: &cursor::SquashHunk,
     section: cursor::SquashSection,
+    write_to_disk: bool,
 ) -> Result<(String, String), CommandError> {
     let badjuju_exe = std::env::current_exe().map_err(CommandError::Io)?;
     let sidecar_path = workspace
@@ -864,7 +877,7 @@ pub fn run_squash_toggle_hunk(
         }
     }
 
-    regenerate_squash_window(jj, window)
+    regenerate_squash_window(jj, window, write_to_disk)
 }
 
 /// Toggle an entire file between REMAINING and SELECTED using file-level squash.
@@ -873,6 +886,7 @@ pub fn run_squash_toggle_file(
     window: &SquashWindow,
     file: &str,
     section: cursor::SquashSection,
+    write_to_disk: bool,
 ) -> Result<(String, String), CommandError> {
     match section {
         cursor::SquashSection::Remaining => {
@@ -882,25 +896,27 @@ pub fn run_squash_toggle_file(
             jj.squash_file_into(&window.into, &window.from, file)?;
         }
     }
-    regenerate_squash_window(jj, window)
+    regenerate_squash_window(jj, window, write_to_disk)
 }
 
 /// Move all remaining hunks to SELECTED (`jj squash --from <from> --into <into>`).
 pub fn run_squash_select_all(
     jj: &Jj,
     window: &SquashWindow,
+    write_to_disk: bool,
 ) -> Result<(String, String), CommandError> {
     jj.squash_from_into_keep_emptied(&window.from, &window.into)?;
-    regenerate_squash_window(jj, window)
+    regenerate_squash_window(jj, window, write_to_disk)
 }
 
 /// Move all selected hunks back to REMAINING (`jj squash --from <into> --into <from>`).
 pub fn run_squash_select_none(
     jj: &Jj,
     window: &SquashWindow,
+    write_to_disk: bool,
 ) -> Result<(String, String), CommandError> {
     jj.squash_from_into_keep_emptied(&window.into, &window.from)?;
-    regenerate_squash_window(jj, window)
+    regenerate_squash_window(jj, window, write_to_disk)
 }
 
 /// Compare hunk content lines (ignoring trailing whitespace differences).
@@ -1098,12 +1114,19 @@ pub fn run_squash_open_hunk_edit(
     window: &SquashWindow,
     hunk: &cursor::SquashHunk,
     section: cursor::SquashSection,
+    write_to_disk: bool,
 ) -> Result<(String, HunkEdit, Option<(String, String)>), CommandError> {
     let mut window_update: Option<(String, String)> = None;
     if section == cursor::SquashSection::Selected {
         // Unsquash the hunk from <into> back into <from> first.
-        let (uri, content) =
-            run_squash_toggle_hunk(jj, workspace, window, hunk, cursor::SquashSection::Selected)?;
+        let (uri, content) = run_squash_toggle_hunk(
+            jj,
+            workspace,
+            window,
+            hunk,
+            cursor::SquashSection::Selected,
+            write_to_disk,
+        )?;
         window_update = Some((uri, content));
     }
 
@@ -1141,6 +1164,7 @@ pub fn on_hunk_edit_save(
     workspace: &Path,
     edit: &HunkEdit,
     text: &str,
+    write_to_disk: bool,
 ) -> Result<HunkEditOutcome, CommandError> {
     let HunkEdit::Squash {
         uri,
@@ -1193,7 +1217,8 @@ pub fn on_hunk_edit_save(
         uri: squash_window_uri_for(workspace, from, into)?,
         baseline_hunks: Vec::new(),
     };
-    let (window_uri, window_content) = regenerate_squash_window(jj, &baseline_window)?;
+    let (window_uri, window_content) =
+        regenerate_squash_window(jj, &baseline_window, write_to_disk)?;
 
     // Replace the hunk-edit file with the terminal notice.
     let notice = HUNK_EDIT_APPLIED_NOTICE.to_string();

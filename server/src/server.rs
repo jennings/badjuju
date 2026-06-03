@@ -275,7 +275,13 @@ impl Backend {
         }
         self.refresh_open_diffs(jj, workspace).await;
         if let Some(window) = open_squash_window {
-            match commands::regenerate_squash_window(jj, &window) {
+            // For virtual-diffs-capable clients (VS Code, Neovim), applyEdit
+            // delivers the new content directly into the open buffer; skip the
+            // disk-write so Neovim's autoreload doesn't re-trigger the ftplugin
+            // and reset user-opened folds. Helix relies on the disk-write
+            // fallback because it doesn't auto-reload.
+            let write_to_disk = !virtual_diffs_enabled;
+            match commands::regenerate_squash_window(jj, &window, write_to_disk) {
                 Ok((uri, content)) => {
                     apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
                     self.state.write().await.documents.insert(uri, content);
@@ -542,7 +548,8 @@ fn spawn_op_head_watcher(
                     // Refresh open squash window if any.
                     let open_squash_window = state.read().await.open_squash_window.clone();
                     if let Some(window) = open_squash_window {
-                        match commands::regenerate_squash_window(&jj, &window) {
+                        let write_to_disk = !virtual_diffs_enabled;
+                        match commands::regenerate_squash_window(&jj, &window, write_to_disk) {
                             Ok((uri, content)) => {
                                 apply_edit_if_open(&client, &state, &uri, &content).await;
                                 state.write().await.documents.insert(uri, content);
@@ -1367,7 +1374,8 @@ impl LanguageServer for Backend {
                         .await;
                     return;
                 };
-                match commands::on_hunk_edit_save(&jj, &workspace, &edit, &text) {
+                let write_to_disk = !self.state.read().await.virtual_diffs_enabled;
+                match commands::on_hunk_edit_save(&jj, &workspace, &edit, &text, write_to_disk) {
                     Ok(commands::HunkEditOutcome::Applied {
                         window_uri,
                         window_content,
@@ -1718,7 +1726,7 @@ impl LanguageServer for Backend {
                     .map_err(lsp_err)?
                     .ok_or_else(|| lsp_err("squash.toggle requires a cursor argument"))?;
 
-                let (window, content) = {
+                let (window, content, write_to_disk) = {
                     let state = self.state.read().await;
                     let w = state
                         .open_squash_window
@@ -1730,7 +1738,11 @@ impl LanguageServer for Backend {
                         .cloned()
                         .or_else(|| read_uri_from_disk(&cp.uri))
                         .ok_or_else(|| lsp_err(format!("document not found: {}", cp.uri)))?;
-                    (w, c)
+                    // Virtual-diffs-capable clients (VS Code, Neovim) get the
+                    // refreshed squash buffer via applyEdit only — skipping the
+                    // disk-write avoids autoreload-triggered fold loss. Helix
+                    // (no virtual diffs) still needs the disk-write fallback.
+                    (w, c, !state.virtual_diffs_enabled)
                 };
 
                 let section = cursor::squash_section_at_line(&content, cp.line)
@@ -1741,12 +1753,19 @@ impl LanguageServer for Backend {
                     && cursor::squash_hunk_at_line(&content, cp.line).is_none()
                 {
                     // File-level toggle: use file-level squash (no --interactive needed).
-                    commands::run_squash_toggle_file(&jj, &window, &file, section)
+                    commands::run_squash_toggle_file(&jj, &window, &file, section, write_to_disk)
                         .map_err(lsp_err)?
                 } else if let Some(hunk) = cursor::squash_hunk_at_line(&content, cp.line) {
                     // Hunk-level toggle: use --interactive --tool.
-                    commands::run_squash_toggle_hunk(&jj, &workspace, &window, &hunk, section)
-                        .map_err(lsp_err)?
+                    commands::run_squash_toggle_hunk(
+                        &jj,
+                        &workspace,
+                        &window,
+                        &hunk,
+                        section,
+                        write_to_disk,
+                    )
+                    .map_err(lsp_err)?
                 } else {
                     return Err(lsp_err("cursor is not on a file or hunk line"));
                 };
@@ -1785,9 +1804,16 @@ impl LanguageServer for Backend {
                 let hunk = cursor::squash_hunk_at_line(&content, cp.line)
                     .ok_or_else(|| lsp_err("edit_hunk requires the cursor to be on a hunk"))?;
 
-                let (hunk_edit_uri, edit, window_update) =
-                    commands::run_squash_open_hunk_edit(&jj, &workspace, &window, &hunk, section)
-                        .map_err(lsp_err)?;
+                let write_to_disk = !self.state.read().await.virtual_diffs_enabled;
+                let (hunk_edit_uri, edit, window_update) = commands::run_squash_open_hunk_edit(
+                    &jj,
+                    &workspace,
+                    &window,
+                    &hunk,
+                    section,
+                    write_to_disk,
+                )
+                .map_err(lsp_err)?;
 
                 // If a reverse-toggle happened (SELECTED → REMAINING), push the
                 // refreshed squash window to the client first.
@@ -1806,15 +1832,17 @@ impl LanguageServer for Backend {
                 Ok(Some(serde_json::Value::String(hunk_edit_uri)))
             }
             "badjuju.squash.select_all" => {
-                let window = self
-                    .state
-                    .read()
-                    .await
-                    .open_squash_window
-                    .clone()
-                    .ok_or_else(|| lsp_err("no open squash window"))?;
+                let (window, write_to_disk) = {
+                    let state = self.state.read().await;
+                    let w = state
+                        .open_squash_window
+                        .clone()
+                        .ok_or_else(|| lsp_err("no open squash window"))?;
+                    (w, !state.virtual_diffs_enabled)
+                };
                 let (squash_uri, new_content) =
-                    commands::run_squash_select_all(&jj, &window).map_err(lsp_err)?;
+                    commands::run_squash_select_all(&jj, &window, write_to_disk)
+                        .map_err(lsp_err)?;
                 self.record_self_caused_op(&jj).await;
                 apply_edit_if_open(&self.client, &self.state, &squash_uri, &new_content).await;
                 self.state
@@ -1825,15 +1853,17 @@ impl LanguageServer for Backend {
                 Ok(Some(serde_json::Value::String(squash_uri)))
             }
             "badjuju.squash.select_none" => {
-                let window = self
-                    .state
-                    .read()
-                    .await
-                    .open_squash_window
-                    .clone()
-                    .ok_or_else(|| lsp_err("no open squash window"))?;
+                let (window, write_to_disk) = {
+                    let state = self.state.read().await;
+                    let w = state
+                        .open_squash_window
+                        .clone()
+                        .ok_or_else(|| lsp_err("no open squash window"))?;
+                    (w, !state.virtual_diffs_enabled)
+                };
                 let (squash_uri, new_content) =
-                    commands::run_squash_select_none(&jj, &window).map_err(lsp_err)?;
+                    commands::run_squash_select_none(&jj, &window, write_to_disk)
+                        .map_err(lsp_err)?;
                 self.record_self_caused_op(&jj).await;
                 apply_edit_if_open(&self.client, &self.state, &squash_uri, &new_content).await;
                 self.state

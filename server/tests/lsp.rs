@@ -2098,6 +2098,84 @@ fn lsp_squash_window_did_close_deletes_file() {
 /// Open a squash window in a fresh LSP session and return the session (with
 /// `open_squash_window` set), the squash buffer URI, and its initial content.
 /// The repo has one source commit (adds readme.txt v1) and one destination commit.
+/// Like [`setup_squash_session`], but initializes the session with
+/// `virtualDiffs: true` (matching VS Code / Neovim capability advertisement).
+fn setup_squash_session_virtual_diffs(dir: &std::path::Path) -> (LspSession, String, String) {
+    std::fs::write(dir.join("readme.txt"), "v1\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "source commit"])
+        .current_dir(dir)
+        .output()
+        .expect("describe failed");
+    Command::new("jj")
+        .args(["new", "-m", "destination commit"])
+        .current_dir(dir)
+        .output()
+        .expect("new failed");
+
+    let root_uri = format!("file://{}", dir.display());
+    let mut session = LspSession::start(dir);
+    session.initialize_with_options(&root_uri, serde_json::json!({ "virtualDiffs": true }));
+
+    let resp =
+        session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@-"]));
+    assert!(
+        resp.get("error").is_none(),
+        "source selection failed: {resp}"
+    );
+
+    let resp = session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@"]));
+    assert!(
+        resp.get("error").is_none(),
+        "destination selection failed: {resp}"
+    );
+
+    let squash_uri = resp["result"].as_str().unwrap().to_string();
+    let squash_content = read_file(&squash_uri);
+    (session, squash_uri, squash_content)
+}
+
+#[test]
+fn lsp_squash_toggle_skips_disk_write_when_virtual_diffs_enabled() {
+    // Regression for #24: when the client advertises virtualDiffs (VS Code,
+    // Neovim), squash buffer regenerations must NOT rewrite the on-disk file —
+    // the applyEdit alone delivers the new content. Disk rewrites trigger
+    // Neovim's autoreload, which re-runs the ftplugin and resets user-opened
+    // folds.
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let (mut session, squash_uri, initial_content) = setup_squash_session_virtual_diffs(dir.path());
+
+    session.did_open(&squash_uri, "jujutsu", &initial_content);
+
+    let remaining_line = initial_content
+        .lines()
+        .enumerate()
+        .find_map(|(i, l)| (l == "REMAINING CHANGES:").then_some(i))
+        .expect("REMAINING CHANGES: not found in initial squash buffer");
+    let hunk_line = initial_content
+        .lines()
+        .enumerate()
+        .skip(remaining_line)
+        .find_map(|(i, l)| l.starts_with("@@").then_some(i))
+        .expect("no @@ hunk found in REMAINING section");
+
+    let resp = session.execute_command_acked(
+        "badjuju.squash.toggle",
+        serde_json::json!([{ "cursor": { "uri": squash_uri, "line": hunk_line } }]),
+    );
+    assert!(resp.get("error").is_none(), "squash.toggle failed: {resp}");
+
+    // Disk content must be unchanged from the initial creation — the toggle
+    // only sent an applyEdit.
+    let on_disk_after = read_file(&squash_uri);
+    assert_eq!(
+        on_disk_after, initial_content,
+        "disk file should NOT have been rewritten when virtualDiffs is enabled; \
+         applyEdit alone updates the buffer"
+    );
+}
+
 fn setup_squash_session(dir: &std::path::Path) -> (LspSession, String, String) {
     std::fs::write(dir.join("readme.txt"), "v1\n").unwrap();
     Command::new("jj")
