@@ -209,6 +209,12 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         windows: &["squash"],
     },
     KeymapEntry {
+        key: "u",
+        action: "badjuju.undo",
+        description: "jj undo",
+        windows: &["squash"],
+    },
+    KeymapEntry {
         key: "q",
         action: "",
         description: "close",
@@ -396,6 +402,12 @@ static VIM_ENTRIES: &[KeymapEntry] = &[
         windows: &["squash"],
     },
     KeymapEntry {
+        key: "u",
+        action: "badjuju.undo",
+        description: "jj undo",
+        windows: &["squash"],
+    },
+    KeymapEntry {
         key: "q",
         action: "",
         description: "close",
@@ -507,10 +519,22 @@ mod tests {
     #[test]
     fn render_squash_has_toggle_select_close() {
         let text = render_command_reference(&KeymapProfile::Magit, "squash");
-        for key in ["s", "a", "A", "q", "Tab"] {
+        for key in ["s", "a", "A", "u", "q", "Tab"] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in squash:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn render_squash_has_undo_key_in_both_profiles() {
+        for profile in [KeymapProfile::Magit, KeymapProfile::Vim] {
+            let text = render_command_reference(&profile, "squash");
+            assert!(
+                text.lines()
+                    .any(|l| l.starts_with('u') && l.contains("undo")),
+                "missing `u` undo binding in {profile:?} squash:\n{text}"
             );
         }
     }

@@ -1869,7 +1869,10 @@ impl LanguageServer for Backend {
             "badjuju.undo" => {
                 let uri = commands::run_undo(&jj, &workspace).map_err(lsp_err)?;
                 self.record_self_caused_op(&jj).await;
-                self.refresh_open_diffs(&jj, &workspace).await;
+                // Regenerate every open badjuju buffer so the reverted jj state
+                // is reflected — undo can be triggered from the squash buffer,
+                // where leaving the window stale would mislead the user.
+                self.refresh_open_artifacts(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.abandon" => {

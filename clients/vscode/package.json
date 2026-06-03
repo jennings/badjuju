@@ -694,6 +694,11 @@
         "when": "badjuju.keymapProfile == 'magit' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
       },
       {
+        "command": "badjuju.undo.open",
+        "key": "u",
+        "when": "badjuju.keymapProfile == 'magit' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
         "command": "workbench.action.closeActiveEditor",
         "key": "q",
         "when": "badjuju.keymapProfile == 'magit' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
@@ -711,6 +716,11 @@
       {
         "command": "badjuju.squash.select_none",
         "key": "shift+a",
+        "when": "badjuju.keymapProfile == 'vim' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.undo.open",
+        "key": "u",
         "when": "badjuju.keymapProfile == 'vim' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
       },
       {
