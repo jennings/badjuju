@@ -87,6 +87,7 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.squash.commit",
     "badjuju.squash.cancel",
     "badjuju.squash.toggle",
+    "badjuju.squash.edit_hunk",
     "badjuju.squash.select_all",
     "badjuju.squash.select_none",
     "badjuju.unsquash",
@@ -131,6 +132,9 @@ struct State {
     pending_squash_source: Option<String>,
     /// State of the currently open squash window, if any.
     open_squash_window: Option<commands::SquashWindow>,
+    /// State of the currently open hunk-edit buffer, if any. Cleared by
+    /// `did_close` and overwritten by a successful save.
+    open_hunk_edit: Option<commands::HunkEdit>,
     /// Op-ids produced by bad-juju's own mutations, with the time they were recorded.
     /// Used by an op-head watcher to suppress double-refreshes.
     self_caused_ops: HashMap<String, Instant>,
@@ -156,6 +160,7 @@ impl Default for State {
             virtual_diffs_enabled: false,
             pending_squash_source: None,
             open_squash_window: None,
+            open_hunk_edit: None,
             self_caused_ops: HashMap::new(),
             preopen_marks: HashSet::new(),
         }
@@ -663,6 +668,11 @@ fn squash_window_actions(uri: &str, line: usize, content: &str) -> Vec<CodeActio
                 "badjuju.squash.toggle",
                 vec![cursor_arg.clone()],
             ));
+            actions.push(make(
+                "Edit hunk before squashing".to_string(),
+                "badjuju.squash.edit_hunk",
+                vec![cursor_arg.clone()],
+            ));
         }
     }
 
@@ -781,6 +791,7 @@ fn parse_command_reference(value: &serde_json::Value, profile: &KeymapProfile) -
         pick("log"),
         pick("diff"),
         pick("squash"),
+        pick("hunkEdit"),
     )
 }
 
@@ -1003,7 +1014,7 @@ impl LanguageServer for Backend {
             BufferKind::Squash => {
                 actions.extend(squash_window_actions(&uri, line, &content));
             }
-            BufferKind::Diff => {}
+            BufferKind::Diff | BufferKind::HunkEdit => {}
         }
 
         Ok(Some(actions))
@@ -1169,7 +1180,10 @@ impl LanguageServer for Backend {
                         Ok(None)
                     }
                 }
-                BufferKind::Diff | BufferKind::Squash => Ok(None),
+                // Squash windows can't be reconstructed from URI alone;
+                // hunk-edit buffers are action-oriented and must never be
+                // clobbered by a cold-open regen.
+                BufferKind::Diff | BufferKind::Squash | BufferKind::HunkEdit => Ok(None),
             };
 
         match regen {
@@ -1231,6 +1245,18 @@ impl LanguageServer for Backend {
                 let _ = std::fs::remove_file(path);
             }
         }
+        if matches!(BufferKind::from_uri(&uri), Some(BufferKind::HunkEdit)) {
+            if state
+                .open_hunk_edit
+                .as_ref()
+                .is_some_and(|e| e.uri() == uri)
+            {
+                state.open_hunk_edit = None;
+            }
+            if let Some(path) = commands::path_from_uri(&uri) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -1287,6 +1313,46 @@ impl LanguageServer for Backend {
                     self.client
                         .log_message(MessageType::ERROR, format!("log save failed: {e}"))
                         .await;
+                }
+            }
+            Some("hunk-edit.jujutsu") => {
+                let edit = self.state.read().await.open_hunk_edit.clone();
+                let Some(edit) = edit else {
+                    self.client
+                        .log_message(MessageType::WARNING, "hunk-edit save: no open buffer state")
+                        .await;
+                    return;
+                };
+                match commands::on_hunk_edit_save(&jj, &workspace, &edit, &text) {
+                    Ok(commands::HunkEditOutcome::Applied {
+                        window_uri,
+                        window_content,
+                        notice,
+                    }) => {
+                        self.record_self_caused_op(&jj).await;
+                        apply_edit_if_open(&self.client, &self.state, &window_uri, &window_content)
+                            .await;
+                        // Replace the user's hunk-edit buffer with the terminal
+                        // notice so the editor stops showing the (now stale)
+                        // metadata + body.
+                        apply_edit_if_open(&self.client, &self.state, edit.uri(), &notice).await;
+                        let mut state = self.state.write().await;
+                        state.documents.insert(window_uri, window_content);
+                        state.documents.insert(edit.uri().to_string(), notice);
+                        state.open_hunk_edit = None;
+                    }
+                    Ok(commands::HunkEditOutcome::Aborted { notice })
+                    | Ok(commands::HunkEditOutcome::StaleSource { notice }) => {
+                        apply_edit_if_open(&self.client, &self.state, edit.uri(), &notice).await;
+                        let mut state = self.state.write().await;
+                        state.documents.insert(edit.uri().to_string(), notice);
+                        state.open_hunk_edit = None;
+                    }
+                    Err(e) => {
+                        self.client
+                            .log_message(MessageType::ERROR, format!("hunk-edit save failed: {e}"))
+                            .await;
+                    }
                 }
             }
             _ => {}
@@ -1643,6 +1709,51 @@ impl LanguageServer for Backend {
                     .insert(squash_uri.clone(), new_content);
                 Ok(Some(serde_json::Value::String(squash_uri)))
             }
+            "badjuju.squash.edit_hunk" => {
+                let cp = commands::parse_cursor_arg(params.arguments.first())
+                    .map_err(lsp_err)?
+                    .ok_or_else(|| lsp_err("squash.edit_hunk requires a cursor argument"))?;
+
+                let (window, content) = {
+                    let state = self.state.read().await;
+                    let w = state
+                        .open_squash_window
+                        .clone()
+                        .ok_or_else(|| lsp_err("no open squash window"))?;
+                    let c = state
+                        .documents
+                        .get(&cp.uri)
+                        .cloned()
+                        .or_else(|| read_uri_from_disk(&cp.uri))
+                        .ok_or_else(|| lsp_err(format!("document not found: {}", cp.uri)))?;
+                    (w, c)
+                };
+
+                let section = cursor::squash_section_at_line(&content, cp.line)
+                    .ok_or_else(|| lsp_err("cursor not in a SELECTED or REMAINING section"))?;
+                let hunk = cursor::squash_hunk_at_line(&content, cp.line)
+                    .ok_or_else(|| lsp_err("edit_hunk requires the cursor to be on a hunk"))?;
+
+                let (hunk_edit_uri, edit, window_update) =
+                    commands::run_squash_open_hunk_edit(&jj, &workspace, &window, &hunk, section)
+                        .map_err(lsp_err)?;
+
+                // If a reverse-toggle happened (SELECTED → REMAINING), push the
+                // refreshed squash window to the client first.
+                if let Some((squash_uri, squash_content)) = window_update {
+                    self.record_self_caused_op(&jj).await;
+                    apply_edit_if_open(&self.client, &self.state, &squash_uri, &squash_content)
+                        .await;
+                    self.state
+                        .write()
+                        .await
+                        .documents
+                        .insert(squash_uri, squash_content);
+                }
+
+                self.state.write().await.open_hunk_edit = Some(edit);
+                Ok(Some(serde_json::Value::String(hunk_edit_uri)))
+            }
             "badjuju.squash.select_all" => {
                 let window = self
                     .state
@@ -1893,6 +2004,7 @@ mod tests {
         assert!(COMMANDS.contains(&"badjuju.fetch"));
         assert!(COMMANDS.contains(&"badjuju.push"));
         assert!(COMMANDS.contains(&"badjuju.rebase"));
+        assert!(COMMANDS.contains(&"badjuju.squash.edit_hunk"));
     }
 
     #[test]

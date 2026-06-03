@@ -18,13 +18,20 @@ pub enum BufferKind {
     Log,
     Diff,
     Squash,
+    /// Reusable single-instance `hunk-edit.jujutsu` buffer used by the squash
+    /// `edit hunk` flow (and, in the future, `jj diffedit`-style flows).
+    HunkEdit,
 }
 
 impl BufferKind {
     /// Detect kind from a URI string by trailing filename. Returns `None` for
     /// URIs that don't end in one of the known buffer names.
     pub fn from_uri(uri: &str) -> Option<Self> {
-        if uri.ends_with("status.jujutsu") {
+        // Check the hunk-edit URI first so the generic "ends with .jujutsu"
+        // filename match doesn't claim it.
+        if is_hunk_edit_uri(uri) {
+            Some(Self::HunkEdit)
+        } else if uri.ends_with("status.jujutsu") {
             Some(Self::Status)
         } else if uri.ends_with("log.jujutsu") {
             Some(Self::Log)
@@ -36,6 +43,13 @@ impl BufferKind {
             None
         }
     }
+}
+
+/// True for the single `.jj/badjuju/hunk-edit.jujutsu` URI. Lives directly
+/// under `badjuju/` (not under `squash/`), so other-kind detection won't claim
+/// it.
+pub fn is_hunk_edit_uri(uri: &str) -> bool {
+    uri.ends_with("/.jj/badjuju/hunk-edit.jujutsu")
 }
 
 /// Whether the URI resolves to a squash window file: `.jj/badjuju/squash/<id>-<id>.jujutsu`.
@@ -103,6 +117,8 @@ pub fn revision_at_line(content: &str, line: usize, kind: BufferKind) -> Option<
         BufferKind::Log => revision_at_line_log(content, line),
         BufferKind::Diff => revision_from_diff_header(content),
         BufferKind::Squash => revision_from_squash_header(content),
+        // The hunk-edit buffer is action-oriented; no enclosing revision.
+        BufferKind::HunkEdit => None,
     }
 }
 
@@ -721,6 +737,27 @@ mod tests {
         // Should not match partial names
         assert_eq!(BufferKind::from_uri("file:///x/diff-change-.jujutsu"), None);
         assert_eq!(BufferKind::from_uri("file:///x/diff-commit-.jujutsu"), None);
+    }
+
+    #[test]
+    fn buffer_kind_hunk_edit_from_uri() {
+        assert_eq!(
+            BufferKind::from_uri("file:///x/.jj/badjuju/hunk-edit.jujutsu"),
+            Some(BufferKind::HunkEdit)
+        );
+        assert!(is_hunk_edit_uri("file:///x/.jj/badjuju/hunk-edit.jujutsu"));
+        assert!(!is_hunk_edit_uri("file:///x/hunk-edit.jujutsu"));
+    }
+
+    #[test]
+    fn buffer_kind_squash_does_not_claim_hunk_edit_jujutsu() {
+        // The squash detector requires a `/squash/` segment in the path, so the
+        // top-level hunk-edit.jujutsu must not be misclassified as a squash
+        // window even before the explicit hunk-edit check runs.
+        assert_ne!(
+            BufferKind::from_uri("file:///x/.jj/badjuju/hunk-edit.jujutsu"),
+            Some(BufferKind::Squash)
+        );
     }
 
     // --- revision_at_line: Status buffer ---

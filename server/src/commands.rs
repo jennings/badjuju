@@ -23,6 +23,7 @@ pub struct CommandReference {
     log: String,
     diff: String,
     squash: String,
+    hunk_edit: String,
 }
 
 impl Default for CommandReference {
@@ -32,13 +33,14 @@ impl Default for CommandReference {
 }
 
 impl CommandReference {
-    /// Render all four buffers' reference text from the given profile.
+    /// Render all buffer reference texts from the given profile.
     pub fn from_profile(profile: &KeymapProfile) -> Self {
         Self {
             status: keymap::render_command_reference(profile, "status"),
             log: keymap::render_command_reference(profile, "log"),
             diff: keymap::render_command_reference(profile, "diff"),
             squash: keymap::render_command_reference(profile, "squash"),
+            hunk_edit: keymap::render_command_reference(profile, "hunk-edit"),
         }
     }
 
@@ -52,8 +54,9 @@ impl CommandReference {
         log: Option<String>,
         diff: Option<String>,
         squash: Option<String>,
+        hunk_edit: Option<String>,
     ) -> Self {
-        Self::with_profile(&KeymapProfile::Magit, status, log, diff, squash)
+        Self::with_profile(&KeymapProfile::Magit, status, log, diff, squash, hunk_edit)
     }
 
     pub fn with_profile(
@@ -62,6 +65,7 @@ impl CommandReference {
         log: Option<String>,
         diff: Option<String>,
         squash: Option<String>,
+        hunk_edit: Option<String>,
     ) -> Self {
         let base = Self::from_profile(profile);
         Self {
@@ -69,6 +73,7 @@ impl CommandReference {
             log: log.unwrap_or(base.log),
             diff: diff.unwrap_or(base.diff),
             squash: squash.unwrap_or(base.squash),
+            hunk_edit: hunk_edit.unwrap_or(base.hunk_edit),
         }
     }
 
@@ -86,6 +91,10 @@ impl CommandReference {
 
     pub fn squash(&self) -> &str {
         &self.squash
+    }
+
+    pub fn hunk_edit(&self) -> &str {
+        &self.hunk_edit
     }
 }
 
@@ -920,6 +929,315 @@ pub fn run_squash_select_none(
 /// Compare hunk content lines (ignoring trailing whitespace differences).
 fn hunks_content_match(a: &str, b: &str) -> bool {
     a.trim_end() == b.trim_end()
+}
+
+// ---------- Hunk-edit buffer (#13) ----------
+
+/// State of an open `hunk-edit.jujutsu` buffer. Stored singly on `State`.
+#[derive(Debug, Clone)]
+pub enum HunkEdit {
+    /// Editing a hunk that will be squashed from `from` into `into`.
+    Squash {
+        /// File URI of the hunk-edit buffer.
+        uri: String,
+        /// Full change-id of the squash source.
+        from: String,
+        /// Full change-id of the squash destination.
+        into: String,
+        /// File path the hunk applies to.
+        file: String,
+        /// Original `@@` header — kept so we can preserve `old_start` /
+        /// `new_start` and only recompute lengths from the body.
+        original_header: String,
+        /// Which section the hunk was in before editing — used to decide
+        /// whether a "reverse-toggle" unsquash happened first.
+        origin_section: cursor::SquashSection,
+    },
+}
+
+impl HunkEdit {
+    pub fn uri(&self) -> &str {
+        match self {
+            HunkEdit::Squash { uri, .. } => uri,
+        }
+    }
+}
+
+/// Result of saving a hunk-edit buffer.
+#[derive(Debug, Clone)]
+pub enum HunkEditOutcome {
+    /// Hunk was applied successfully. The hunk-edit file is rewritten with a
+    /// terminal notice, and the squash window is refreshed.
+    Applied {
+        window_uri: String,
+        window_content: String,
+        notice: String,
+    },
+    /// User cleared the body — no jj invocation, terminal notice rendered.
+    Aborted { notice: String },
+    /// `<from>` was abandoned externally — no jj invocation, terminal notice.
+    StaleSource { notice: String },
+}
+
+const HUNK_EDIT_FILENAME: &str = "hunk-edit.jujutsu";
+const HUNK_EDIT_APPLIED_NOTICE: &str = "EDIT APPLIED — close this buffer\n";
+const HUNK_EDIT_ABORTED_NOTICE: &str = "EDIT ABORTED — close this buffer\n";
+const HUNK_EDIT_STALE_NOTICE: &str = "STALE SOURCE — close this buffer\n";
+
+/// Build the JJ:-prefixed metadata + body for a hunk-edit buffer.
+fn render_hunk_edit_buffer(
+    action: &str,
+    from: &str,
+    into: &str,
+    file: &str,
+    original_header: &str,
+    hunk_body: &str,
+    command_reference: &str,
+) -> String {
+    let mut out = String::new();
+    out.push_str("JJ: Edit the +/- lines below, then save to apply.\n");
+    out.push_str("JJ: Editing `-` line text has no effect; editing ` ` (context) text\n");
+    out.push_str("JJ: replaces the source. Add/remove only `+` lines for safe edits.\n");
+    out.push_str(&format!("JJ: action: {action}\n"));
+    out.push_str(&format!("JJ: from: {from}\n"));
+    out.push_str(&format!("JJ: into: {into}\n"));
+    out.push_str(&format!("JJ: file: {file}\n"));
+    out.push_str(&format!("JJ: original-header: {original_header}\n"));
+    out.push('\n');
+    out.push_str(file);
+    out.push('\n');
+    out.push_str(original_header);
+    out.push('\n');
+    out.push_str(hunk_body);
+    if !hunk_body.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push('\n');
+    out.push_str(command_reference);
+    out
+}
+
+/// Strip leading `JJ:`-prefix lines from `text` and return the `(header, body)`
+/// of the user-edited hunk. Returns `None` when there is no `@@` line or the
+/// body (the `+/-/space` lines after `@@`) is empty.
+pub fn parse_hunk_edit_buffer(text: &str) -> Option<(String, String)> {
+    // Skip JJ: lines and the file-path header line; find the @@ header.
+    let mut header: Option<String> = None;
+    let mut body_lines: Vec<&str> = Vec::new();
+    let mut in_body = false;
+    for line in text.lines() {
+        if line.starts_with("JJ:") {
+            continue;
+        }
+        if line.starts_with("COMMAND REFERENCE:") {
+            break;
+        }
+        if !in_body {
+            if line.starts_with("@@") {
+                header = Some(line.to_string());
+                in_body = true;
+            }
+            continue;
+        }
+        // Inside body: collect only `+/-/space` lines. Anything else ends the
+        // body (a stray COMMAND REFERENCE block, blank tail, etc.).
+        if line.starts_with('+') || line.starts_with('-') || line.starts_with(' ') {
+            body_lines.push(line);
+        } else {
+            break;
+        }
+    }
+    let header = header?;
+    if body_lines.is_empty() {
+        return None;
+    }
+    Some((header, body_lines.join("\n")))
+}
+
+/// Recompute an `@@` hunk header from the body lines: keep `old_start` and
+/// `new_start` from the original, recount `old_len` (` ` + `-` lines) and
+/// `new_len` (` ` + `+` lines) from the body. Rejects unknown line prefixes.
+pub fn recompute_hunk_header(original: &str, body: &str) -> Result<String, CommandError> {
+    let (old_start, _) = crate::squash_tool::parse_hunk_old_range(original).ok_or_else(|| {
+        CommandError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("could not parse @@ header: {original:?}"),
+        ))
+    })?;
+    let new_start = parse_hunk_new_start(original).ok_or_else(|| {
+        CommandError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("could not parse +N from @@ header: {original:?}"),
+        ))
+    })?;
+
+    let mut old_len = 0usize;
+    let mut new_len = 0usize;
+    for line in body.lines() {
+        if let Some(first) = line.chars().next() {
+            match first {
+                ' ' => {
+                    old_len += 1;
+                    new_len += 1;
+                }
+                '-' => old_len += 1,
+                '+' => new_len += 1,
+                _ => {
+                    return Err(CommandError::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("unknown hunk-body line prefix: {line:?}"),
+                    )));
+                }
+            }
+        }
+    }
+
+    Ok(format!(
+        "@@ -{old_start},{old_len} +{new_start},{new_len} @@"
+    ))
+}
+
+/// Parse `+N` or `+N,M` (the new-range portion of an `@@` header) and return
+/// `N` (the new start line, 1-indexed in the diff format).
+fn parse_hunk_new_start(header: &str) -> Option<usize> {
+    let plus_idx = header.find('+')?;
+    let rest = &header[plus_idx + 1..];
+    let end = rest.find([' ', ',', '@'])?;
+    let start_str = &rest[..end];
+    start_str.parse::<usize>().ok()
+}
+
+/// Open the hunk-edit buffer for the hunk at the cursor inside a squash
+/// window. For SELECTED hunks, first reverse-toggle the hunk back to REMAINING
+/// (so the user edits in the source revision), then write the hunk-edit file.
+///
+/// Returns the hunk-edit URI, the `HunkEdit` state to persist, and an
+/// optional `(squash_uri, squash_content)` to push back to the client if the
+/// reverse-toggle ran.
+#[allow(clippy::type_complexity)]
+pub fn run_squash_open_hunk_edit(
+    jj: &Jj,
+    workspace: &Path,
+    window: &SquashWindow,
+    hunk: &cursor::SquashHunk,
+    section: cursor::SquashSection,
+) -> Result<(String, HunkEdit, Option<(String, String)>), CommandError> {
+    let mut window_update: Option<(String, String)> = None;
+    if section == cursor::SquashSection::Selected {
+        // Unsquash the hunk from <into> back into <from> first.
+        let (uri, content) =
+            run_squash_toggle_hunk(jj, workspace, window, hunk, cursor::SquashSection::Selected)?;
+        window_update = Some((uri, content));
+    }
+
+    let dir = badjuju_dir(workspace)?;
+    let path = dir.join(HUNK_EDIT_FILENAME);
+    let uri = file_uri(&path);
+
+    let content = render_hunk_edit_buffer(
+        "squash",
+        &window.from,
+        &window.into,
+        &hunk.file,
+        &hunk.header,
+        &hunk.content,
+        jj.command_reference().hunk_edit(),
+    );
+    std::fs::write(&path, &content)?;
+
+    let edit = HunkEdit::Squash {
+        uri: uri.clone(),
+        from: window.from.clone(),
+        into: window.into.clone(),
+        file: hunk.file.clone(),
+        original_header: hunk.header.clone(),
+        origin_section: section,
+    };
+    Ok((uri, edit, window_update))
+}
+
+/// Handle a save on `hunk-edit.jujutsu`: parse the buffer, validate, run
+/// `jj squash --interactive --tool`, regenerate the squash window, and rewrite
+/// the hunk-edit file with a terminal notice. Caller persists/clears state.
+pub fn on_hunk_edit_save(
+    jj: &Jj,
+    workspace: &Path,
+    edit: &HunkEdit,
+    text: &str,
+) -> Result<HunkEditOutcome, CommandError> {
+    let HunkEdit::Squash {
+        uri,
+        from,
+        into,
+        file,
+        original_header,
+        ..
+    } = edit;
+
+    // Empty body / no @@ → abort cleanly.
+    let Some((_, body)) = parse_hunk_edit_buffer(text) else {
+        let notice = HUNK_EDIT_ABORTED_NOTICE.to_string();
+        if let Some(path) = path_from_uri(uri) {
+            let _ = std::fs::write(&path, &notice);
+        }
+        return Ok(HunkEditOutcome::Aborted { notice });
+    };
+
+    // Source vanished externally → stale notice, no jj call.
+    if jj.change_id_of(from).is_err() {
+        let notice = HUNK_EDIT_STALE_NOTICE.to_string();
+        if let Some(path) = path_from_uri(uri) {
+            let _ = std::fs::write(&path, &notice);
+        }
+        return Ok(HunkEditOutcome::StaleSource { notice });
+    }
+
+    let new_header = recompute_hunk_header(original_header, &body)?;
+
+    // Stage the sidecar and run interactive squash from <from> into <into>.
+    let badjuju_exe = std::env::current_exe().map_err(CommandError::Io)?;
+    let sidecar_path = workspace
+        .join(".jj")
+        .join("badjuju")
+        .join("squash_selection.json");
+    let sel = serde_json::json!({
+        "file": file,
+        "hunk_header": new_header,
+        "hunk_content": body,
+        "direction": "include",
+    });
+    std::fs::write(&sidecar_path, sel.to_string())?;
+    jj.squash_from_into_interactive(from, into, &badjuju_exe, &sidecar_path)?;
+
+    // Regenerate the squash window the user came from.
+    let baseline_window = SquashWindow {
+        from: from.clone(),
+        into: into.clone(),
+        uri: squash_window_uri_for(workspace, from, into)?,
+        baseline_hunks: Vec::new(),
+    };
+    let (window_uri, window_content) = regenerate_squash_window(jj, &baseline_window)?;
+
+    // Replace the hunk-edit file with the terminal notice.
+    let notice = HUNK_EDIT_APPLIED_NOTICE.to_string();
+    if let Some(path) = path_from_uri(uri) {
+        let _ = std::fs::write(&path, &notice);
+    }
+
+    Ok(HunkEditOutcome::Applied {
+        window_uri,
+        window_content,
+        notice,
+    })
+}
+
+/// Build the on-disk URI for a squash window between `from` and `into`,
+/// matching the filename convention in [`run_squash_window`].
+fn squash_window_uri_for(workspace: &Path, from: &str, into: &str) -> Result<String, CommandError> {
+    let dir = badjuju_dir(workspace)?;
+    let squash_dir = dir.join("squash");
+    let filename = format!("{}-{}.jujutsu", short_id(from), short_id(into));
+    Ok(file_uri(&squash_dir.join(&filename)))
 }
 
 /// Render baseline hunks as plain-text grouped by file path, ready to embed
@@ -2027,6 +2345,7 @@ mod tests {
             Some("CUSTOM LOG REF".to_string()),
             Some("CUSTOM DIFF REF".to_string()),
             None,
+            None,
         );
         let jj = Jj::with_binary_or_default(None, dir.path()).with_command_reference(reference);
         std::process::Command::new("jj")
@@ -2070,8 +2389,13 @@ mod tests {
     fn command_reference_partial_override_falls_back_per_field() {
         let dir = tempdir().unwrap();
         // Only override the log reference; status and diff should use defaults.
-        let reference =
-            CommandReference::new(None, Some("LOG ONLY OVERRIDE".to_string()), None, None);
+        let reference = CommandReference::new(
+            None,
+            Some("LOG ONLY OVERRIDE".to_string()),
+            None,
+            None,
+            None,
+        );
         let jj = Jj::with_binary_or_default(None, dir.path()).with_command_reference(reference);
         std::process::Command::new("jj")
             .args(["git", "init"])
@@ -3777,5 +4101,100 @@ mod tests {
                 "all ranges must have kind=Region: {r:?}"
             );
         }
+    }
+
+    // ---- Hunk-edit buffer (#13) ----
+
+    #[test]
+    fn parse_hunk_edit_buffer_strips_jj_lines_and_extracts_body() {
+        let text = "\
+JJ: Edit the +/- lines below, then save to apply.
+JJ: action: squash
+JJ: from: abc
+JJ: into: def
+JJ: file: src/a.rs
+JJ: original-header: @@ -1,2 +1,3 @@
+
+src/a.rs
+@@ -1,2 +1,3 @@
+ keep
+-old
++new1
++new2
+
+COMMAND REFERENCE:
+(save) apply
+";
+        let (header, body) = parse_hunk_edit_buffer(text).expect("buffer should parse");
+        assert_eq!(header, "@@ -1,2 +1,3 @@");
+        assert_eq!(body, " keep\n-old\n+new1\n+new2");
+    }
+
+    #[test]
+    fn parse_hunk_edit_buffer_returns_none_on_empty_body() {
+        let text = "\
+JJ: action: squash
+JJ: from: abc
+JJ: into: def
+
+src/a.rs
+@@ -1,2 +1,3 @@
+
+COMMAND REFERENCE:
+";
+        assert!(parse_hunk_edit_buffer(text).is_none());
+    }
+
+    #[test]
+    fn recompute_hunk_header_preserves_starts_and_recounts_lengths() {
+        let original = "@@ -10,2 +10,3 @@";
+        let body = " ctx\n-removed\n+added1\n+added2";
+        let header = recompute_hunk_header(original, body).unwrap();
+        // 1 context + 1 removal = old_len 2; 1 context + 2 additions = new_len 3.
+        assert_eq!(header, "@@ -10,2 +10,3 @@");
+    }
+
+    #[test]
+    fn recompute_hunk_header_pure_addition() {
+        let original = "@@ -5,0 +5,2 @@";
+        let body = "+a\n+b";
+        let header = recompute_hunk_header(original, body).unwrap();
+        assert_eq!(header, "@@ -5,0 +5,2 @@");
+    }
+
+    #[test]
+    fn recompute_hunk_header_pure_deletion() {
+        let original = "@@ -7,2 +7,0 @@";
+        let body = "-a\n-b";
+        let header = recompute_hunk_header(original, body).unwrap();
+        assert_eq!(header, "@@ -7,2 +7,0 @@");
+    }
+
+    #[test]
+    fn recompute_hunk_header_rejects_unknown_prefix() {
+        let original = "@@ -1,1 +1,1 @@";
+        let body = "*nope";
+        let err = recompute_hunk_header(original, body).unwrap_err();
+        assert!(matches!(err, CommandError::Io(_)));
+    }
+
+    #[test]
+    fn render_hunk_edit_buffer_contains_metadata_and_body() {
+        let buf = render_hunk_edit_buffer(
+            "squash",
+            "abcd",
+            "efgh",
+            "src/a.rs",
+            "@@ -1,1 +1,1 @@",
+            "-old\n+new\n",
+            "COMMAND REFERENCE:\n(save) apply",
+        );
+        assert!(buf.contains("JJ: action: squash"));
+        assert!(buf.contains("JJ: from: abcd"));
+        assert!(buf.contains("JJ: into: efgh"));
+        assert!(buf.contains("JJ: file: src/a.rs"));
+        assert!(buf.contains("JJ: original-header: @@ -1,1 +1,1 @@"));
+        assert!(buf.contains("\nsrc/a.rs\n@@ -1,1 +1,1 @@\n-old\n+new"));
+        assert!(buf.contains("COMMAND REFERENCE:"));
     }
 }

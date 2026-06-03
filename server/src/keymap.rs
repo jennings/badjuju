@@ -191,6 +191,12 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         windows: &["squash"],
     },
     KeymapEntry {
+        key: "e",
+        action: "badjuju.squash.edit_hunk",
+        description: "edit hunk before squashing",
+        windows: &["squash"],
+    },
+    KeymapEntry {
         key: "a",
         action: "badjuju.squash.select_all",
         description: "select all changes",
@@ -207,6 +213,19 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         action: "",
         description: "close",
         windows: &["squash"],
+    },
+    // Hunk-edit buffer — save to apply, close to discard.
+    KeymapEntry {
+        key: "(save)",
+        action: "(editor)",
+        description: "apply edited hunk and close",
+        windows: &["hunk-edit"],
+    },
+    KeymapEntry {
+        key: "q",
+        action: "",
+        description: "close (discard pending edit)",
+        windows: &["hunk-edit"],
     },
 ];
 
@@ -359,6 +378,12 @@ static VIM_ENTRIES: &[KeymapEntry] = &[
         windows: &["squash"],
     },
     KeymapEntry {
+        key: "e",
+        action: "badjuju.squash.edit_hunk",
+        description: "edit hunk before squashing",
+        windows: &["squash"],
+    },
+    KeymapEntry {
         key: "a",
         action: "badjuju.squash.select_all",
         description: "select all changes",
@@ -375,6 +400,18 @@ static VIM_ENTRIES: &[KeymapEntry] = &[
         action: "",
         description: "close",
         windows: &["squash"],
+    },
+    KeymapEntry {
+        key: "(save)",
+        action: "(editor)",
+        description: "apply edited hunk and close",
+        windows: &["hunk-edit"],
+    },
+    KeymapEntry {
+        key: "q",
+        action: "",
+        description: "close (discard pending edit)",
+        windows: &["hunk-edit"],
     },
 ];
 
@@ -474,6 +511,40 @@ mod tests {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in squash:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn render_squash_has_edit_key() {
+        for profile in [KeymapProfile::Magit, KeymapProfile::Vim] {
+            let text = render_command_reference(&profile, "squash");
+            assert!(
+                text.lines().any(|l| l.starts_with('e')),
+                "missing `e` key for edit_hunk in {profile:?} squash:\n{text}"
+            );
+            assert!(
+                text.contains("edit hunk"),
+                "missing edit-hunk description in {profile:?} squash:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn render_hunk_edit_has_command_reference_block() {
+        for profile in [KeymapProfile::Magit, KeymapProfile::Vim] {
+            let text = render_command_reference(&profile, "hunk-edit");
+            assert!(
+                text.starts_with("COMMAND REFERENCE:"),
+                "missing header in {profile:?} hunk-edit:\n{text}"
+            );
+            assert!(
+                text.contains("apply edited hunk"),
+                "missing save action in {profile:?} hunk-edit:\n{text}"
+            );
+            assert!(
+                text.contains("close"),
+                "missing close action in {profile:?} hunk-edit:\n{text}"
             );
         }
     }

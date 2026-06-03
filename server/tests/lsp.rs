@@ -2339,6 +2339,145 @@ fn lsp_squash_window_shows_notice_when_from_abandoned() {
     );
 }
 
+/// Open a squash window, place the cursor on the `@@` hunk line, invoke
+/// `badjuju.squash.edit_hunk`, and verify the returned URI points at
+/// `hunk-edit.jujutsu` with the expected JJ:-prefixed metadata + hunk body.
+#[test]
+fn lsp_squash_edit_hunk_opens_buffer_with_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    // Prime the working copy via the helper, then drop its session so the
+    // commits remain but the window state is fresh in the new session below.
+    let _ = open_squash_window(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+    // The squash window state lives inside this session, so we need to redo
+    // the commit-to-commit selection here too.
+    let resp =
+        session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@-"]));
+    assert!(
+        resp.get("error").is_none(),
+        "source selection failed: {resp}"
+    );
+    let resp = session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@"]));
+    assert!(
+        resp.get("error").is_none(),
+        "destination selection failed: {resp}"
+    );
+    let squash_uri = resp["result"].as_str().unwrap().to_string();
+    let squash_content = read_file(&squash_uri);
+    let hunk_line = squash_content
+        .lines()
+        .position(|l| l.starts_with("@@"))
+        .expect("expected @@ line in regenerated squash window");
+
+    session.did_open(&squash_uri, "jujutsu", &squash_content);
+
+    let resp = session.execute_command_acked(
+        "badjuju.squash.edit_hunk",
+        serde_json::json!([{ "cursor": { "uri": squash_uri, "line": hunk_line } }]),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "edit_hunk returned error: {resp}"
+    );
+    let hunk_edit_uri = resp["result"].as_str().expect("string result");
+    assert!(
+        hunk_edit_uri.ends_with("/hunk-edit.jujutsu"),
+        "unexpected URI: {hunk_edit_uri}"
+    );
+    let content = read_file(hunk_edit_uri);
+    assert!(
+        content.contains("JJ: action: squash"),
+        "missing JJ: action:\n{content}"
+    );
+    assert!(
+        content.contains("JJ: file: readme.txt"),
+        "missing file metadata:\n{content}"
+    );
+    assert!(content.contains("@@"), "missing @@ header:\n{content}");
+    assert!(
+        content.contains("COMMAND REFERENCE:"),
+        "missing reference block:\n{content}"
+    );
+}
+
+/// Saving a hunk-edit buffer whose body has been cleared must abort cleanly:
+/// no jj invocation, terminal notice rendered, server state cleared.
+#[test]
+fn lsp_hunk_edit_save_empty_body_aborts_with_notice() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let _ = open_squash_window(dir.path());
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+    let resp =
+        session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@-"]));
+    assert!(
+        resp.get("error").is_none(),
+        "source selection failed: {resp}"
+    );
+    let resp = session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@"]));
+    let squash_uri = resp["result"].as_str().unwrap().to_string();
+    let squash_content = read_file(&squash_uri);
+    let hunk_line = squash_content
+        .lines()
+        .position(|l| l.starts_with("@@"))
+        .expect("expected @@ line");
+
+    session.did_open(&squash_uri, "jujutsu", &squash_content);
+
+    let resp = session.execute_command_acked(
+        "badjuju.squash.edit_hunk",
+        serde_json::json!([{ "cursor": { "uri": squash_uri, "line": hunk_line } }]),
+    );
+    let hunk_edit_uri = resp["result"].as_str().unwrap().to_string();
+
+    // Save with a body that has only JJ: lines — no hunk content.
+    let empty = "JJ: nothing\n";
+    session.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": {
+                "uri": hunk_edit_uri,
+                "languageId": "jujutsu",
+                "version": 1,
+                "text": empty,
+            }
+        }),
+    );
+    session.notify(
+        "textDocument/didSave",
+        serde_json::json!({
+            "textDocument": { "uri": hunk_edit_uri },
+            "text": empty,
+        }),
+    );
+
+    // Expect an applyEdit pushing the EDIT ABORTED notice onto the hunk-edit buffer.
+    let req = session
+        .recv_server_request_timeout("workspace/applyEdit", Duration::from_millis(3000))
+        .expect("expected applyEdit with abort notice");
+    ack_apply_edit(&mut session, &req);
+    let new_text = req["params"]["edit"]["changes"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap()[0]["newText"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        new_text.contains("EDIT ABORTED"),
+        "expected abort notice, got: {new_text}"
+    );
+}
+
 /// `apply_edit_if_open` skips URIs not in `state.documents`. When status was
 /// generated via executeCommand but never opened, no applyEdit should fire on
 /// an external op — there's no client buffer to update.
