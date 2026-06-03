@@ -1,5 +1,6 @@
 export const READONLY_SCHEME = "badjuju-status";
 export const DIFF_SCHEME = "badjuju-diff";
+export const FILE_SCHEME = "badjuju-file";
 
 export interface UriLike {
   readonly path: string;

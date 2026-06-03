@@ -25,6 +25,7 @@ import { restoreCursor } from "./lib/clamp";
 import { resolveServerCommand } from "./lib/serverPath";
 import {
   DIFF_SCHEME,
+  FILE_SCHEME,
   isLogFile,
   isReadonlyOutput,
   isSquashFile,
@@ -83,6 +84,25 @@ class DiffContentProvider implements TextDocumentContentProvider {
 }
 
 const diffProvider = new DiffContentProvider();
+
+class FileContentProvider implements TextDocumentContentProvider {
+  private readonly _onDidChange = new EventEmitter<Uri>();
+  readonly onDidChange = this._onDidChange.event;
+
+  async provideTextDocumentContent(uri: Uri): Promise<string> {
+    try {
+      const result = await client.sendRequest<{ text: string }>(
+        "workspace/textDocumentContent",
+        { uri: uri.toString() },
+      );
+      return result?.text ?? "";
+    } catch {
+      return "";
+    }
+  }
+}
+
+const fileProvider = new FileContentProvider();
 
 function waitForDocumentChange(
   doc: TextDocument,
@@ -349,6 +369,7 @@ export async function activate(context: ExtensionContext) {
       statusProvider,
     ),
     workspace.registerTextDocumentContentProvider(DIFF_SCHEME, diffProvider),
+    workspace.registerTextDocumentContentProvider(FILE_SCHEME, fileProvider),
     commands.registerCommand("badjuju.status.open", async () => {
       const result = await client.sendRequest("workspace/executeCommand", {
         command: "badjuju.status",

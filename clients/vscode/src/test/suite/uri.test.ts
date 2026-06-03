@@ -1,6 +1,7 @@
 import * as assert from "node:assert";
 import {
   DIFF_SCHEME,
+  FILE_SCHEME,
   isDescribeFile,
   isDiffFile,
   isLogFile,
@@ -110,5 +111,9 @@ suite("uri helpers", () => {
 
   test("DIFF_SCHEME is badjuju-diff", () => {
     assert.strictEqual(DIFF_SCHEME, "badjuju-diff");
+  });
+
+  test("FILE_SCHEME is badjuju-file", () => {
+    assert.strictEqual(FILE_SCHEME, "badjuju-file");
   });
 });

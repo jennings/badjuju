@@ -1,11 +1,15 @@
 local M = {}
 
 local DIFF_SCHEME = 'badjuju-diff'
+local FILE_SCHEME = 'badjuju-file'
 
 --- Populate a buffer with content fetched via workspace/textDocumentContent.
+--- The handler is scheme-agnostic — it forwards whatever URI it receives.
+--- The caller is responsible for setting the appropriate filetype.
 ---@param bufnr integer
----@param uri string  full badjuju-diff:// URI
-local function populate_virtual_diff_buf(bufnr, uri)
+---@param uri string  full badjuju-diff:// or badjuju-file:// URI
+---@param filetype string?  filetype to set; nil to infer from URI path
+local function populate_virtual_buf(bufnr, uri, filetype)
   local client = M.get_client()
   if not client then return end
   local result = client.request_sync('workspace/textDocumentContent', { uri = uri }, 5000, bufnr)
@@ -19,7 +23,17 @@ local function populate_virtual_diff_buf(bufnr, uri)
   vim.bo[bufnr].bufhidden = 'wipe'
   vim.bo[bufnr].modifiable = false
   vim.bo[bufnr].readonly = true
-  vim.bo[bufnr].filetype = 'jujutsu'
+  if filetype then
+    vim.bo[bufnr].filetype = filetype
+  else
+    -- Infer from the repo-relative path encoded in the badjuju-file:// URI
+    -- (everything after /commit/<id>/) so editors highlight .rs as Rust, etc.
+    local path = uri:match('^badjuju%-file:/+commit/[^/]+/(.+)$')
+    if path then
+      local ft = vim.filetype.match({ filename = path, buf = bufnr })
+      if ft then vim.bo[bufnr].filetype = ft end
+    end
+  end
   vim.b[bufnr].badjuju_diff_uri = uri
 end
 
@@ -63,27 +77,34 @@ function M.setup(opts)
     M.config.keymap_profile = opts.keymap_profile
   end
 
-  -- BufReadCmd polyfill for badjuju-diff:// virtual URIs.
-  -- Fires whenever Neovim tries to read a buffer whose name matches this scheme.
-  -- Fetches content from the server via workspace/textDocumentContent.
+  -- BufReadCmd polyfill for virtual badjuju-* URIs. Fires whenever Neovim
+  -- tries to read a buffer whose name matches one of the badjuju virtual
+  -- schemes. Fetches content from the server via workspace/textDocumentContent.
   vim.api.nvim_create_autocmd('BufReadCmd', {
     pattern = DIFF_SCHEME .. '://*',
     callback = function(args)
-      local uri = args.file
-      local bufnr = args.buf
-      populate_virtual_diff_buf(bufnr, uri)
+      populate_virtual_buf(args.buf, args.file, 'jujutsu')
+    end,
+  })
+  vim.api.nvim_create_autocmd('BufReadCmd', {
+    pattern = FILE_SCHEME .. '://*',
+    callback = function(args)
+      -- nil filetype → infer from the URI's encoded path so .rs maps to rust, etc.
+      populate_virtual_buf(args.buf, args.file, nil)
     end,
   })
 
   -- Global handler for workspace/textDocumentContent/refresh (server → client).
   -- The server sends this after each mutation for every open change-mode diff.
+  -- file-blob buffers are never refreshed — commit-id pins them — so the
+  -- refresh handler only re-fetches with the diff filetype.
   vim.lsp.handlers['workspace/textDocumentContent/refresh'] = function(_, params)
     if type(params) ~= 'table' or type(params.uri) ~= 'string' then return end
     local uri = params.uri
     for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
       if vim.api.nvim_buf_is_loaded(bufnr)
           and vim.api.nvim_buf_get_name(bufnr) == uri then
-        populate_virtual_diff_buf(bufnr, uri)
+        populate_virtual_buf(bufnr, uri, 'jujutsu')
       end
     end
   end
