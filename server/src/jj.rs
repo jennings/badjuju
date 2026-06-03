@@ -18,6 +18,52 @@ pub struct Jj {
     command_reference: Arc<CommandReference>,
 }
 
+/// Remove `jj log --stat` per-commit summary lines like
+/// `N files changed, X insertions(+), Y deletions(-)`. The per-file stat
+/// lines (`<path> | <count> <+/->`) carry the same information and stay.
+/// Hand-rolled rather than pulling in `regex` for a one-shot check.
+fn strip_stat_summary_lines(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for line in raw.split_inclusive('\n') {
+        let body = line.strip_suffix('\n').unwrap_or(line);
+        if is_stat_summary_line(body) {
+            continue;
+        }
+        out.push_str(line);
+    }
+    out
+}
+
+fn is_stat_summary_line(line: &str) -> bool {
+    // Graph-mode log indents continuation lines with whitespace and box-drawing
+    // chars. Strip a leading graph/whitespace prefix (anything that isn't an
+    // ASCII digit), then the rest must match exactly:
+    //   N file changed[, N insertions(+)][, N deletions(-)]
+    //   N files changed[, N insertions(+)][, N deletions(-)]
+    // Anchoring the suffix avoids false positives on commit-description
+    // lines that happen to contain `N files changed`.
+    let prefix_chars = |c: char| c.is_whitespace() || matches!(c, '│' | '~' | '@' | '×' | '+');
+    let trimmed = line.trim_start_matches(prefix_chars);
+    let bytes = trimmed.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == 0 {
+        return false;
+    }
+    let rest = &trimmed[i..];
+    let after_changed = if let Some(r) = rest.strip_prefix(" file changed") {
+        r
+    } else if let Some(r) = rest.strip_prefix(" files changed") {
+        r
+    } else {
+        return false;
+    };
+    // Tail must be empty or begin with the optional clauses joined by `, `.
+    after_changed.is_empty() || after_changed.starts_with(", ")
+}
+
 impl Jj {
     pub fn new(binary: impl Into<PathBuf>, workdir: impl Into<PathBuf>) -> Self {
         Self {
@@ -113,7 +159,12 @@ impl Jj {
         if stat {
             args.push("--stat");
         }
-        self.run(&args)
+        let raw = self.run(&args)?;
+        if stat {
+            Ok(strip_stat_summary_lines(&raw))
+        } else {
+            Ok(raw)
+        }
     }
 
     pub fn describe_get(&self, revision: &str) -> Result<String, JjError> {
@@ -1086,6 +1137,70 @@ mod tests {
             header.contains(')'),
             "closing `)` of (time email) should be on the header line: {header}"
         );
+    }
+
+    #[test]
+    fn log_with_stat_strips_summary_keeps_per_file_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        std::fs::write(dir.path().join("alpha.txt"), "hello\n").unwrap();
+        std::fs::write(dir.path().join("beta.txt"), "world\n").unwrap();
+        let out = jj.log_with_stat("@", true).expect("log failed");
+        // Per-file stat lines must still appear (path | count +/-).
+        assert!(
+            out.lines()
+                .any(|l| l.contains('|') && (l.contains('+') || l.contains('-'))),
+            "expected at least one per-file stat line; got:\n{out}"
+        );
+        // The summary line must be stripped (both pluralizations).
+        assert!(
+            !out.contains("files changed") && !out.contains("file changed"),
+            "summary line should be stripped; got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn log_without_stat_unaffected_by_summary_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        std::fs::write(dir.path().join("alpha.txt"), "hello\n").unwrap();
+        let out = jj.log("@").expect("log failed");
+        // The non-stat path never emits per-file stats or summary lines.
+        assert!(
+            !out.contains("files changed") && !out.contains("file changed"),
+            "non-stat log should never contain a summary line: {out}"
+        );
+        assert!(
+            !out.contains('|'),
+            "non-stat log should not contain per-file stat pipes: {out}"
+        );
+    }
+
+    #[test]
+    fn strip_stat_summary_lines_recognizes_variants() {
+        assert!(is_stat_summary_line("1 file changed, 2 insertions(+)"));
+        assert!(is_stat_summary_line(
+            "12 files changed, 5 insertions(+), 1 deletion(-)"
+        ));
+        assert!(is_stat_summary_line("3 files changed"));
+        assert!(!is_stat_summary_line(" file changed (no leading digit)"));
+        assert!(!is_stat_summary_line("alpha.txt | 5 +++--"));
+        assert!(!is_stat_summary_line(""));
+        // Description-text guard: a commit description containing the phrase
+        // must NOT be stripped — the suffix anchor rejects it.
+        assert!(!is_stat_summary_line(
+            "@  abcd1234 efgh5678 Fix 5 files changed bug (now me@x.com)"
+        ));
+        assert!(!is_stat_summary_line("3 files changed bug"));
+        // Graph-prefixed forms must still be recognized.
+        assert!(is_stat_summary_line(
+            "   2 files changed, 2 insertions(+), 0 deletions(-)"
+        ));
+        assert!(is_stat_summary_line("│  1 file changed, 1 insertion(+)"));
+        // Composite input round-trip: only summary lines removed.
+        let raw = "alpha.txt | 5 +++--\n1 file changed, 5 insertions(+)\nbeta.txt | 2 +-\n2 files changed, 7 insertions(+)\n";
+        let stripped = strip_stat_summary_lines(raw);
+        assert_eq!(stripped, "alpha.txt | 5 +++--\nbeta.txt | 2 +-\n");
     }
 
     #[test]
