@@ -13,4 +13,7 @@ clients/neovim/.test-deps/
 !.claude/skills
 !.claude/settings.json
 
+# AI-agent local notes — per-user, not shared.
+CLAUDE.local.md
+
 .beads/
