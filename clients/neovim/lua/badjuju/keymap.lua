@@ -387,6 +387,8 @@ function M.setup_for_buffer(bufnr)
     nmap(bufnr, '?', function() show_help('diff') end, 'badjuju: show help')
   elseif name:match('/%.jj/badjuju/squash/[^/]+%.jujutsu$') then
     nmap(bufnr, 's', run_squash_toggle, 'badjuju: toggle hunk or file in squash window')
+    nmap(bufnr, 'e', function() run_at_cursor_split('badjuju.squash.edit_hunk') end,
+      'badjuju: edit hunk before squashing')
     nmap(bufnr, 'a', run_squash_select_all, 'badjuju: select all changes')
     nmap(bufnr, 'A', run_squash_select_none, 'badjuju: deselect all changes')
     nmap(bufnr, 'u', '<Cmd>JJUndo<CR>', 'badjuju: undo')

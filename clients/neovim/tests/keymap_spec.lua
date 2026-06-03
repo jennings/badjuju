@@ -153,6 +153,12 @@ describe('keymap.setup_for_buffer', function()
     assert.are.equal('za', m.rhs, '<Tab> should invoke za (toggle fold)')
   end)
 
+  it('e on squash window is bound (shadows vim word-end motion)', function()
+    local buf = open_named('.jj/badjuju/squash/foo-bar.jujutsu')
+    local found = has_buffer_map(buf, 'e')
+    assert.is_true(found, 'expected squash window map for e (edit hunk)')
+  end)
+
   it('does nothing for unrelated jujutsu buffers', function()
     local buf = open_named('describe.jujutsu')
     for _, key in ipairs({ 'R', 'r', 'n', 'L', 'd', 'q', 'u', '=', 'a' }) do
@@ -288,6 +294,35 @@ describe('revision-scoped hotkeys send cursor-form', function()
     local arg = captured[1].args[1]
     assert.are.equal(1, arg.cursor.line, 'cursor line is 0-indexed (row 2 -> 1)')
     assert.is_truthy(arg.cursor.uri:match('/log%.jujutsu$'))
+  end)
+
+  it('squash buffer e sends cursor-form for badjuju.squash.edit_hunk', function()
+    local captured, restore = capture_execute()
+    local buf = setup_buffer('.jj/badjuju/squash/foo-bar.jujutsu', {
+      'SELECTED:',
+      '',
+      'M src/main.rs',
+      '@@ -1,1 +1,1 @@',
+      '-old',
+      '+new',
+    })
+    -- Cursor on the hunk body (line 5, 1-indexed).
+    vim.api.nvim_win_set_cursor(0, { 5, 0 })
+
+    local cb = find_callback(buf, 'e')
+    assert.is_not_nil(cb, 'expected callback for e on squash buffer')
+    cb()
+    restore()
+
+    assert.are.equal(1, #captured)
+    assert.are.equal('badjuju.squash.edit_hunk', captured[1].command)
+    local arg = captured[1].args[1]
+    assert.is_table(arg.cursor, 'arg.cursor should be a table')
+    assert.are.equal(4, arg.cursor.line, 'cursor line is 0-indexed (row 5 -> 4)')
+    assert.is_truthy(
+      arg.cursor.uri:match('/squash/foo%-bar%.jujutsu$'),
+      'cursor uri should end in /squash/foo-bar.jujutsu, got ' .. tostring(arg.cursor.uri)
+    )
   end)
 
   it('status.jujutsu e sends cursor-form for badjuju.edit', function()
