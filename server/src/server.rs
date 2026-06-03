@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -134,6 +134,12 @@ struct State {
     /// Op-ids produced by bad-juju's own mutations, with the time they were recorded.
     /// Used by an op-head watcher to suppress double-refreshes.
     self_caused_ops: HashMap<String, Instant>,
+    /// URIs the server pre-wrote and expects the client to open next. When a
+    /// `did_open` arrives for one of these, the file is fresh — skip the
+    /// cold-open regen path. Inserted by `badjuju.status` / `badjuju.log` /
+    /// `badjuju.diff` (change-mode, file://) command handlers; consumed by
+    /// `did_open`, defensively cleared by `did_close`.
+    preopen_marks: HashSet<String>,
 }
 
 impl Default for State {
@@ -151,6 +157,7 @@ impl Default for State {
             pending_squash_source: None,
             open_squash_window: None,
             self_caused_ops: HashMap::new(),
+            preopen_marks: HashSet::new(),
         }
     }
 }
@@ -1104,7 +1111,7 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
         let text = params.text_document.text;
-        {
+        let preopened = {
             let mut state = self.state.write().await;
             state.documents.insert(uri.clone(), text.clone());
             if uri.ends_with("/status.jujutsu") {
@@ -1112,84 +1119,76 @@ impl LanguageServer for Backend {
             } else if uri.ends_with("/log.jujutsu") {
                 state.open_log_uri = Some(uri.clone());
             }
+            state.preopen_marks.remove(&uri)
+        };
+
+        // If the server just pre-wrote this file (via badjuju.status / .log /
+        // .diff), the content on disk is already fresh — skip cold-open regen.
+        if preopened {
+            return;
         }
 
-        if text.trim().is_empty()
-            && let Some(kind) = BufferKind::from_uri(&uri)
-        {
-            let (jj, workspace) = {
-                let state = self.state.read().await;
-                match (state.jj(), state.workspace_root.clone()) {
-                    (Some(jj), Some(root)) => (jj, root),
-                    _ => {
-                        self.client
-                            .log_message(
-                                MessageType::WARNING,
-                                "did_open auto-populate: no jj workspace",
-                            )
-                            .await;
-                        return;
-                    }
-                }
-            };
+        let Some(kind) = BufferKind::from_uri(&uri) else {
+            return;
+        };
 
-            let virtual_diffs_enabled = self.state.read().await.virtual_diffs_enabled;
-            let result = match kind {
-                BufferKind::Status => commands::run_status(&jj, &workspace),
-                BufferKind::Log => commands::run_log(&jj, &workspace, ""),
-                // In virtual-diff mode the client fetches content via workspace/textDocumentContent.
-                // In file mode, regenerate the legacy diff.jujutsu only.
+        // Cold open: regenerate by kind. Squash windows can't be reconstructed
+        // from filename alone, and diff-commit URIs are pinned by design.
+        let (jj, workspace) = {
+            let state = self.state.read().await;
+            match (state.jj(), state.workspace_root.clone()) {
+                (Some(jj), Some(root)) => (jj, root),
+                _ => return,
+            }
+        };
+
+        let (pending_squash, virtual_diffs_enabled) = {
+            let state = self.state.read().await;
+            (
+                state.pending_squash_source.clone(),
+                state.virtual_diffs_enabled,
+            )
+        };
+        let pending = pending_squash.as_deref();
+
+        let regen: std::result::Result<Option<(String, String)>, commands::CommandError> =
+            match kind {
+                BufferKind::Status => {
+                    commands::run_status_with_content(&jj, &workspace, pending).map(Some)
+                }
+                BufferKind::Log => {
+                    commands::run_log_with_content(&jj, &workspace, "", pending).map(Some)
+                }
                 BufferKind::Diff if !virtual_diffs_enabled => {
-                    commands::run_diff_change(&jj, &workspace, "@").map(|(uri, _)| uri)
-                }
-                // Squash windows are always materialized as files; no auto-populate needed.
-                BufferKind::Diff | BufferKind::Squash => return,
-            };
-
-            match result {
-                Ok(_) => {
-                    let file_path = commands::path_from_uri(&uri);
-                    let content = file_path
-                        .and_then(|p| std::fs::read_to_string(p).ok())
-                        .unwrap_or_default();
-
-                    if !content.is_empty()
-                        && let Ok(uri_url) = Url::parse(&uri)
-                    {
-                        let mut changes = HashMap::new();
-                        changes.insert(
-                            uri_url,
-                            vec![TextEdit {
-                                range: Range {
-                                    start: Position {
-                                        line: 0,
-                                        character: 0,
-                                    },
-                                    end: Position {
-                                        line: 0,
-                                        character: 0,
-                                    },
-                                },
-                                new_text: content,
-                            }],
-                        );
-                        let _ = self
-                            .client
-                            .apply_edit(WorkspaceEdit {
-                                changes: Some(changes),
-                                ..Default::default()
-                            })
-                            .await;
+                    if let Some(change_id) = commands::parse_change_id_from_uri(&uri) {
+                        commands::run_diff_change_with_content(&jj, &workspace, &change_id)
+                            .map(|(uri, _, content)| Some((uri, content)))
+                    } else {
+                        // diff-commit-* is immutable; legacy diff.jujutsu is not
+                        // refreshed on cold open (no id encoded in the filename).
+                        Ok(None)
                     }
                 }
-                Err(e) => {
-                    self.client
-                        .log_message(
-                            MessageType::WARNING,
-                            format!("did_open auto-populate failed: {e}"),
-                        )
-                        .await;
+                BufferKind::Diff | BufferKind::Squash => Ok(None),
+            };
+
+        match regen {
+            Ok(Some((regen_uri, content))) => {
+                // Skip applyEdit when the regen matches what the client just
+                // reported — avoids Helix's modified-indicator flash for files
+                // the CLI wrote fresh moments ago.
+                if content != text {
+                    apply_edit_if_open(&self.client, &self.state, &regen_uri, &content).await;
                 }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                self.client
+                    .log_message(
+                        MessageType::WARNING,
+                        format!("did_open cold-open refresh failed: {e}"),
+                    )
+                    .await;
             }
         }
     }
@@ -1205,6 +1204,9 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let mut state = self.state.write().await;
         state.documents.remove(&uri);
+        // Defensively drop any pre-open mark so a stale entry doesn't suppress
+        // the next cold-open regen.
+        state.preopen_marks.remove(&uri);
         if state.open_status_uri.as_deref() == Some(&uri) {
             state.open_status_uri = None;
         }
@@ -1342,6 +1344,7 @@ impl LanguageServer for Backend {
         match params.command.as_str() {
             "badjuju.status" => {
                 let uri = commands::run_status(&jj, &workspace).map_err(lsp_err)?;
+                self.state.write().await.preopen_marks.insert(uri.clone());
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.log" => {
@@ -1358,6 +1361,7 @@ impl LanguageServer for Backend {
                 let revset = cursor_revset
                     .unwrap_or_else(|| arg.and_then(|v| v.as_str()).unwrap_or("").to_string());
                 let uri = commands::run_log(&jj, &workspace, &revset).map_err(lsp_err)?;
+                self.state.write().await.preopen_marks.insert(uri.clone());
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.describe" => {
@@ -1384,11 +1388,15 @@ impl LanguageServer for Backend {
                 } else {
                     commands::run_diff_change(&jj, &workspace, &revision).map_err(lsp_err)?
                 };
-                self.state
-                    .write()
-                    .await
-                    .open_diffs
-                    .insert(uri.clone(), target);
+                {
+                    let mut state = self.state.write().await;
+                    state.open_diffs.insert(uri.clone(), target);
+                    // Only file:// URIs go through did_open; virtual URIs are
+                    // fetched via workspace/textDocumentContent.
+                    if !virtual_diffs_enabled {
+                        state.preopen_marks.insert(uri.clone());
+                    }
+                }
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.diff.commit" => {

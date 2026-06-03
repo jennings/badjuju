@@ -2367,3 +2367,285 @@ fn lsp_apply_edit_skipped_when_document_not_open() {
         "expected no applyEdit when no document is open, got: {msg:?}"
     );
 }
+
+// ---- did_open cold-open refresh (#18) ----
+
+fn ack_apply_edit(session: &mut LspSession, req: &serde_json::Value) {
+    session.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": req["id"],
+        "result": { "applied": true }
+    }));
+}
+
+/// Helix cold-open: the user opens a `.jj/badjuju/status.jujutsu` whose
+/// on-disk content is stale (left over from a previous session or external
+/// `jj` op). Since the server never received a `badjuju.status` command, there
+/// is no preopen mark — `did_open` must regenerate and push fresh content.
+#[test]
+fn lsp_did_open_refreshes_stale_status() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_path = dir
+        .path()
+        .join(".jj")
+        .join("badjuju")
+        .join("status.jujutsu");
+    std::fs::create_dir_all(status_path.parent().unwrap()).unwrap();
+    std::fs::write(&status_path, "STALE CONTENT\n").unwrap();
+    let status_uri = format!("file://{}", status_path.display());
+
+    session.did_open(&status_uri, "jujutsu", "STALE CONTENT\n");
+
+    let req = session
+        .recv_server_request_timeout("workspace/applyEdit", Duration::from_millis(3000))
+        .expect("expected applyEdit on stale cold-open");
+    ack_apply_edit(&mut session, &req);
+
+    let new_text = req["params"]["edit"]["changes"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap()[0]["newText"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        new_text.contains("STACK:") && !new_text.contains("STALE CONTENT"),
+        "applyEdit should carry fresh status content, got:\n{new_text}"
+    );
+}
+
+#[test]
+fn lsp_did_open_refreshes_stale_log() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let log_path = dir.path().join(".jj").join("badjuju").join("log.jujutsu");
+    std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+    std::fs::write(&log_path, "STALE LOG\n").unwrap();
+    let log_uri = format!("file://{}", log_path.display());
+
+    session.did_open(&log_uri, "jujutsu", "STALE LOG\n");
+
+    let req = session
+        .recv_server_request_timeout("workspace/applyEdit", Duration::from_millis(3000))
+        .expect("expected applyEdit on stale log cold-open");
+    ack_apply_edit(&mut session, &req);
+
+    let new_text = req["params"]["edit"]["changes"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap()[0]["newText"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        new_text.contains("REVSET:") && !new_text.contains("STALE LOG"),
+        "applyEdit should carry fresh log content, got:\n{new_text}"
+    );
+}
+
+/// Cold-opening `diff-change-<id>.jujutsu` must regenerate the diff using the
+/// id parsed from the filename — not hardcoded `@`, which the previous code
+/// path did. Catches that regression.
+#[test]
+fn lsp_did_open_refreshes_diff_using_change_id_from_uri() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    // Generate a diff buffer for @ in file mode.
+    let diff_uri =
+        session.execute_command_with_args("badjuju.diff", serde_json::json!(["@"]))["result"]
+            .as_str()
+            .unwrap()
+            .to_string();
+    let path = diff_uri.strip_prefix("file://").unwrap();
+    // Tear down preopen mark by closing without opening, then corrupt the file.
+    session.notify(
+        "textDocument/didClose",
+        serde_json::json!({ "textDocument": { "uri": diff_uri } }),
+    );
+    std::fs::write(path, "STALE DIFF\n").unwrap();
+
+    session.did_open(&diff_uri, "jujutsu", "STALE DIFF\n");
+
+    let req = session
+        .recv_server_request_timeout("workspace/applyEdit", Duration::from_millis(3000))
+        .expect("expected applyEdit on stale diff cold-open");
+    ack_apply_edit(&mut session, &req);
+
+    let new_text = req["params"]["edit"]["changes"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap()[0]["newText"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        new_text.contains("CHANGE_ID:") && !new_text.contains("STALE DIFF"),
+        "applyEdit should carry fresh diff content (with CHANGE_ID header), got:\n{new_text}"
+    );
+}
+
+/// VS Code / Neovim flow: client invokes `badjuju.status`, server pre-writes
+/// the file, then client opens it. The preopen mark must suppress the
+/// cold-open regen so no spurious applyEdit fires.
+#[test]
+fn lsp_did_open_skips_regen_when_preopen_marked() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let content = read_file(&status_uri);
+    session.did_open(&status_uri, "jujutsu", &content);
+
+    let msg =
+        session.recv_server_request_timeout("workspace/applyEdit", Duration::from_millis(1500));
+    assert!(
+        msg.is_none(),
+        "preopen-marked URI should not trigger applyEdit, got: {msg:?}"
+    );
+}
+
+/// `did_close` must clear any stale preopen mark — otherwise a subsequent cold
+/// open of the same URI would be wrongly suppressed.
+#[test]
+fn lsp_did_close_clears_preopen_mark() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let status_uri = session.execute_command("badjuju.status");
+    let path = status_uri.strip_prefix("file://").unwrap();
+
+    // Close without ever opening — drops the preopen mark.
+    session.notify(
+        "textDocument/didClose",
+        serde_json::json!({ "textDocument": { "uri": &status_uri } }),
+    );
+
+    // Corrupt the on-disk file and reopen: refresh must fire.
+    std::fs::write(path, "STALE AFTER CLOSE\n").unwrap();
+    session.did_open(&status_uri, "jujutsu", "STALE AFTER CLOSE\n");
+
+    let req = session
+        .recv_server_request_timeout("workspace/applyEdit", Duration::from_millis(3000))
+        .expect("expected applyEdit after did_close cleared the preopen mark");
+    ack_apply_edit(&mut session, &req);
+}
+
+/// `diff-commit-<id>.jujutsu` is pinned by design — cold-open must NOT
+/// regenerate it.
+#[test]
+fn lsp_did_open_skips_commit_diff_refresh() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    // Open a commit-diff via the command (file mode).
+    let diff_uri = session
+        .execute_command_with_args("badjuju.diff.commit", serde_json::json!(["@"]))["result"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let path = diff_uri.strip_prefix("file://").unwrap();
+    // Drop any preopen mark for the commit-diff URI.
+    session.notify(
+        "textDocument/didClose",
+        serde_json::json!({ "textDocument": { "uri": &diff_uri } }),
+    );
+    // Corrupt the on-disk content. If cold-open were to refresh, an applyEdit
+    // would fire — but the commit URI is pinned, so it must not.
+    std::fs::write(path, "STALE COMMIT DIFF\n").unwrap();
+
+    session.did_open(&diff_uri, "jujutsu", "STALE COMMIT DIFF\n");
+
+    let msg =
+        session.recv_server_request_timeout("workspace/applyEdit", Duration::from_millis(1500));
+    assert!(
+        msg.is_none(),
+        "commit-diff cold-open must not regenerate, got: {msg:?}"
+    );
+}
+
+/// Squash window URIs (`.jj/badjuju/squash/<from>-<into>.jujutsu`) can't be
+/// reconstructed from filename alone — cold-open must skip them.
+#[test]
+fn lsp_did_open_skips_squash_window() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    // Hand-fabricate a plausible squash URI; the server should not regen it.
+    let squash_path = dir
+        .path()
+        .join(".jj")
+        .join("badjuju")
+        .join("squash")
+        .join("abcdef123456-fedcba654321.jujutsu");
+    std::fs::create_dir_all(squash_path.parent().unwrap()).unwrap();
+    std::fs::write(&squash_path, "stale squash\n").unwrap();
+    let squash_uri = format!("file://{}", squash_path.display());
+
+    session.did_open(&squash_uri, "jujutsu", "stale squash\n");
+
+    let msg =
+        session.recv_server_request_timeout("workspace/applyEdit", Duration::from_millis(1500));
+    assert!(
+        msg.is_none(),
+        "squash-window cold-open must not regenerate, got: {msg:?}"
+    );
+}
+
+/// `describe.jujutsu` is user-editable; cold-open must never touch it.
+#[test]
+fn lsp_did_open_does_not_touch_describe() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let describe_path = dir
+        .path()
+        .join(".jj")
+        .join("badjuju")
+        .join("describe.jujutsu");
+    std::fs::create_dir_all(describe_path.parent().unwrap()).unwrap();
+    std::fs::write(&describe_path, "user draft\n").unwrap();
+    let describe_uri = format!("file://{}", describe_path.display());
+
+    session.did_open(&describe_uri, "jujutsu", "user draft\n");
+
+    let msg =
+        session.recv_server_request_timeout("workspace/applyEdit", Duration::from_millis(1500));
+    assert!(
+        msg.is_none(),
+        "describe.jujutsu cold-open must never trigger applyEdit, got: {msg:?}"
+    );
+}
