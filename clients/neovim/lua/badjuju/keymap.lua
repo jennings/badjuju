@@ -313,6 +313,7 @@ function M.setup_for_buffer(bufnr)
     else
       nmap(bufnr, 'A', vim.lsp.buf.code_action, 'badjuju: code actions menu')
     end
+    nmap(bufnr, 'gd', vim.lsp.buf.definition, 'badjuju: go to definition')
   elseif name:match('/%.jj/badjuju/log%.jujutsu$') then
     -- Both helpers send cursor-form args; the server returns an LSP error if
     -- the cursor isn't on a commit (surfaced via badjuju.execute's error path).
@@ -380,11 +381,13 @@ function M.setup_for_buffer(bufnr)
     else
       nmap(bufnr, 'A', vim.lsp.buf.code_action, 'badjuju: code actions menu')
     end
+    nmap(bufnr, 'gd', vim.lsp.buf.definition, 'badjuju: go to definition')
   elseif name:match('/%.jj/badjuju/diff%.jujutsu$')
       or name:match('/%.jj/badjuju/diff%-[a-z]+%-[^/]+%.jujutsu$') then
     nmap(bufnr, 'R', '<Cmd>JJRefresh<CR>', 'badjuju: refresh')
     nmap(bufnr, 'q', '<Cmd>bdelete<CR>', 'badjuju: close buffer')
     nmap(bufnr, '?', function() show_help('diff') end, 'badjuju: show help')
+    nmap(bufnr, 'gd', vim.lsp.buf.definition, 'badjuju: go to definition')
   elseif name:match('/%.jj/badjuju/squash/[^/]+%.jujutsu$') then
     nmap(bufnr, 's', run_squash_toggle, 'badjuju: toggle hunk or file in squash window')
     nmap(bufnr, 'e', function() run_at_cursor_split('badjuju.squash.edit_hunk') end,
@@ -395,6 +398,7 @@ function M.setup_for_buffer(bufnr)
     nmap(bufnr, '<Tab>', 'za', 'badjuju: toggle fold at cursor')
     nmap(bufnr, 'q', '<Cmd>bdelete<CR>', 'badjuju: close squash buffer')
     nmap(bufnr, '?', function() show_help('squash') end, 'badjuju: show help')
+    nmap(bufnr, 'gd', vim.lsp.buf.definition, 'badjuju: go to definition')
   elseif name:match('/%.jj/badjuju/describe%.jujutsu$') then
     nmap(bufnr, '?', function() show_help('describe') end, 'badjuju: show help')
     nmap(bufnr, '<C-c><C-c>', '<Cmd>write | quit<CR>', 'badjuju: finalize commit (save and close)')
