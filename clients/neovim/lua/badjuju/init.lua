@@ -204,6 +204,21 @@ function M.execute(command, arguments, opts)
       return
     end
     vim.schedule(function()
+      -- Refocus-only responses: commands like badjuju.squash.commit (source
+      -- selection) and badjuju.squash.cancel return the cursor's URI to let
+      -- the client refocus its existing buffer. When that URI matches the
+      -- buffer the user is already in and no split was requested, opening it
+      -- via show_document + checktime is at best a no-op — and at worst
+      -- triggers a BufReadPost that re-runs ftplugin/jujutsu.lua, which
+      -- closes every user-opened fold. Skip the open path; still fire `after`.
+      local opens_window = opts and (opts.split == 'h' or opts.split == 'v')
+      local current_uri = vim.uri_from_fname(vim.api.nvim_buf_get_name(0))
+      if not opens_window and result == current_uri then
+        if opts and opts.after then
+          opts.after(result)
+        end
+        return
+      end
       if opts and opts.split == 'h' then
         vim.cmd('split')
       elseif opts and opts.split == 'v' then
