@@ -33,6 +33,23 @@ share the top priority, pick whichever has the clearest scope.
 If no ticket exists yet for the unit of work the user is describing,
 create one first — do not start without a ticket.
 
+### Drilling into a tracking issue
+
+If the chosen issue is a **tracking issue** (has sub-issues attached
+via GitHub's native sub-issues feature), don't work it directly.
+Read the sub-issues, pick an unblocked one using the same
+priority/clarity criteria, and treat *that* as the unit of work for
+the rest of the loop.
+
+```bash
+gh api repos/:owner/:repo/issues/<n>/sub_issues \
+  --jq '.[] | {number, title, state}'
+```
+
+A tracking issue with zero open sub-issues is itself the unit of
+work — this is how single-ticket features planned via
+`plan-tickets` show up.
+
 ## 2. Claim the ticket
 
 Add the `in progress` label so others know it's taken:
@@ -77,6 +94,36 @@ Last line is either:
 - `Resolves #123` — this commit completely finishes the ticket.
 - `Progresses: #123` — there's more work to do on the ticket.
 
+### Closing the tracking issue with the last sub-task
+
+If the ticket has a parent tracking issue, check whether it's the
+**last open sub-task** before writing the commit message:
+
+```bash
+# Find the parent (if any)
+PARENT=$(gh api repos/:owner/:repo/issues/<n> --jq '.parent.number // empty')
+
+# If there's a parent, count its other open sub-issues
+if [ -n "$PARENT" ]; then
+  gh api repos/:owner/:repo/issues/$PARENT/sub_issues \
+    --jq '[.[] | select(.state=="open") | select(.number != <n>)] | length'
+fi
+```
+
+If that count is `0`, the commit resolves **both** issues — add a
+second `Resolves` line:
+
+```
+feat(area): Short imperative title
+
+Body…
+
+Resolves #<sub-task>
+Resolves #<tracking>
+```
+
+Otherwise, just `Resolves #<sub-task>` as usual.
+
 ## 6. Finish
 
 When the ticket is **completely implemented**:
@@ -87,3 +134,7 @@ gh issue edit <n> --add-label implemented --remove-label "in progress"
 
 **Do not close the ticket.** Landing the commit on `main` closes it
 automatically.
+
+**Do not close the tracking issue manually either.** If this was
+the last sub-task, the second `Resolves #<tracking>` line in the
+commit message closes the parent when the commit lands on `main`.
