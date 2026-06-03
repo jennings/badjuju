@@ -76,24 +76,29 @@ impl Jj {
         // Pin the per-commit and graph-node templates so a user's
         // `templates.log` / `templates.log_node` overrides don't change the
         // shape of bad-juju's log buffers (which the clients parse).
-        // Use an explicit template instead of builtin_log_compact to avoid
-        // OSC 8 hyperlink escape codes that newer jj versions emit.
-        // Field order: change_id, commit_id, author.email, commit_timestamp,
-        // bookmarks, tags, conflict flag, divergent flag.
-        // The trailing `++ "\n"` inserts a blank line between commits.
+        // Single-line layout: change_id, commit_id, description, (time author),
+        // tags, bookmarks, conflict/divergent flags. Description appears
+        // before metadata so folded entries show the useful context first.
+        // time_ago is abbreviated to e.g. `4h` within a week, `YYMMDD` after.
         let template = concat!(
-            r#"separate("\n","#,
-            r#"  separate(" ","#,
-            r#"    change_id.shortest(8),"#,
-            r#"    commit_id.shortest(8),"#,
-            r#"    author.email(),"#,
-            r#"    commit_timestamp(self),"#,
-            r#"    bookmarks,"#,
-            r#"    tags,"#,
-            r#"    if(conflict, "conflict"),"#,
-            r#"    if(divergent, "divergent"),"#,
-            r#"  ),"#,
+            r#"separate(" ","#,
+            r#"  change_id.shortest(8),"#,
+            r#"  commit_id.shortest(8),"#,
             r#"  if(!description, "(empty)", description.first_line()),"#,
+            r#"  "(" ++ separate(" ","#,
+            r#"    if(commit_timestamp(self).before("1 week ago"),"#,
+            r#"      commit_timestamp(self).format("%y%m%d"),"#,
+            r#"      commit_timestamp(self).ago().replace("#,
+            r#"        regex:" ((m)illi(s)econds?|(sec)onds?|(min)utes?|(h)ours?|(d)ays?|(w)eeks?) ago","#,
+            r#"        "$2$3$4$5$6$7$8""#,
+            r#"      ),"#,
+            r#"    ),"#,
+            r#"    author.email(),"#,
+            r#"  ) ++ ")","#,
+            r#"  tags,"#,
+            r#"  bookmarks,"#,
+            r#"  if(conflict, "conflict"),"#,
+            r#"  if(divergent, "divergent"),"#,
             r#") ++ "\n\n""#,
         );
         let mut args: Vec<&str> = vec![
@@ -1011,21 +1016,75 @@ mod tests {
     }
 
     #[test]
-    fn log_with_stat_field_order_has_email_before_timestamp() {
+    fn log_with_stat_header_follows_compact_single_line_shape() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        jj.describe_set("@", "my unique description").unwrap();
+        let out = jj.log("@").expect("log failed");
+        let header = out.lines().next().expect("no output");
+        // Layout: <graph> <change_id> <commit_id> <description> (<time> <email>) ...
+        let desc_pos = header
+            .find("my unique description")
+            .expect("description missing from header");
+        let open_paren = header.find('(').expect("missing opening paren");
+        let close_paren = header.find(')').expect("missing closing paren");
+        // The leading `@` is the graph working-copy marker; the *email* `@`
+        // sits inside the parenthesized chunk. Look there only.
+        let inner = &header[open_paren + 1..close_paren];
+        assert!(
+            inner.contains('@'),
+            "email @ should sit inside (time email) parens: {header}"
+        );
+        assert!(
+            desc_pos < open_paren,
+            "description should appear before (time email): {header}"
+        );
+    }
+
+    #[test]
+    fn log_with_stat_recent_commit_has_no_ago_suffix_or_internal_space() {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
         let out = jj.log("@").expect("log failed");
-        // The header line is: <graph> <change_id> <commit_id> <email> <timestamp> ...
-        // Verify email appears before the timestamp on the header line.
         let header = out.lines().next().expect("no output");
-        let at_pos = header.find('@').expect("no @ in header");
-        // email contains @, timestamp does not — find a digit sequence for timestamp
-        let ts_pos = header
-            .find(|c: char| c.is_ascii_digit())
-            .expect("no digit in header");
+        let open = header.find('(').expect("no opening paren");
+        let close = header.find(')').expect("no closing paren");
+        let inner = &header[open + 1..close];
+        // The parenthesized chunk is "<time> <email>". The time token is the
+        // first whitespace-separated piece — it must not contain " ago" and,
+        // if it abbreviates a quantity, must not contain a space (e.g. "2h",
+        // not "2 h"). Recent commits may render as "now", which is also fine.
+        let time = inner
+            .split_whitespace()
+            .next()
+            .expect("empty parenthesized chunk");
         assert!(
-            at_pos < ts_pos,
-            "expected email (@ sign) before timestamp (digit) in header: {header}"
+            !inner.contains(" ago"),
+            "parenthesized chunk should not contain ` ago`: {inner:?}"
+        );
+        assert!(
+            !time.contains(' '),
+            "time token should not contain a space: {time:?}"
+        );
+    }
+
+    #[test]
+    fn log_with_stat_first_line_is_single_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        jj.describe_set("@", "single line desc").unwrap();
+        let out = jj.log("@").expect("log failed");
+        let header = out.lines().next().expect("no output");
+        // Everything from change_id through the closing `)` must live on one
+        // line — the old multi-line shape put description on a second line,
+        // which folding hid.
+        assert!(
+            header.contains("single line desc"),
+            "description should be on the header line: {header}"
+        );
+        assert!(
+            header.contains(')'),
+            "closing `)` of (time email) should be on the header line: {header}"
         );
     }
 
