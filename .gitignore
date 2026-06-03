@@ -1,6 +1,8 @@
 target/
 .redo/
 *.did
+.do_built
+.do_built.dir/
 node_modules/
 clients/vscode/out/
 clients/vscode/dist/
