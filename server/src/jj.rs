@@ -145,7 +145,7 @@ impl Jj {
             r#"  bookmarks,"#,
             r#"  if(conflict, "conflict"),"#,
             r#"  if(divergent, "divergent"),"#,
-            r#") ++ "\n\n""#,
+            r#") ++ "\n""#,
         );
         let mut args: Vec<&str> = vec![
             "--config",
@@ -1204,20 +1204,31 @@ mod tests {
     }
 
     #[test]
-    fn log_with_stat_inserts_blank_line_between_commits() {
+    fn log_with_stat_no_blank_between_header_and_stat() {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
+        std::fs::write(dir.path().join("alpha.txt"), "x\n").unwrap();
         jj.describe_set("@", "first").unwrap();
-        jj.new_change("").unwrap();
-        jj.describe_set("@", "second").unwrap();
-        let out = jj.log("::@").expect("log failed");
-        // In graph mode the blank line between commits appears as a line
-        // containing only the graph continuation char "│", or as an empty
-        // line for the root commit. Either signals a separator was injected.
+        let out = jj.log_with_stat("@", true).expect("log failed");
+        // The line immediately after the commit header (which starts with `@`)
+        // must be the first per-file stat line — not a blank/graph-only line.
+        let lines: Vec<&str> = out.lines().collect();
+        let header_idx = lines
+            .iter()
+            .position(|l| l.starts_with('@'))
+            .expect("expected @ commit header");
+        let after = lines
+            .get(header_idx + 1)
+            .copied()
+            .expect("expected a line after the header");
+        let trimmed = after.trim_end();
         assert!(
-            out.lines()
-                .any(|l| l.trim_end().is_empty() || l.trim_end() == "│"),
-            "expected blank separator line between commits; got:\n{out}"
+            !trimmed.is_empty() && trimmed != "│" && trimmed != "~",
+            "expected stat line directly after header; got blank/graph-only: {after:?}\nfull:\n{out}"
+        );
+        assert!(
+            after.contains('|'),
+            "expected first post-header line to be a stat line (has `|`); got: {after:?}\nfull:\n{out}"
         );
     }
 
