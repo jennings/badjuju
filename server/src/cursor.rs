@@ -644,22 +644,39 @@ pub fn status_summary_header_revset(line: &str) -> Option<String> {
 
 // --- internal parsers ----------------------------------------------------
 
-const COMMIT_HEADER_CHARS: &[char] = &['@', '*', '○', '●', '◆'];
-
 /// Graph chars that may appear in the prefix of a `jj log --stat` per-file
 /// line. Mirrors the JS `STAT_LINE_RE` character class.
 const STAT_GRAPH_CHARS: &[char] = &[
     '│', '○', '●', '◆', '~', '*', '╭', '╮', '╯', '╰', '─', '├', '┤', '┬', '┴', '┼',
 ];
 
-/// If `line` is a commit-header line (graph char + whitespace + change_id),
-/// return the change_id. Otherwise `None`.
+/// If `line` is a commit-header line (graph prefix + glyph + whitespace +
+/// change_id), return the change_id. Otherwise `None`.
+///
+/// We deliberately don't whitelist the glyph: jj's `templates.log_node` is
+/// user-configurable (and even the builtin emits `×` for conflicts), so
+/// anything that isn't a graph connector or whitespace is treated as a
+/// possible node glyph. The shape of what *follows* the glyph is what
+/// confirms the row — 3+ lowercase letters (change_id) ending at whitespace
+/// or end-of-line, which the `jj log` template guarantees.
 pub(crate) fn match_commit_header(line: &str) -> Option<&str> {
-    let first = line.chars().next()?;
-    if !COMMIT_HEADER_CHARS.contains(&first) {
+    let mut byte_idx = 0;
+    let mut saw_glyph = false;
+    for c in line.chars() {
+        if is_graph_connector(c) {
+            byte_idx += c.len_utf8();
+            continue;
+        }
+        // First non-connector, non-whitespace char is the commit-node glyph
+        // for this row. Single character.
+        byte_idx += c.len_utf8();
+        saw_glyph = true;
+        break;
+    }
+    if !saw_glyph {
         return None;
     }
-    let rest = &line[first.len_utf8()..];
+    let rest = &line[byte_idx..];
     if !rest.starts_with(|c: char| c.is_whitespace()) {
         return None;
     }
@@ -667,17 +684,31 @@ pub(crate) fn match_commit_header(line: &str) -> Option<&str> {
     let end = after_ws
         .find(|c: char| !c.is_ascii_lowercase())
         .unwrap_or(after_ws.len());
-    if end == 0 {
+    // Need at least 3 lowercase chars for a plausible change_id. Without a
+    // glyph whitelist we lean on this shape: a stat-style line like
+    // `M src/main.rs` would otherwise parse as glyph=`M`, change_id=`src`.
+    if end < 3 {
         return None;
     }
-    // Reject if the change_id runs into another alphanumeric/underscore char
-    // (analogous to the JS regex's trailing `\b`).
-    if let Some(next) = after_ws[end..].chars().next()
-        && (next.is_alphanumeric() || next == '_')
-    {
-        return None;
+    // The change_id must end at whitespace (real jj log output puts the
+    // commit_id after a space) or end-of-line. `src/foo.rs` ending at `/`
+    // is what we want to reject here — `/` isn't alphanumeric so the older
+    // word-boundary check let it through.
+    match after_ws[end..].chars().next() {
+        None => Some(&after_ws[..end]),
+        Some(c) if c.is_whitespace() => Some(&after_ws[..end]),
+        _ => None,
     }
-    Some(&after_ws[..end])
+}
+
+/// Graph connector chars (and space) that may appear *before* the commit
+/// glyph on an indented row. These are the box-drawing chars `jj` uses to
+/// render the DAG (plus `~` for elided revs and the space separator).
+fn is_graph_connector(c: char) -> bool {
+    matches!(
+        c,
+        ' ' | '│' | '~' | '╭' | '╮' | '╯' | '╰' | '─' | '├' | '┤' | '┬' | '┴' | '┼'
+    )
 }
 
 /// Parse a status-section header line: `M src/main.rs`, `A new.txt`, etc.
@@ -1576,6 +1607,63 @@ mod tests {
     #[test]
     fn commit_id_at_line_returns_none_on_empty() {
         assert_eq!(commit_id_at_line("", 0), None);
+    }
+
+    #[test]
+    fn commit_id_at_line_returns_id_on_indented_branch_header() {
+        // Branched log output puts a commit one or more graph cells in from
+        // the left: `│ ○  qqrpmryt …`. The commit char isn't at column 0 but
+        // it's still a commit-header row.
+        let content = "@  vzkvvnwk 3cdaebd6\n○  nslnmquu 774297e0\n│ ○  qqrpmryt 1354dff3\n";
+        assert_eq!(commit_id_at_line(content, 2).as_deref(), Some("qqrpmryt"));
+    }
+
+    #[test]
+    fn commit_id_at_line_rejects_stat_line_with_graph_prefix() {
+        // Stat lines also start with graph chars but have no commit glyph in
+        // the prefix — they must not be misidentified as commit headers.
+        let content = "○  abcdefgh first\n│  src/main.rs | 3 +++\n├─╯  other.rs | 1 +\n";
+        assert_eq!(commit_id_at_line(content, 1), None);
+        assert_eq!(commit_id_at_line(content, 2), None);
+    }
+
+    #[test]
+    fn commit_id_at_line_recognizes_custom_node_glyphs() {
+        // jj's `templates.log_node` is user-configurable, and even the builtin
+        // emits `×` for conflicts. We must not hardcode a glyph allowlist —
+        // any single non-connector char before `<ws><change_id>` is the glyph.
+        for glyph in ['×', '◌', '✗', 'W'] {
+            let line = format!("{glyph}  qpvuntsm 1234abcd description");
+            assert_eq!(
+                commit_id_at_line(&line, 0).as_deref(),
+                Some("qpvuntsm"),
+                "expected to recognize {glyph:?} as a commit-node glyph in {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn commit_id_at_line_rejects_m_flag_status_line() {
+        // `M src/main.rs` looks superficially like `<glyph><ws><change_id>`
+        // (glyph=`M`, then `src`) — and would silently misparse if the
+        // trailing boundary were just "non-alphanumeric". The change_id has
+        // to end at whitespace (or EOL), not at `/`.
+        assert_eq!(commit_id_at_line("M src/main.rs", 0), None);
+        assert_eq!(commit_id_at_line("A new.txt", 0), None);
+        assert_eq!(commit_id_at_line("D gone.rs", 0), None);
+    }
+
+    #[test]
+    fn commit_id_at_line_rejects_short_change_id_under_three_chars() {
+        // Without a glyph whitelist we use the change_id's shape as the
+        // confirming signal. Fewer than 3 lowercase letters is too generic
+        // (any `M x` style line would pass).
+        assert_eq!(commit_id_at_line("○  ab 1234abcd desc", 0), None);
+        // 3 is the minimum that counts.
+        assert_eq!(
+            commit_id_at_line("○  abc 1234abcd desc", 0).as_deref(),
+            Some("abc")
+        );
     }
 
     // --- status_summary_header_revset ---

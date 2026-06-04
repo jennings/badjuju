@@ -4243,6 +4243,88 @@ mod tests {
     }
 
     #[test]
+    fn status_folding_ranges_indented_branch_commit_gets_own_fold() {
+        // Branched/merged stack lays out a child commit indented one cell to
+        // the right of its parent. Each commit row — flush-left or indented —
+        // must produce its own fold spanning only its own stat lines.
+        let content = concat!(
+            "@  : (empty)\n@- : (empty)\n\n",
+            "STACK: ancestors(@, 2)\n\n",
+            "@  vzkvvnwk 3cdaebd6 (empty)\n",
+            "○  nslnmquu 774297e0 first commit\n",
+            "│  src/a.rs | 2 ++\n",
+            "│ ○  qqrpmryt 1354dff3 branched commit\n",
+            "├─╯  src/b.rs | 14 +++++---------\n",
+            "│    src/c.csproj | 3 +++\n",
+            "○  pmlukpno c3427863 third commit\n",
+            "│  src/d.do | 4 ++--\n",
+            "\nCOMMAND REFERENCE:\nkeys",
+        );
+        let ranges = status_folding_ranges(content);
+
+        let lines: Vec<&str> = content.lines().collect();
+        let line_of = |needle: &str| -> u32 {
+            lines
+                .iter()
+                .position(|l| l.contains(needle))
+                .unwrap_or_else(|| panic!("line containing {needle:?} not found"))
+                as u32
+        };
+
+        let nslnmquu_start = line_of("nslnmquu");
+        let qqrpmryt_start = line_of("qqrpmryt");
+        let pmlukpno_start = line_of("pmlukpno");
+
+        let nslnmquu_fold = ranges
+            .iter()
+            .find(|r| r.start_line == nslnmquu_start)
+            .unwrap_or_else(|| {
+                panic!("expected fold for nslnmquu (line {nslnmquu_start}): {ranges:?}")
+            });
+        let qqrpmryt_fold = ranges
+            .iter()
+            .find(|r| r.start_line == qqrpmryt_start)
+            .unwrap_or_else(|| {
+                panic!("expected fold for indented qqrpmryt (line {qqrpmryt_start}): {ranges:?}")
+            });
+        let pmlukpno_fold = ranges
+            .iter()
+            .find(|r| r.start_line == pmlukpno_start)
+            .unwrap_or_else(|| {
+                panic!("expected fold for pmlukpno (line {pmlukpno_start}): {ranges:?}")
+            });
+
+        // nslnmquu's fold must stop at its own single stat line, NOT swallow
+        // the indented qqrpmryt commit row below it.
+        assert!(
+            nslnmquu_fold.end_line < qqrpmryt_start,
+            "nslnmquu fold (start={}, end={}) must end before qqrpmryt commit at line {}: {:?}",
+            nslnmquu_fold.start_line,
+            nslnmquu_fold.end_line,
+            qqrpmryt_start,
+            ranges
+        );
+
+        // qqrpmryt's fold spans its two stat lines and must end before pmlukpno.
+        assert!(
+            qqrpmryt_fold.end_line > qqrpmryt_fold.start_line,
+            "qqrpmryt fold must span multiple lines: {qqrpmryt_fold:?}"
+        );
+        assert!(
+            qqrpmryt_fold.end_line < pmlukpno_start,
+            "qqrpmryt fold (end={}) must end before pmlukpno at line {}: {ranges:?}",
+            qqrpmryt_fold.end_line,
+            pmlukpno_start,
+        );
+
+        // pmlukpno still folds its stat line.
+        assert!(
+            pmlukpno_fold.end_line > pmlukpno_fold.start_line,
+            "pmlukpno fold must span multiple lines: {pmlukpno_fold:?}"
+        );
+    }
+
+    #[test]
     fn status_folding_ranges_all_have_region_kind() {
         let content = concat!(
             "@  : (empty)\n@- : (empty)\n\n",
