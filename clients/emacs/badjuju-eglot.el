@@ -50,8 +50,10 @@ When empty (the default), the binary is located on PATH."
 (defclass badjuju-lsp-server (eglot-lsp-server) ()
   :documentation "Eglot server class for the Bad Juju LSP (badjuju lsp).")
 
-(cl-defmethod eglot-initialization-options ((_server badjuju-lsp-server))
-  "Build initializationOptions for the badjuju LSP server."
+(defun badjuju-eglot--init-options ()
+  "Build the initializationOptions plist for the badjuju LSP server.
+Pure function of the customization variables so it can be tested
+without instantiating a real LSP-server object."
   (let ((opts (list :keymapProfile (if (and badjuju-keymap-profile
                                             (not (string= badjuju-keymap-profile "")))
                                        badjuju-keymap-profile
@@ -60,6 +62,10 @@ When empty (the default), the binary is located on PATH."
     (when (and badjuju-binary-path (not (string= badjuju-binary-path "")))
       (setq opts (append opts (list :binaryPath badjuju-binary-path))))
     opts))
+
+(cl-defmethod eglot-initialization-options ((_server badjuju-lsp-server))
+  "Build initializationOptions for the badjuju LSP server."
+  (badjuju-eglot--init-options))
 
 ;;; Server registration
 

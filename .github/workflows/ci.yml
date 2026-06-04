@@ -87,6 +87,46 @@ jobs:
       - name: Run Neovim plugin tests
         run: redo clients/neovim/test
 
+  emacs:
+    name: Emacs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Install Emacs
+        uses: purcell/setup-emacs@509bfe03ba1ffddb67b3c6d9eaaeb96b45182cc7 # master
+        with:
+          version: '29.4'
+
+      - name: Verify Emacs is installed
+        # Guard against silent skips: clients/emacs/scripts/test.sh exits 0
+        # when emacs is missing on local machines. In CI we want a hard
+        # failure if the setup step above didn't actually install emacs.
+        run: emacs --version
+
+      - name: Cache cargo bin
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-jj
+
+      - name: Install jj
+        run: command -v jj || cargo install jj-cli
+
+      - name: Install redo
+        run: |
+          git clone --depth 1 https://github.com/apenwarr/redo /tmp/redo
+          cd /tmp/redo && sudo DESTDIR= ./do install
+
+      - name: Run Emacs ERT suite
+        run: redo clients/emacs/test
+        env:
+          BADJUJU_E2E: '1'
+
   typescript:
     name: TypeScript
     runs-on: ubuntu-latest
