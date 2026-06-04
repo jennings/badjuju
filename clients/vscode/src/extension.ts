@@ -848,7 +848,7 @@ export async function activate(context: ExtensionContext) {
     serverOptions,
     clientOptions,
   );
-  client.start();
+  await client.start();
 
   // Subscribe to server-sent workspace/textDocumentContent/refresh.
   // The server fires this for each open change-mode diff when the underlying
