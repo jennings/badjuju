@@ -8,12 +8,16 @@ clients/vscode/out/
 clients/vscode/dist/
 clients/vscode/.vscode-test/
 clients/neovim/.test-deps/
+docs/book/
 /configuration
 *.vsix
 
 .claude/*
 !.claude/skills
 !.claude/settings.json
+
+# Per-package Claude Code state (created when a session runs inside a subdir).
+**/.claude/
 
 # AI-agent local notes — per-user, not shared.
 CLAUDE.local.md

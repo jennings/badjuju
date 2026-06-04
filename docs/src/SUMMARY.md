@@ -1,0 +1,18 @@
+# Summary
+
+[Introduction](./introduction.md)
+
+- [Getting Started](./getting-started.md)
+- [Usage](./usage/index.md)
+  - [Basic Usage](./usage/basic.md)
+  - [Manipulating Commits](./usage/manipulating-commits.md)
+- [Clients](./clients/index.md)
+  - [Neovim](./clients/neovim.md)
+  - [VS Code](./clients/vscode.md)
+  - [Emacs](./clients/emacs.md)
+  - [Other Editors](./clients/other.md)
+- [Reference](./reference/index.md)
+  - [Status buffer](./reference/status-buffer.md)
+  - [Log buffer](./reference/log-buffer.md)
+  - [Diff buffer](./reference/diff-buffer.md)
+  - [Hunk edit buffer](./reference/hunk-edit-buffer.md)

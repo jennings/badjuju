@@ -1,0 +1,18 @@
+[book]
+title = "Bad Juju"
+description = "An LSP-powered, editor-agnostic frontend for the Jujutsu VCS."
+authors = ["Bad Juju contributors"]
+language = "en"
+multilingual = false
+src = "src"
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/jennings/badjuju"
+edit-url-template = "https://github.com/jennings/badjuju/edit/main/docs/{path}"
+site-url = "/badjuju/"
+
+[output.html.fold]
+enable = true
+level = 1
