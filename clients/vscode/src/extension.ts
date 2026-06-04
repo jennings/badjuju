@@ -557,7 +557,12 @@ export async function activate(context: ExtensionContext) {
     commands.registerCommand("badjuju.unsquash.file", async () => {
       await runFileScopedStatusCommand("badjuju.unsquash");
     }),
-    commands.registerCommand("badjuju.squash.commit", async () => {
+    // Client-side wrappers around the server's `badjuju.squash.*` commands.
+    // The wrapper name MUST differ from the server name: vscode-languageclient's
+    // ExecuteCommandFeature auto-registers every server command as a VS Code
+    // command, so reusing the same name throws "command already exists" at
+    // initialize and tears the LSP connection down.
+    commands.registerCommand("badjuju.squash.commit.cursor", async () => {
       const args = cursorArgsForActiveEditor() ?? [];
       try {
         const result = await client.sendRequest("workspace/executeCommand", {
@@ -576,7 +581,7 @@ export async function activate(context: ExtensionContext) {
         window.showInformationMessage(`squash.commit: ${(e as Error).message}`);
       }
     }),
-    commands.registerCommand("badjuju.squash.cancel", async () => {
+    commands.registerCommand("badjuju.squash.cancel.run", async () => {
       try {
         const result = await client.sendRequest("workspace/executeCommand", {
           command: "badjuju.squash.cancel",
@@ -588,7 +593,7 @@ export async function activate(context: ExtensionContext) {
         window.showInformationMessage(`squash.cancel: ${(e as Error).message}`);
       }
     }),
-    commands.registerCommand("badjuju.squash.toggle", async () => {
+    commands.registerCommand("badjuju.squash.toggle.cursor", async () => {
       const editor = window.activeTextEditor;
       if (!editor) return;
       try {
@@ -607,7 +612,7 @@ export async function activate(context: ExtensionContext) {
         window.showInformationMessage(`squash.toggle: ${(e as Error).message}`);
       }
     }),
-    commands.registerCommand("badjuju.squash.select_all", async () => {
+    commands.registerCommand("badjuju.squash.select_all.run", async () => {
       try {
         await client.sendRequest("workspace/executeCommand", {
           command: "badjuju.squash.select_all",
@@ -619,7 +624,7 @@ export async function activate(context: ExtensionContext) {
         );
       }
     }),
-    commands.registerCommand("badjuju.squash.select_none", async () => {
+    commands.registerCommand("badjuju.squash.select_none.run", async () => {
       try {
         await client.sendRequest("workspace/executeCommand", {
           command: "badjuju.squash.select_none",
