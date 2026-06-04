@@ -4,36 +4,33 @@
 
 ;; Thin wrappers around workspace/executeCommand LSP requests.
 ;;
-;; The key entry point is `badjuju-commands-run', which:
-;;   1. Ensures the badjuju LSP server is running (starting it if needed).
-;;   2. Sends workspace/executeCommand with the given command and arguments.
-;;   3. Opens the returned file:// or badjuju-diff:// URI in the current window.
-;;
-;; Cursor-form arguments: many server commands accept a
-;; (:cursor (:uri URI :line LINE)) argument that lets the server resolve the
-;; revision or file under point.  Use `badjuju-commands-cursor-arg' to build one.
+;; Key entry points:
+;;   `badjuju-commands-run'      — send a command, open the returned URI
+;;   `badjuju-commands-request'  — send a command, pass raw result to a callback
+;;   `badjuju-commands-cursor-arg' — build a cursor-form {:cursor {:uri :line}} plist
 
 ;;; Code:
 
+(require 'url-parse)
 (require 'badjuju-eglot)
 
 ;;; Cursor argument
 
 (defun badjuju-commands-cursor-arg ()
   "Build a cursor-form argument for the current buffer position.
-Returns a plist (:cursor (:uri URI :line LINE)) where LINE is 0-indexed.
-This is the form the server uses to resolve the revision or file under point."
+Returns a plist (:cursor (:uri URI :line LINE)) where LINE is 0-indexed."
   (let* ((file (buffer-file-name))
          (uri (when file (concat "file://" (url-encode-url file))))
          (line (1- (line-number-at-pos))))
     (list :cursor (list :uri (or uri "") :line line))))
 
-;;; Core execute helper
+;;; Core execute helpers
 
-(defun badjuju-commands-run (command &optional args &rest _)
+(defun badjuju-commands-run (command &optional args)
   "Send workspace/executeCommand COMMAND with ARGS to the badjuju LSP server.
-ARGS is a list of arguments passed as the JSON array.  When the server
-returns a URI string, open it in the current window."
+ARGS is a list of arguments.  When the server returns a URI string, open it.
+Signals a user-error on LSP error; callers that need custom error handling
+should use `badjuju-commands-run-with-handler' instead."
   (let* ((server (badjuju--ensure-server))
          (result (jsonrpc-request
                   server
@@ -43,15 +40,43 @@ returns a URI string, open it in the current window."
     (when (and result (stringp result) (not (string= result "")))
       (badjuju-commands--open-uri result))))
 
+(defun badjuju-commands-run-with-handler (command args on-error)
+  "Like `badjuju-commands-run' but call ON-ERROR instead of signaling on failure.
+ON-ERROR receives the jsonrpc error plist (:code :message :data)."
+  (let ((server (badjuju--ensure-server)))
+    (condition-case err
+        (let ((result (jsonrpc-request
+                       server
+                       'workspace/executeCommand
+                       (list :command command
+                             :arguments (or (vconcat args) [])))))
+          (when (and result (stringp result) (not (string= result "")))
+            (badjuju-commands--open-uri result)))
+      (jsonrpc-error
+       (when on-error
+         ;; err = (jsonrpc-error "msg" (:jsonrpc-error-code C :jsonrpc-error-message M :jsonrpc-error-data D))
+         (let* ((details (cddr err))
+                (code    (plist-get details :jsonrpc-error-code))
+                (msg     (plist-get details :jsonrpc-error-message))
+                (data    (plist-get details :jsonrpc-error-data)))
+           (funcall on-error (list :code code :message msg :data data))))))))
+
+(defun badjuju-commands-request (command args callback)
+  "Send workspace/executeCommand COMMAND with ARGS and pass raw result to CALLBACK."
+  (let* ((server (badjuju--ensure-server))
+         (result (jsonrpc-request
+                  server
+                  'workspace/executeCommand
+                  (list :command command
+                        :arguments (or (vconcat args) [])))))
+    (funcall callback result)))
+
 (defun badjuju-commands--open-uri (uri)
-  "Open a server-returned URI in the current window.
-Handles file://, badjuju-diff://, and badjuju-file:// URIs."
+  "Open a server-returned URI in the current window."
   (cond
-   ((string-prefix-p "badjuju-diff://" uri)
-    (find-file uri))
-   ((string-prefix-p "badjuju-file://" uri)
-    (find-file uri))
-   ((string-prefix-p "file://" uri)
+   ((string-prefix-p "badjuju-diff://" uri) (find-file uri))
+   ((string-prefix-p "badjuju-file://" uri) (find-file uri))
+   ((string-prefix-p "file://"         uri)
     (find-file (url-filename (url-generic-parse-url uri))))
    (t
     (message "badjuju: unexpected URI %s" uri))))
