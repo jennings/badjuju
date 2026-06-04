@@ -679,6 +679,16 @@ export async function activate(context: ExtensionContext) {
         `Bad Juju  |  Client: v${__BADJUJU_VERSION__} (${__BADJUJU_COMMIT__})  |  Server: v${server.version} (${server.commit})`,
       );
     }),
+    commands.registerCommand("badjuju.ret.dispatch", async () => {
+      const editor = window.activeTextEditor;
+      if (!editor) return;
+      const line = editor.document.lineAt(editor.selection.active.line).text;
+      if (/^JJ: [^:]+:/.test(line)) {
+        await commands.executeCommand("badjuju.log.applyShortcut");
+      } else {
+        await commands.executeCommand("editor.action.revealDefinition");
+      }
+    }),
     commands.registerCommand("badjuju.help.open", async () => {
       const editor = window.activeTextEditor;
       const windowType = windowTypeForUri(editor?.document.uri);

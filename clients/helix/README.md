@@ -153,6 +153,11 @@ In `log.jujutsu`, lines beginning with `JJ:` are named revset shortcuts. Place
 the cursor on a `JJ:` line and press `Space a` → **Apply revset: `<label>`** to
 re-run the log query with that revset.
 
+> **Note:** Other clients (VS Code, Neovim, Emacs) bind `Enter` / `RET` to a
+> context-aware dispatch: on a `JJ:` shortcut line it applies the revset; elsewhere
+> it invokes go-to-definition. Helix has no keybinding layer in bad-juju, so use
+> `Space a` for both actions.
+
 ## Syntax highlighting
 
 Syntax highlighting comes from LSP semantic tokens, which the server

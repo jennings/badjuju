@@ -246,6 +246,11 @@
         "command": "badjuju.bookmark.prompt",
         "category": "jj",
         "title": "Bookmark (create / move / delete / track / forget)"
+      },
+      {
+        "command": "badjuju.ret.dispatch",
+        "category": "jj",
+        "title": "Apply revset shortcut or go to definition"
       }
     ],
     "keybindings": [
@@ -355,9 +360,44 @@
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
-        "command": "badjuju.log.applyShortcut",
+        "command": "badjuju.describe.open",
+        "key": "c w",
+        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.new.open",
+        "key": "c n",
+        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.describe.open",
+        "key": "c w",
+        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.new.open",
+        "key": "c n",
+        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.ret.dispatch",
+        "key": "enter",
+        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
+      },
+      {
+        "command": "badjuju.ret.dispatch",
         "key": "enter",
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
+      },
+      {
+        "command": "editor.action.revealDefinition",
+        "key": "enter",
+        "when": "badjuju.keymapProfile == 'magit' && resourceScheme == 'badjuju-diff' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
+      },
+      {
+        "command": "editor.action.revealDefinition",
+        "key": "enter",
+        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
       },
       {
         "command": "badjuju.abandon.cursor",
@@ -634,9 +674,44 @@
         "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
-        "command": "badjuju.log.applyShortcut",
+        "command": "badjuju.describe.open",
+        "key": "c w",
+        "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.new.open",
+        "key": "c n",
+        "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.describe.open",
+        "key": "c w",
+        "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.new.open",
+        "key": "c n",
+        "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.ret.dispatch",
+        "key": "enter",
+        "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
+      },
+      {
+        "command": "badjuju.ret.dispatch",
         "key": "enter",
         "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
+      },
+      {
+        "command": "editor.action.revealDefinition",
+        "key": "enter",
+        "when": "badjuju.keymapProfile == 'vim' && resourceScheme == 'badjuju-diff' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
+      },
+      {
+        "command": "editor.action.revealDefinition",
+        "key": "enter",
+        "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !inSnippetMode"
       },
       {
         "command": "badjuju.refresh.open",

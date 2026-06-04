@@ -113,6 +113,12 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
     },
     // Status + log
     KeymapEntry {
+        key: "c",
+        action: "(transient)",
+        description: "commit transient (c w = reword, c n = new)",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
         key: "r",
         action: "badjuju.rebase",
         description: "rebase to destination",
@@ -141,6 +147,14 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         action: "badjuju.abandon",
         description: "abandon commit at cursor",
         windows: &["status", "log"],
+    },
+    // RET — context-dispatched: apply revset shortcut on JJ: shortcut lines
+    // (log buffer only), otherwise invoke textDocument/definition at point.
+    KeymapEntry {
+        key: "RET",
+        action: "(editor)",
+        description: "apply revset shortcut / goto definition",
+        windows: &["status", "log", "diff"],
     },
     // All main windows
     KeymapEntry {
@@ -476,8 +490,8 @@ mod tests {
         let text = render_command_reference(&KeymapProfile::Magit, "status");
         assert!(text.starts_with("COMMAND REFERENCE:"));
         for key in [
-            "n", "L", "b", "r", "e", "d", "D", "s", "S", "U", "a", "f", "p", "P", "u", "R", "q",
-            "?", "Tab",
+            "n", "L", "c", "b", "r", "e", "d", "D", "s", "S", "U", "a", "f", "p", "P", "u", "R",
+            "q", "?", "Tab", "RET",
         ] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
@@ -497,7 +511,9 @@ mod tests {
             text.contains("shortcut line"),
             "missing shortcut hint in:\n{text}"
         );
-        for key in ["b", "r", "e", "d", "D", "s", "S", "a", "R", "q", "?"] {
+        for key in [
+            "c", "b", "r", "e", "d", "D", "s", "S", "a", "R", "q", "?", "RET",
+        ] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in log:\n{text}"
@@ -508,7 +524,7 @@ mod tests {
     #[test]
     fn render_diff_has_refresh_close_help() {
         let text = render_command_reference(&KeymapProfile::Magit, "diff");
-        for key in ["R", "q", "?"] {
+        for key in ["R", "q", "?", "RET"] {
             assert!(
                 text.lines().any(|l| l.starts_with(key)),
                 "missing key `{key}` in diff:\n{text}"

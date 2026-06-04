@@ -87,10 +87,10 @@ describe('keymap.setup_for_buffer', function()
     assert.is_true(found, 'expected log.jujutsu map for <CR>')
   end)
 
-  it('does NOT install <CR> on status.jujutsu', function()
+  it('installs <CR> on status.jujutsu for ret_dispatch', function()
     local buf = open_named('.jj/badjuju/status.jujutsu')
     local found = has_buffer_map(buf, '<CR>')
-    assert.is_false(found, 'status.jujutsu should not bind <CR>')
+    assert.is_true(found, 'expected status.jujutsu map for <CR>')
   end)
 
   it('does NOT install status-only maps on log.jujutsu', function()

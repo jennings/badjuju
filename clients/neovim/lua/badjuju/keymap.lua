@@ -120,12 +120,16 @@ local LOG_MAPS = {
   { 'a', 'JJAbandon', 'badjuju: abandon revision' },
 }
 
---- Handle <CR> on a log.jujutsu buffer. Ships the cursor position to the
---- server which re-runs `badjuju.log` with the revset of any `JJ: <label>:
---- <revset>` shortcut at that line. The cursor is restored (row/col clamped
---- to the new buffer) after the buffer regenerates. If the cursor isn't on
---- a shortcut line the server returns an LSP error which surfaces through
---- the standard notification path.
+--- Returns true when the line at the current cursor position is a
+--- `JJ: <Label>:  <revset>` shortcut line from the log header.
+local function cursor_on_log_shortcut()
+  local row = vim.api.nvim_win_get_cursor(0)[1] - 1  -- 0-indexed
+  local line = vim.api.nvim_buf_get_lines(0, row, row + 1, false)[1] or ''
+  return line:match('^JJ: [^:]+:') ~= nil
+end
+
+--- Apply the revset shortcut under the cursor in a log.jujutsu buffer.
+--- Ships the cursor position to the server; cursor is restored afterward.
 local function apply_log_shortcut()
   local win = vim.api.nvim_get_current_win()
   local saved = vim.api.nvim_win_get_cursor(win) -- {row (1-based), col}
@@ -144,6 +148,17 @@ local function apply_log_shortcut()
       vim.api.nvim_win_set_cursor(win, { row, col })
     end,
   })
+end
+
+--- Context-dispatched RET handler.
+--- On a `JJ: <Label>: <revset>` shortcut line in the log buffer: apply the
+--- revset. Otherwise: invoke textDocument/definition at point (same as gd).
+local function ret_dispatch()
+  if cursor_on_log_shortcut() then
+    apply_log_shortcut()
+  else
+    vim.lsp.buf.definition()
+  end
 end
 
 --- Show a floating help popup listing active bindings for window_type.
@@ -302,6 +317,9 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'u', function() run_file_scoped('badjuju.unsquash') end,
         'badjuju: unsquash file at cursor from parent into child')
     end
+    nmap(bufnr, 'cw', function() run_at_cursor_split('badjuju.describe') end,
+      'badjuju: commit transient: reword commit at cursor')
+    nmap(bufnr, 'cn', '<Cmd>JJNew<CR>', 'badjuju: commit transient: new child commit')
     nmap(bufnr, '<Tab>', 'za', 'badjuju: toggle fold at cursor')
     nmap(bufnr, 'q', '<Cmd>bdelete<CR>', 'badjuju: close buffer')
     nmap(bufnr, '?', function() show_help('status') end, 'badjuju: show help')
@@ -314,6 +332,7 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'A', vim.lsp.buf.code_action, 'badjuju: code actions menu')
     end
     nmap(bufnr, 'gd', vim.lsp.buf.definition, 'badjuju: go to definition')
+    nmap(bufnr, '<CR>', ret_dispatch, 'badjuju: apply revset shortcut or goto definition')
   elseif name:match('/%.jj/badjuju/log%.jujutsu$') then
     -- Both helpers send cursor-form args; the server returns an LSP error if
     -- the cursor isn't on a commit (surfaced via badjuju.execute's error path).
@@ -374,7 +393,10 @@ function M.setup_for_buffer(bufnr)
         if pending_squash then run_squash_cancel() end
       end, 'badjuju: cancel pending squash')
     end
-    nmap(bufnr, '<CR>', apply_log_shortcut, 'badjuju: apply revset shortcut under cursor')
+    nmap(bufnr, 'cw', function() run_at_cursor_split('badjuju.describe') end,
+      'badjuju: commit transient: reword commit at cursor')
+    nmap(bufnr, 'cn', '<Cmd>JJNew<CR>', 'badjuju: commit transient: new child commit')
+    nmap(bufnr, '<CR>', ret_dispatch, 'badjuju: apply revset shortcut or goto definition')
     nmap(bufnr, '?', function() show_help('log') end, 'badjuju: show help')
     if profile == 'vim' then
       nmap(bufnr, '<leader>a', vim.lsp.buf.code_action, 'badjuju: code actions menu')
@@ -388,6 +410,7 @@ function M.setup_for_buffer(bufnr)
     nmap(bufnr, 'q', '<Cmd>bdelete<CR>', 'badjuju: close buffer')
     nmap(bufnr, '?', function() show_help('diff') end, 'badjuju: show help')
     nmap(bufnr, 'gd', vim.lsp.buf.definition, 'badjuju: go to definition')
+    nmap(bufnr, '<CR>', ret_dispatch, 'badjuju: apply revset shortcut or goto definition')
   elseif name:match('/%.jj/badjuju/squash/[^/]+%.jujutsu$') then
     nmap(bufnr, 's', run_squash_toggle, 'badjuju: toggle hunk or file in squash window')
     nmap(bufnr, 'e', function() run_at_cursor_split('badjuju.squash.edit_hunk') end,

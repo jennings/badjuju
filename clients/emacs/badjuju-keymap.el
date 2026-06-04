@@ -36,6 +36,7 @@
 (require 'badjuju-mode)
 (require 'badjuju-commands)
 (require 'badjuju-prompts)
+(require 'badjuju-transient)
 
 ;;; Module-level squash state
 
@@ -94,6 +95,20 @@
               (local-set-key (kbd "q") #'quit-window)
               (local-set-key (kbd "?") #'quit-window)
               (local-set-key (kbd "<escape>") #'quit-window))))))))
+
+;;; RET dispatch
+
+(defun badjuju--ret-dispatch ()
+  "Context-dispatched RET handler.
+On a `JJ: <Label>: <revset>' shortcut line: apply the revset shortcut.
+Otherwise: invoke `xref-find-definitions' (go-to-definition)."
+  (interactive)
+  (if (string-match-p "^JJ: [^:]+:" (buffer-substring-no-properties
+                                       (line-beginning-position)
+                                       (line-end-position)))
+      (badjuju-commands-run "badjuju.log"
+                            (list (badjuju-commands-cursor-arg)))
+    (call-interactively #'xref-find-definitions)))
 
 ;;; Squash helpers
 
@@ -166,10 +181,15 @@ the user to pick the target parent."
   (define-key map (kbd "P")       (lambda () (interactive) (badjuju-push t)))
   (define-key map (kbd "r")       #'badjuju-rebase)
   (define-key map (kbd "b")       #'badjuju-bookmark)
+  ;; Commit transient
+  (define-key map (kbd "c")       #'badjuju-commit)
   ;; Help / code actions
   (define-key map (kbd "?")       (lambda () (interactive) (badjuju--show-help "status")))
   (define-key map (kbd "A")       #'eglot-code-actions)
-  (define-key map (kbd "M-RET")   #'eglot-code-actions))
+  (define-key map (kbd "M-RET")   #'eglot-code-actions)
+  ;; xref-find-definitions: available via RET (below) and the global M-. binding.
+  ;; `gd' (vim-style) can't coexist with `g' as a non-prefix command.
+  (define-key map (kbd "RET")     #'xref-find-definitions))
 
 (let ((map badjuju-log-mode-map))
   ;; Navigation / refresh
@@ -194,10 +214,15 @@ the user to pick the target parent."
   ;; Remote / bookmark
   (define-key map (kbd "r")       #'badjuju-rebase)
   (define-key map (kbd "b")       #'badjuju-bookmark)
+  ;; Commit transient
+  (define-key map (kbd "c")       #'badjuju-commit)
   ;; Help / code actions
   (define-key map (kbd "?")       (lambda () (interactive) (badjuju--show-help "log")))
   (define-key map (kbd "A")       #'eglot-code-actions)
-  (define-key map (kbd "M-RET")   #'eglot-code-actions))
+  (define-key map (kbd "M-RET")   #'eglot-code-actions)
+  ;; xref-find-definitions: available via the global M-. binding.
+  ;; `gd' (vim-style) can't coexist with `g' as a non-prefix command.
+  (define-key map (kbd "RET")     #'badjuju--ret-dispatch))
 
 (let ((map badjuju-diff-mode-map))
   (define-key map (kbd "g")     #'badjuju-refresh)
@@ -205,7 +230,10 @@ the user to pick the target parent."
   (define-key map (kbd "q")     #'bury-buffer)
   (define-key map (kbd "?")     (lambda () (interactive) (badjuju--show-help "diff")))
   (define-key map (kbd "A")     #'eglot-code-actions)
-  (define-key map (kbd "M-RET") #'eglot-code-actions))
+  (define-key map (kbd "M-RET") #'eglot-code-actions)
+  ;; xref-find-definitions: available via RET (below) and the global M-. binding.
+  ;; `gd' (vim-style) can't coexist with `g' as a non-prefix command.
+  (define-key map (kbd "RET")   #'xref-find-definitions))
 
 ;;; Squash & hunk-edit keymaps (#41)
 
