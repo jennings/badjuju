@@ -14,7 +14,7 @@
 ;; Quick start:
 ;;   M-x badjuju-status    open the status buffer
 ;;   M-x badjuju-log       open the log buffer
-;;   M-x badjuju-diff      open a diff for the current change
+;;   M-x badjuju-diff      open a diff for the change at point
 
 ;;; Code:
 
@@ -25,6 +25,8 @@
 (require 'badjuju-uri)
 (require 'badjuju-transient)
 (require 'badjuju-prompts)
+
+;;; No-argument commands
 
 ;;;###autoload
 (defun badjuju-status ()
@@ -39,58 +41,10 @@
   (badjuju-commands-run "badjuju.log" (when revset (list revset))))
 
 ;;;###autoload
-(defun badjuju-describe (&optional revision)
-  "Open the describe buffer for REVISION (default: current change)."
-  (interactive)
-  (badjuju-commands-run "badjuju.describe" (when revision (list revision))))
-
-;;;###autoload
-(defun badjuju-diff (&optional revision)
-  "Open a diff for REVISION (default: current change)."
-  (interactive)
-  (badjuju-commands-run "badjuju.diff" (when revision (list revision))))
-
-;;;###autoload
-(defun badjuju-diff-commit (&optional revision)
-  "Open a pinned commit-id diff for REVISION (default: current change)."
-  (interactive)
-  (badjuju-commands-run "badjuju.diff.commit" (when revision (list revision))))
-
-;;;###autoload
-(defun badjuju-new ()
-  "Create a new change as a child of the change at point (or @)."
-  (interactive)
-  (badjuju-commands-run "badjuju.new"))
-
-;;;###autoload
-(defun badjuju-squash ()
-  "Squash the current change into its parent."
-  (interactive)
-  (badjuju-commands-run "badjuju.squash"))
-
-;;;###autoload
-(defun badjuju-unsquash ()
-  "Move content from the parent change back into the child."
-  (interactive)
-  (badjuju-commands-run "badjuju.unsquash"))
-
-;;;###autoload
 (defun badjuju-undo ()
   "Undo the last jj operation."
   (interactive)
   (badjuju-commands-run "badjuju.undo"))
-
-;;;###autoload
-(defun badjuju-abandon (&optional revision)
-  "Abandon REVISION (default: @)."
-  (interactive)
-  (badjuju-commands-run "badjuju.abandon" (list (or revision "@"))))
-
-;;;###autoload
-(defun badjuju-edit (&optional revision)
-  "Edit REVISION (default: @)."
-  (interactive)
-  (badjuju-commands-run "badjuju.edit" (list (or revision "@"))))
 
 ;;;###autoload
 (defun badjuju-fetch ()
@@ -102,7 +56,96 @@
 (defun badjuju-push (&optional force)
   "Push bookmarks.  With prefix arg FORCE, push with --force-with-lease."
   (interactive "P")
-  (badjuju-commands-run "badjuju.push" (list (list :forceWithLease (if force t :json-false)))))
+  (badjuju-commands-run "badjuju.push"
+                        (list (list :forceWithLease (if force t :json-false)))))
+
+;;; Cursor-aware commands
+;;
+;; When invoked from a badjuju status/log/diff buffer, these ship the cursor
+;; position so the server can resolve the revision or file under point.
+
+;;;###autoload
+(defun badjuju-new ()
+  "Create a new change as a child of the change at point (or @)."
+  (interactive)
+  (if (derived-mode-p 'badjuju-mode)
+      (badjuju-commands-run "badjuju.new" (list (badjuju-commands-cursor-arg)))
+    (badjuju-commands-run "badjuju.new")))
+
+;;;###autoload
+(defun badjuju-describe ()
+  "Open the describe buffer for the change at point (or @)."
+  (interactive)
+  (badjuju-commands-run "badjuju.describe"
+                        (when (derived-mode-p 'badjuju-mode)
+                          (list (badjuju-commands-cursor-arg)))))
+
+;;;###autoload
+(defun badjuju-diff ()
+  "Open a change-mode diff for the revision at point (or @).
+The diff updates on every subsequent amend."
+  (interactive)
+  (badjuju-commands-run "badjuju.diff"
+                        (when (derived-mode-p 'badjuju-mode)
+                          (list (badjuju-commands-cursor-arg)))))
+
+;;;###autoload
+(defun badjuju-diff-commit ()
+  "Open a commit-mode diff for the revision at point (or @).
+The diff is pinned to the exact commit and never refreshed."
+  (interactive)
+  (badjuju-commands-run "badjuju.diff.commit"
+                        (when (derived-mode-p 'badjuju-mode)
+                          (list (badjuju-commands-cursor-arg)))))
+
+;;;###autoload
+(defun badjuju-edit ()
+  "Move @ to the revision at point."
+  (interactive)
+  (badjuju-commands-run "badjuju.edit"
+                        (when (derived-mode-p 'badjuju-mode)
+                          (list (badjuju-commands-cursor-arg)))))
+
+;;;###autoload
+(defun badjuju-abandon ()
+  "Abandon the revision at point (or @ if not in a badjuju buffer)."
+  (interactive)
+  (badjuju-commands-run "badjuju.abandon"
+                        (if (derived-mode-p 'badjuju-mode)
+                            (list (badjuju-commands-cursor-arg))
+                          (list "@"))))
+
+;;;###autoload
+(defun badjuju-squash ()
+  "Begin or complete a commit-to-commit squash at point."
+  (interactive)
+  (badjuju-commands-run "badjuju.squash.commit"
+                        (when (derived-mode-p 'badjuju-mode)
+                          (list (badjuju-commands-cursor-arg)))))
+
+;;;###autoload
+(defun badjuju-squash-file ()
+  "Squash the file at point from the current change into its parent."
+  (interactive)
+  (badjuju-commands-run "badjuju.squash"
+                        (when (derived-mode-p 'badjuju-mode)
+                          (list (badjuju-commands-cursor-arg)))))
+
+;;;###autoload
+(defun badjuju-unsquash ()
+  "Unsquash the file at point from parent into the child change."
+  (interactive)
+  (badjuju-commands-run "badjuju.unsquash"
+                        (when (derived-mode-p 'badjuju-mode)
+                          (list (badjuju-commands-cursor-arg)))))
+
+;;;###autoload
+(defun badjuju-refresh ()
+  "Refresh the current Bad Juju buffer."
+  (interactive)
+  (let ((uri (when (buffer-file-name)
+               (concat "file://" (buffer-file-name)))))
+    (badjuju-commands-run "badjuju.refresh" (list (or uri "")))))
 
 (provide 'badjuju)
 ;;; badjuju.el ends here
