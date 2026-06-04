@@ -23,7 +23,7 @@ local STATUS_MAPS = {
   { 'L', 'JJLog',        'badjuju: open log' },
   { 'f', 'JJFetch',      'badjuju: git fetch' },
   { 'p', 'JJPush',       'badjuju: git push' },
-  { 'u', 'JJUndo',    'badjuju: undo' },
+  { 'U', 'JJUndo',    'badjuju: undo' },
   { 'a', 'JJAbandon', 'badjuju: abandon revision' },
 }
 
@@ -259,12 +259,12 @@ function M.setup_for_buffer(bufnr)
           run_squash()
         end
       end, 'badjuju: cancel pending squash / squash file at cursor')
-      nmap(bufnr, 'UU', function() run_file_scoped('badjuju.unsquash') end,
+      nmap(bufnr, 'uu', function() run_file_scoped('badjuju.unsquash') end,
         'badjuju: unsquash file at cursor from parent into child')
       nmap(bufnr, 'ff', '<Cmd>JJFetch<CR>', 'badjuju: git fetch')
       nmap(bufnr, 'pp', '<Cmd>JJPush<CR>', 'badjuju: git push')
       nmap(bufnr, 'PP', '<Cmd>JJPush!<CR>', 'badjuju: git push --force-with-lease')
-      nmap(bufnr, 'uu', '<Cmd>JJUndo<CR>', 'badjuju: undo')
+      nmap(bufnr, 'UU', '<Cmd>JJUndo<CR>', 'badjuju: undo')
       nmap(bufnr, 'bb', status_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
       nmap(bufnr, 'rr', status_rebase, 'badjuju: rebase commit at cursor to destination')
       nmap(bufnr, 'ee', function() run_at_cursor_split('badjuju.edit') end,
@@ -299,7 +299,7 @@ function M.setup_for_buffer(bufnr)
           run_squash()
         end
       end, 'badjuju: cancel pending squash / squash file at cursor')
-      nmap(bufnr, 'U', function() run_file_scoped('badjuju.unsquash') end,
+      nmap(bufnr, 'u', function() run_file_scoped('badjuju.unsquash') end,
         'badjuju: unsquash file at cursor from parent into child')
     end
     nmap(bufnr, '<Tab>', 'za', 'badjuju: toggle fold at cursor')

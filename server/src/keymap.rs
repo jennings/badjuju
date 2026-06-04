@@ -76,7 +76,7 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         windows: &["log"],
     },
     KeymapEntry {
-        key: "U",
+        key: "u",
         action: "badjuju.unsquash",
         description: "unsquash file at cursor from parent into child",
         windows: &["status"],
@@ -100,7 +100,7 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         windows: &["status"],
     },
     KeymapEntry {
-        key: "u",
+        key: "U",
         action: "badjuju.undo",
         description: "jj undo",
         windows: &["status"],
@@ -269,7 +269,7 @@ static VIM_ENTRIES: &[KeymapEntry] = &[
         windows: &["log"],
     },
     KeymapEntry {
-        key: "UU",
+        key: "uu",
         action: "badjuju.unsquash",
         description: "unsquash file at cursor from parent into child",
         windows: &["status"],
@@ -293,7 +293,7 @@ static VIM_ENTRIES: &[KeymapEntry] = &[
         windows: &["status"],
     },
     KeymapEntry {
-        key: "uu",
+        key: "UU",
         action: "badjuju.undo",
         description: "jj undo",
         windows: &["status"],

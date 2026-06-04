@@ -341,12 +341,12 @@
       },
       {
         "command": "badjuju.undo.open",
-        "key": "u",
+        "key": "shift+u",
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.unsquash.file",
-        "key": "shift+u",
+        "key": "u",
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus && !vim.active"
       },
       {
