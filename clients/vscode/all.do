@@ -1,22 +1,23 @@
 #!/bin/sh
 set -e
 exec >&2
-redo-ifchange ../../configuration ../../server/all ../../version
 
+redo-ifchange ../../configuration ../../version
 config=$(cat ../../configuration)
-mkdir -p out/bin
 
-case "$TARGET" in
-  *windows*) binary_name="badjuju.exe" ;;
-  *)         binary_name="badjuju" ;;
+# Dev builds use the host triple by default; override with TARGET to
+# package the dev extension against a cross-built binary.
+triple=${TARGET:-$(rustc -vV | awk '/^host:/{print $2}')}
+
+case "$triple" in
+  *-pc-windows-*) binary_name="badjuju.exe" ;;
+  *)              binary_name="badjuju" ;;
 esac
 
-if [ -n "$TARGET" ]; then
-  src="../../server/target/$TARGET/$config/$binary_name"
-else
-  src="../../server/target/$config/$binary_name"
-fi
+src="../../server/target/$config/$triple/$binary_name"
+redo-ifchange "$src"
 
+mkdir -p out/bin
 cp "$src" "out/bin/$binary_name"
 chmod +x "out/bin/$binary_name"
 

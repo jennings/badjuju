@@ -20,7 +20,6 @@ case "$os" in
     case "$arch" in
       x86_64)        platform=linux-x64 ;;
       aarch64|arm64) platform=linux-arm64 ;;
-      armv7l|armhf)  platform=linux-armhf ;;
       *) echo "ERROR: unsupported Linux arch: $arch" >&2; exit 1 ;;
     esac ;;
   MINGW*|MSYS*|CYGWIN*)
