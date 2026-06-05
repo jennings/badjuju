@@ -112,7 +112,7 @@ impl tower_lsp::lsp_types::notification::Notification for WorkspaceTextDocumentC
 use crate::commands::{self, CommandReference, DiffTarget};
 use crate::cursor::{self, BufferKind};
 use crate::highlighting;
-use crate::jj::Jj;
+use crate::jj::{Jj, RebaseInsert, RebaseMode};
 use crate::keymap::{self, KeymapProfile};
 use crate::workspace::find_workspace_root;
 
@@ -130,7 +130,6 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.squash",
     "badjuju.squash.into",
     "badjuju.squash.commit",
-    "badjuju.squash.cancel",
     "badjuju.squash.toggle",
     "badjuju.squash.edit_hunk",
     "badjuju.squash.select_all",
@@ -144,9 +143,17 @@ pub const COMMANDS: &[&str] = &[
     "badjuju.edit",
     "badjuju.fetch",
     "badjuju.push",
-    "badjuju.rebase",
+    "badjuju.rebase.source",
+    "badjuju.rebase.commit",
+    "badjuju.cancel",
     "badjuju.bookmark",
 ];
+
+#[derive(Debug, Clone)]
+struct PendingRebase {
+    source: String,
+    mode: RebaseMode,
+}
 
 #[derive(Debug)]
 struct State {
@@ -176,8 +183,11 @@ struct State {
     virtual_diffs_enabled: bool,
     /// Full change-id of a pending commit-to-commit squash source, or `None` when
     /// no squash is in progress. Set by `badjuju.squash.commit` and cleared by
-    /// `badjuju.squash.cancel`.
+    /// `badjuju.cancel`.
     pending_squash_source: Option<String>,
+    /// Pending rebase source + mode, set by `badjuju.rebase.source` and cleared
+    /// by `badjuju.rebase.commit` or `badjuju.cancel`.
+    pending_rebase: Option<PendingRebase>,
     /// State of the currently open squash window, if any.
     open_squash_window: Option<commands::SquashWindow>,
     /// State of the currently open hunk-edit buffer, if any. Cleared by
@@ -208,6 +218,7 @@ impl Default for State {
             open_file_logs: HashMap::new(),
             virtual_diffs_enabled: false,
             pending_squash_source: None,
+            pending_rebase: None,
             open_squash_window: None,
             open_hunk_edit: None,
             self_caused_ops: HashMap::new(),
@@ -552,6 +563,60 @@ async fn publish_pending_squash_diagnostics(client: &Client, state: &Arc<RwLock<
     }
 }
 
+/// Publish (or clear) the persistent "pending rebase source" diagnostic on the
+/// status and log buffers. Mirrors [`publish_pending_squash_diagnostics`].
+async fn publish_pending_rebase_diagnostics(client: &Client, state: &Arc<RwLock<State>>) {
+    let (pending, open_status_uri, open_log_uri) = {
+        let s = state.read().await;
+        (
+            s.pending_rebase.clone(),
+            s.open_status_uri.clone(),
+            s.open_log_uri.clone(),
+        )
+    };
+    for uri_opt in [open_status_uri, open_log_uri].into_iter().flatten() {
+        let Ok(uri_url) = Url::parse(&uri_opt) else {
+            continue;
+        };
+        let diags = if let Some(pr) = pending.as_ref() {
+            let content = {
+                let s = state.read().await;
+                s.documents.get(&uri_opt).cloned()
+            }
+            .or_else(|| read_uri_from_disk(&uri_opt));
+            let mode_str = match pr.mode {
+                RebaseMode::Source => "--source",
+                RebaseMode::Revisions => "--revisions",
+                RebaseMode::Branch => "--branch",
+            };
+            content
+                .as_deref()
+                .and_then(|c| commands::find_change_id_line(c, &pr.source))
+                .map(|line| {
+                    vec![Diagnostic {
+                        range: Range {
+                            start: Position { line, character: 0 },
+                            end: Position {
+                                line,
+                                character: u32::MAX,
+                            },
+                        },
+                        severity: Some(DiagnosticSeverity::HINT),
+                        source: Some("badjuju".into()),
+                        message: format!(
+                            "Pending rebase source ({mode_str}). Press r{{o,A,B}} on destination, x to cancel."
+                        ),
+                        ..Default::default()
+                    }]
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        client.publish_diagnostics(uri_url, diags, None).await;
+    }
+}
+
 /// Spawns a debounced watcher on `.jj/repo/op_heads/heads/`. On each external
 /// op-head change (i.e. not caused by bad-juju itself), refreshes all open
 /// status, log, and change-diff buffers.
@@ -719,6 +784,7 @@ fn spawn_op_head_watcher(
                         }
                     }
                     publish_pending_squash_diagnostics(&client, &state).await;
+                    publish_pending_rebase_diagnostics(&client, &state).await;
                 }
                 _ = shutdown.notified() => {
                     let _ = stop_tx.send(());
@@ -786,10 +852,6 @@ fn commit_actions(revision: &str) -> Vec<CodeActionOrCommand> {
         make(format!("Describe commit {revision}"), "badjuju.describe"),
         make(format!("Show diff for {revision}"), "badjuju.diff"),
         make(format!("New child of {revision}"), "badjuju.new"),
-        make(
-            format!("Rebase commit {revision}…"),
-            "badjuju.client.rebasePrompt",
-        ),
         make(
             format!("Bookmark {revision}…"),
             "badjuju.client.bookmarkPrompt",
@@ -911,15 +973,17 @@ fn squash_window_actions(uri: &str, line: usize, content: &str) -> Vec<CodeActio
     actions
 }
 
-/// Build the squash-flow code actions offered for a commit-header row in status
-/// and log buffers. When no squash is pending, offers "Squash from this
-/// revision"; when a squash is pending, offers "Squash into this revision"
-/// and "Cancel pending squash". Both use cursor-form args for stability
-/// across buffer regenerations.
-fn squash_commit_actions(
+/// Build the pending-op code actions for a commit-header row in status and log
+/// buffers. The action set depends on which (if any) operation is pending:
+///
+/// - **Rebase pending**: three destination actions + universal cancel.
+/// - **Squash pending**: squash-into-this + universal cancel.
+/// - **Nothing pending**: squash-from + three rebase-source actions.
+fn pending_op_commit_actions(
     uri: &str,
     line: usize,
-    pending_source: Option<&str>,
+    pending_squash: Option<&str>,
+    pending_rebase: Option<&PendingRebase>,
 ) -> Vec<CodeActionOrCommand> {
     let cursor_arg = serde_json::json!({ "cursor": { "uri": uri, "line": line } });
     let make =
@@ -935,25 +999,76 @@ fn squash_commit_actions(
                 ..Default::default()
             })
         };
-    if pending_source.is_some() {
+
+    let cancel_action = make(
+        "Cancel pending operation".to_string(),
+        "badjuju.cancel",
+        vec![cursor_arg.clone()],
+    );
+
+    if pending_rebase.is_some() {
+        vec![
+            make(
+                "Rebase onto this revision".to_string(),
+                "badjuju.rebase.commit",
+                vec![
+                    serde_json::Value::String("onto".to_string()),
+                    cursor_arg.clone(),
+                ],
+            ),
+            make(
+                "Insert after this revision".to_string(),
+                "badjuju.rebase.commit",
+                vec![
+                    serde_json::Value::String("after".to_string()),
+                    cursor_arg.clone(),
+                ],
+            ),
+            make(
+                "Insert before this revision".to_string(),
+                "badjuju.rebase.commit",
+                vec![serde_json::Value::String("before".to_string()), cursor_arg],
+            ),
+            cancel_action,
+        ]
+    } else if pending_squash.is_some() {
         vec![
             make(
                 "Squash into this revision".to_string(),
                 "badjuju.squash.commit",
                 vec![cursor_arg],
             ),
-            make(
-                "Cancel pending squash".to_string(),
-                "badjuju.squash.cancel",
-                vec![],
-            ),
+            cancel_action,
         ]
     } else {
-        vec![make(
-            "Squash from this revision".to_string(),
-            "badjuju.squash.commit",
-            vec![cursor_arg],
-        )]
+        vec![
+            make(
+                "Squash from this revision".to_string(),
+                "badjuju.squash.commit",
+                vec![cursor_arg.clone()],
+            ),
+            make(
+                "Rebase --source from this revision".to_string(),
+                "badjuju.rebase.source",
+                vec![
+                    serde_json::Value::String("source".to_string()),
+                    cursor_arg.clone(),
+                ],
+            ),
+            make(
+                "Rebase --revisions from this revision".to_string(),
+                "badjuju.rebase.source",
+                vec![
+                    serde_json::Value::String("revisions".to_string()),
+                    cursor_arg.clone(),
+                ],
+            ),
+            make(
+                "Rebase --branch from this revision".to_string(),
+                "badjuju.rebase.source",
+                vec![serde_json::Value::String("branch".to_string()), cursor_arg],
+            ),
+        ]
     }
 }
 
@@ -1172,15 +1287,16 @@ impl LanguageServer for Backend {
             return Ok(Some(vec![]));
         };
 
-        let (content, pending_squash) = {
+        let (content, pending_squash, pending_rebase) = {
             let state = self.state.read().await;
             let content = state
                 .documents
                 .get(&uri)
                 .cloned()
                 .or_else(|| read_uri_from_disk(&uri));
-            let pending = state.pending_squash_source.clone();
-            (content, pending)
+            let ps = state.pending_squash_source.clone();
+            let pr = state.pending_rebase.clone();
+            (content, ps, pr)
         };
         let Some(content) = content else {
             return Ok(Some(vec![]));
@@ -1197,12 +1313,13 @@ impl LanguageServer for Backend {
                     actions.push(log_shortcut_action(&uri, line, &shortcut.label));
                 } else if let Some(revision) = cursor::revision_at_line(&content, line, kind) {
                     actions.extend(commit_actions(&revision));
-                    // Add squash actions when cursor is on a commit header row.
+                    // Add pending-op actions when cursor is on a commit header row.
                     if cursor::commit_id_at_line(&content, line).is_some() {
-                        actions.extend(squash_commit_actions(
+                        actions.extend(pending_op_commit_actions(
                             &uri,
                             line,
                             pending_squash.as_deref(),
+                            pending_rebase.as_ref(),
                         ));
                     }
                 }
@@ -1216,7 +1333,12 @@ impl LanguageServer for Backend {
                     actions.extend(file_actions(&uri, line, &file));
                 } else if let Some(revision) = cursor::commit_id_at_line(&content, line) {
                     actions.extend(commit_actions(&revision));
-                    actions.extend(squash_commit_actions(&uri, line, pending_squash.as_deref()));
+                    actions.extend(pending_op_commit_actions(
+                        &uri,
+                        line,
+                        pending_squash.as_deref(),
+                        pending_rebase.as_ref(),
+                    ));
                 } else if let Some(revset) = content
                     .lines()
                     .nth(line)
@@ -1224,9 +1346,14 @@ impl LanguageServer for Backend {
                 {
                     // Top-section `@  : …` / `@- : …` summary rows have no
                     // embedded change_id but represent real revisions; show
-                    // commit + squash-flow actions targeting them by revset.
+                    // commit + pending-op actions targeting them by revset.
                     actions.extend(commit_actions(&revset));
-                    actions.extend(squash_commit_actions(&uri, line, pending_squash.as_deref()));
+                    actions.extend(pending_op_commit_actions(
+                        &uri,
+                        line,
+                        pending_squash.as_deref(),
+                        pending_rebase.as_ref(),
+                    ));
                 }
             }
             BufferKind::Squash => {
@@ -1938,9 +2065,17 @@ impl LanguageServer for Backend {
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.squash.commit" => {
-                let already_pending = self.state.read().await.pending_squash_source.clone();
+                let (squash_pending, rebase_pending) = {
+                    let s = self.state.read().await;
+                    (s.pending_squash_source.clone(), s.pending_rebase.is_some())
+                };
+                if rebase_pending {
+                    return Err(lsp_err(
+                        "a rebase is already pending — press x to cancel before starting a squash",
+                    ));
+                }
 
-                if let Some(from) = already_pending {
+                if let Some(from) = squash_pending {
                     // Destination selection: resolve the cursor to a destination change-id.
                     let revision =
                         commands::resolve_revision_arg(params.arguments.first(), |uri| {
@@ -2002,14 +2137,19 @@ impl LanguageServer for Backend {
                     Ok(Some(serde_json::Value::String(result_uri)))
                 }
             }
-            "badjuju.squash.cancel" => {
+            "badjuju.cancel" => {
                 let cursor_uri = commands::parse_cursor_arg(params.arguments.first())
                     .map_err(lsp_err)?
                     .map(|cp| cp.uri.clone());
-                self.state.write().await.pending_squash_source = None;
+                {
+                    let mut state = self.state.write().await;
+                    state.pending_squash_source = None;
+                    state.pending_rebase = None;
+                }
                 publish_pending_squash_diagnostics(&self.client, &self.state).await;
+                publish_pending_rebase_diagnostics(&self.client, &self.state).await;
                 self.client
-                    .show_message(MessageType::INFO, "Squash cancelled.")
+                    .show_message(MessageType::INFO, "Operation cancelled.")
                     .await;
                 let result_uri = cursor_uri.unwrap_or_default();
                 Ok(Some(serde_json::Value::String(result_uri)))
@@ -2252,20 +2392,99 @@ impl LanguageServer for Backend {
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
             }
-            "badjuju.rebase" => {
-                let source = commands::resolve_revision_arg(params.arguments.first(), |uri| {
+            "badjuju.rebase.source" => {
+                if self.state.read().await.pending_squash_source.is_some() {
+                    return Err(lsp_err(
+                        "a squash is already pending — press x to cancel before starting a rebase",
+                    ));
+                }
+                let mode_str = params
+                    .arguments
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("source");
+                let mode = match mode_str {
+                    "revisions" => RebaseMode::Revisions,
+                    "branch" => RebaseMode::Branch,
+                    _ => RebaseMode::Source,
+                };
+                let cursor_uri = commands::parse_cursor_arg(params.arguments.get(1))
+                    .map_err(lsp_err)?
+                    .map(|cp| cp.uri.clone());
+                let revision = commands::resolve_revision_arg(params.arguments.get(1), |uri| {
                     documents
                         .get(uri)
                         .cloned()
                         .or_else(|| read_uri_from_disk(uri))
                 })
                 .map_err(lsp_err)?;
-                let dest = params
+                let rev = if revision.is_empty() { "@" } else { &revision };
+                let change_id = jj.change_id_of(rev).map_err(lsp_err)?;
+                {
+                    let mut state = self.state.write().await;
+                    state.pending_rebase = Some(PendingRebase {
+                        source: change_id.clone(),
+                        mode,
+                    });
+                }
+                publish_pending_rebase_diagnostics(&self.client, &self.state).await;
+                let mode_flag = match mode {
+                    RebaseMode::Source => "--source",
+                    RebaseMode::Revisions => "--revisions",
+                    RebaseMode::Branch => "--branch",
+                };
+                let short = &change_id[..change_id.len().min(8)];
+                self.client
+                    .show_message(
+                        MessageType::INFO,
+                        format!(
+                            "Pending rebase source ({mode_flag} {short}). Press r{{o,A,B}} on destination, x to cancel."
+                        ),
+                    )
+                    .await;
+                let result_uri = cursor_uri.unwrap_or_default();
+                Ok(Some(serde_json::Value::String(result_uri)))
+            }
+            "badjuju.rebase.commit" => {
+                let pending = self
+                    .state
+                    .read()
+                    .await
+                    .pending_rebase
+                    .clone()
+                    .ok_or_else(|| {
+                        lsp_err("no pending rebase — press r{s,r,b} to select source first")
+                    })?;
+                let insert_str = params
                     .arguments
-                    .get(1)
+                    .first()
                     .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let uri = commands::run_rebase(&jj, &workspace, &source, dest).map_err(lsp_err)?;
+                    .unwrap_or("onto");
+                let insert = match insert_str {
+                    "after" => RebaseInsert::After,
+                    "before" => RebaseInsert::Before,
+                    _ => RebaseInsert::Onto,
+                };
+                let revision = commands::resolve_revision_arg(params.arguments.get(1), |uri| {
+                    documents
+                        .get(uri)
+                        .cloned()
+                        .or_else(|| read_uri_from_disk(uri))
+                })
+                .map_err(lsp_err)?;
+                let rev = if revision.is_empty() { "@" } else { &revision };
+                let dest_id = jj.change_id_of(rev).map_err(lsp_err)?;
+                let uri = commands::run_rebase_commit(
+                    &jj,
+                    &workspace,
+                    pending.mode,
+                    &pending.source,
+                    insert,
+                    &dest_id,
+                )
+                .map_err(lsp_err)?;
+                self.state.write().await.pending_rebase = None;
+                publish_pending_rebase_diagnostics(&self.client, &self.state).await;
                 self.record_self_caused_op(&jj).await;
                 self.refresh_open_diffs(&jj, &workspace).await;
                 Ok(Some(serde_json::Value::String(uri)))
@@ -2504,8 +2723,103 @@ mod tests {
         assert!(COMMANDS.contains(&"badjuju.edit"));
         assert!(COMMANDS.contains(&"badjuju.fetch"));
         assert!(COMMANDS.contains(&"badjuju.push"));
-        assert!(COMMANDS.contains(&"badjuju.rebase"));
+        assert!(COMMANDS.contains(&"badjuju.rebase.source"));
+        assert!(COMMANDS.contains(&"badjuju.rebase.commit"));
+        assert!(COMMANDS.contains(&"badjuju.cancel"));
         assert!(COMMANDS.contains(&"badjuju.squash.edit_hunk"));
+    }
+
+    #[test]
+    fn commands_exclude_removed() {
+        assert!(!COMMANDS.contains(&"badjuju.rebase"));
+        assert!(!COMMANDS.contains(&"badjuju.squash.cancel"));
+    }
+
+    #[test]
+    fn pending_op_actions_no_pending_includes_squash_and_rebase_sources() {
+        let actions =
+            pending_op_commit_actions("file:///x/.jj/badjuju/status.jujutsu", 2, None, None);
+        let commands: Vec<String> = actions
+            .into_iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(act) => act.command.map(|c| c.command),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            commands.iter().any(|c| c == "badjuju.squash.commit"),
+            "expected squash.commit; got: {commands:?}"
+        );
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|c| *c == "badjuju.rebase.source")
+                .count(),
+            3,
+            "expected three rebase.source actions; got: {commands:?}"
+        );
+    }
+
+    #[test]
+    fn pending_op_actions_rebase_pending_shows_dest_and_cancel() {
+        let pr = PendingRebase {
+            source: "abc123".to_string(),
+            mode: RebaseMode::Source,
+        };
+        let actions =
+            pending_op_commit_actions("file:///x/.jj/badjuju/status.jujutsu", 2, None, Some(&pr));
+        let commands: Vec<String> = actions
+            .into_iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(act) => act.command.map(|c| c.command),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|c| *c == "badjuju.rebase.commit")
+                .count(),
+            3,
+            "expected three rebase.commit actions; got: {commands:?}"
+        );
+        assert!(
+            commands.iter().any(|c| c == "badjuju.cancel"),
+            "expected cancel; got: {commands:?}"
+        );
+        assert!(
+            !commands.iter().any(|c| c == "badjuju.squash.commit"),
+            "should not see squash.commit while rebase pending; got: {commands:?}"
+        );
+    }
+
+    #[test]
+    fn pending_op_actions_squash_pending_shows_into_and_cancel() {
+        let actions = pending_op_commit_actions(
+            "file:///x/.jj/badjuju/status.jujutsu",
+            2,
+            Some("abc123"),
+            None,
+        );
+        let commands: Vec<String> = actions
+            .into_iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(act) => act.command.map(|c| c.command),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            commands.iter().any(|c| c == "badjuju.squash.commit"),
+            "expected squash.commit; got: {commands:?}"
+        );
+        assert!(
+            commands.iter().any(|c| c == "badjuju.cancel"),
+            "expected cancel; got: {commands:?}"
+        );
+        assert!(
+            !commands.iter().any(|c| c == "badjuju.rebase.source"),
+            "should not see rebase.source while squash pending; got: {commands:?}"
+        );
     }
 
     #[test]

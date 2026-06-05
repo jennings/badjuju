@@ -12,6 +12,22 @@ pub enum JjError {
     Io(#[from] std::io::Error),
 }
 
+/// Source-selection mode flag for `jj rebase`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebaseMode {
+    Source,
+    Revisions,
+    Branch,
+}
+
+/// Destination insertion mode flag for `jj rebase`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebaseInsert {
+    Onto,
+    After,
+    Before,
+}
+
 pub struct Jj {
     binary: PathBuf,
     workdir: PathBuf,
@@ -346,11 +362,26 @@ impl Jj {
         self.run(&["git", "fetch"])
     }
 
-    /// Rebase `source` onto `dest` (`jj rebase -s <source> -d <dest>`).
-    /// When `source` is empty, defaults to `@`.
-    pub fn rebase(&self, source: &str, dest: &str) -> Result<(), JjError> {
+    /// Rebase `source` onto `dest` using the given mode and insert position.
+    pub fn rebase(
+        &self,
+        mode: RebaseMode,
+        source: &str,
+        insert: RebaseInsert,
+        dest: &str,
+    ) -> Result<(), JjError> {
         let source = if source.is_empty() { "@" } else { source };
-        self.run(&["rebase", "-s", source, "-d", dest])?;
+        let mode_flag = match mode {
+            RebaseMode::Source => "-s",
+            RebaseMode::Revisions => "-r",
+            RebaseMode::Branch => "-b",
+        };
+        let insert_flag = match insert {
+            RebaseInsert::Onto => "-d",
+            RebaseInsert::After => "--insert-after",
+            RebaseInsert::Before => "--insert-before",
+        };
+        self.run(&["rebase", mode_flag, source, insert_flag, dest])?;
         Ok(())
     }
 
@@ -839,7 +870,8 @@ mod tests {
             .cloned()
             .expect("root commit");
         // Rebase B directly onto root (detach from A).
-        jj.rebase("@", &root_id).expect("rebase failed");
+        jj.rebase(RebaseMode::Source, "@", RebaseInsert::Onto, &root_id)
+            .expect("rebase failed");
         // After rebase, @ parent should be root, not A.
         let parents = jj.change_ids("@-").unwrap();
         assert!(
@@ -852,8 +884,61 @@ mod tests {
     fn rebase_invalid_dest_returns_error() {
         let dir = tempfile::tempdir().unwrap();
         let jj = init_jj_repo(dir.path());
-        let result = jj.rebase("@", "not-a-real-rev");
+        let result = jj.rebase(
+            RebaseMode::Source,
+            "@",
+            RebaseInsert::Onto,
+            "not-a-real-rev",
+        );
         assert!(matches!(result, Err(JjError::JjFailed { .. })));
+    }
+
+    fn setup_rebase_chain(dir: &std::path::Path) -> (Jj, String, String) {
+        let jj = init_jj_repo(dir);
+        jj.describe_set("@", "commit A").unwrap();
+        jj.new_change("").unwrap();
+        jj.describe_set("@", "commit B").unwrap();
+        let b_id = jj.change_ids("@").unwrap().first().cloned().unwrap();
+        let root_id = jj.change_ids("root()").unwrap().first().cloned().unwrap();
+        (jj, b_id, root_id)
+    }
+
+    #[test]
+    fn rebase_revisions_onto_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let (jj, b_id, root_id) = setup_rebase_chain(dir.path());
+        jj.rebase(RebaseMode::Revisions, &b_id, RebaseInsert::Onto, &root_id)
+            .expect("rebase --revisions failed");
+    }
+
+    #[test]
+    fn rebase_branch_onto_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let (jj, b_id, root_id) = setup_rebase_chain(dir.path());
+        jj.rebase(RebaseMode::Branch, &b_id, RebaseInsert::Onto, &root_id)
+            .expect("rebase --branch failed");
+    }
+
+    #[test]
+    fn rebase_source_insert_after_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let (jj, b_id, root_id) = setup_rebase_chain(dir.path());
+        jj.rebase(RebaseMode::Source, &b_id, RebaseInsert::After, &root_id)
+            .expect("rebase --insert-after failed");
+    }
+
+    #[test]
+    fn rebase_source_insert_before_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        // root → A → B (@); insert B before A (B slides between root and A).
+        let jj = init_jj_repo(dir.path());
+        jj.describe_set("@", "commit A").unwrap();
+        let a_id = jj.change_ids("@").unwrap().first().cloned().unwrap();
+        jj.new_change("").unwrap();
+        jj.describe_set("@", "commit B").unwrap();
+        let b_id = jj.change_ids("@").unwrap().first().cloned().unwrap();
+        jj.rebase(RebaseMode::Source, &b_id, RebaseInsert::Before, &a_id)
+            .expect("rebase --insert-before failed");
     }
 
     #[test]

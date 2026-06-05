@@ -55,13 +55,25 @@ actions. With the cursor on a commit row you'll get:
 | Describe commit `<rev>` | Edit commit message |
 | Show diff for `<rev>` | Open the change diff |
 | New child of `<rev>` | `jj new <rev>` |
-| Rebase commit `<rev>`… | Prompts for destination |
 | Bookmark `<rev>`… | Bookmark management menu |
 | Squash from this revision | Mark this commit as squash source |
+| Rebase --source from this revision | Mark source for `jj rebase -s` |
+| Rebase --revisions from this revision | Mark source for `jj rebase -r` |
+| Rebase --branch from this revision | Mark source for `jj rebase -b` |
 
-After marking a source, the **Squash into this revision** and
-**Cancel pending squash** actions appear on every commit row. See
-[Manipulating Commits](../usage/manipulating-commits.md#squashing-changes-between-revisions)
+After marking a squash source, **Squash into this revision** and
+**Cancel pending operation** appear on every commit row.
+
+After marking a rebase source, three destination actions appear:
+
+| Action | Description |
+| ------ | ----------- |
+| Rebase onto this revision | `jj rebase … -d <dest>` |
+| Insert after this revision | `jj rebase … --insert-after <dest>` |
+| Insert before this revision | `jj rebase … --insert-before <dest>` |
+| Cancel pending operation | Clear the pending rebase source |
+
+See [Manipulating Commits](../usage/manipulating-commits.md#squashing-changes-between-revisions)
 for the full walkthrough.
 
 For file rows in the status buffer:

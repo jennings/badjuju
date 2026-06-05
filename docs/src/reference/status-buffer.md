@@ -62,11 +62,12 @@ menu entries:
 | `badjuju.squash` | Squash file at cursor into parent |
 | `badjuju.unsquash` | Unsquash file at cursor from parent |
 | `badjuju.squash.commit` | Mark source / open squash window |
-| `badjuju.squash.cancel` | Clear pending squash source |
+| `badjuju.rebase.source` | Mark rebase source (`--source`, `--revisions`, or `--branch`) |
+| `badjuju.rebase.commit` | Execute pending rebase (`--destination`, `--insert-after`, or `--insert-before`) |
+| `badjuju.cancel` | Clear any pending operation (squash or rebase) |
 | `badjuju.undo` | `jj undo` |
 | `badjuju.fetch` | `jj git fetch` |
 | `badjuju.push` | `jj git push` (with optional `forceWithLease`) |
-| `badjuju.rebase` | Rebase commit at cursor to a destination |
 | `badjuju.bookmark` | Interactive bookmark manager |
 | `badjuju.keymap` / `badjuju.help` | Show the active key map |
 | `badjuju.version` | Display `badjuju` and `jj` versions |
@@ -77,8 +78,8 @@ that invoke these commands.
 ## Cursor targeting
 
 Cursor-driven actions (`edit`, `abandon`, `describe`, `diff`,
-`squash`, `unsquash`, `rebase`, `bookmark`) read the cursor line and
-identify a commit or file:
+`squash`, `unsquash`, `rebase.source`, `rebase.commit`, `bookmark`)
+read the cursor line and identify a commit or file:
 
 - On a commit-header row (e.g. the line with `@  kpkzwvqm 909679d0
   …`), the target is that commit's change ID.

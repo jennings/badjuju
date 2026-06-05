@@ -56,9 +56,9 @@ summary.
 
 Most of the same actions as the [status
 buffer](./status-buffer.md#generated-commands) work in the log:
-`edit`, `abandon`, `describe`, `diff`, `rebase`, `bookmark`,
-`squash.commit`. The cursor must be on a commit row (one of the lines
-emitted by `jj log`).
+`edit`, `abandon`, `describe`, `diff`, `rebase.source`,
+`rebase.commit`, `cancel`, `bookmark`, `squash.commit`. The cursor
+must be on a commit row (one of the lines emitted by `jj log`).
 
 `Enter` on a `JJ:` line is special-cased to apply the shortcut. Some
 clients (Neovim/VS Code with the `magit` profile, Emacs) also

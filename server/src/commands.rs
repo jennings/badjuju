@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use tower_lsp::lsp_types::{FoldingRange, Url};
 
 use crate::cursor::{self, BufferKind};
-use crate::jj::{Jj, JjError};
+use crate::jj::{Jj, JjError, RebaseInsert, RebaseMode};
 use crate::keymap::{self, KeymapProfile};
 
 const STATUS_REVSET: &str = "ancestors(reachable(@, mutable()), 2)";
@@ -1949,20 +1949,19 @@ pub fn run_undo(jj: &Jj, workspace: &Path) -> Result<String, CommandError> {
     }
 }
 
-/// Run `badjuju.rebase`: rebase `source` onto `dest` (`jj rebase -s SRC -d DEST`),
-/// then refresh status and log. Surfaces failures as a MESSAGE prelude.
-/// `source` defaults to `@` when empty; `dest` must be non-empty.
-pub fn run_rebase(
+/// Run `badjuju.rebase.commit`: execute the pending two-step rebase, refresh
+/// status, and return the status URI. `source` and `dest` must both be
+/// non-empty resolved change-ids; `mode` and `insert` come from pending state.
+pub fn run_rebase_commit(
     jj: &Jj,
     workspace: &Path,
+    mode: RebaseMode,
     source: &str,
+    insert: RebaseInsert,
     dest: &str,
 ) -> Result<String, CommandError> {
-    if dest.is_empty() {
-        return write_status(jj, workspace, Some("rebase: destination revision required"));
-    }
     let src = revision_or_at(source);
-    match jj.rebase(src, dest) {
+    match jj.rebase(mode, src, insert, dest) {
         Ok(()) => {
             regenerate_log_if_present(jj, workspace)?;
             run_status(jj, workspace)
@@ -3753,17 +3752,30 @@ mod tests {
         assert!(new_content.starts_with("REVSET: @"));
     }
 
-    #[test]
-    fn run_rebase_moves_commit_and_refreshes_status() {
-        let dir = tempdir().unwrap();
-        let jj = init_repo(dir.path());
-        // root → A (@) → B. We rebase B onto root.
+    fn setup_rebase_chain(dir: &std::path::Path) -> (crate::jj::Jj, String, String) {
+        let jj = init_repo(dir);
         jj.describe_set("@", "commit A").unwrap();
         jj.new_change("").unwrap();
         jj.describe_set("@", "commit B").unwrap();
         let b_id = jj.change_ids("@").unwrap().first().cloned().unwrap();
         let root_id = jj.change_ids("root()").unwrap().first().cloned().unwrap();
-        let uri = run_rebase(&jj, dir.path(), &b_id, &root_id).expect("run_rebase failed");
+        (jj, b_id, root_id)
+    }
+
+    #[test]
+    fn run_rebase_commit_source_onto_refreshes_status() {
+        let dir = tempdir().unwrap();
+        let (jj, b_id, root_id) = setup_rebase_chain(dir.path());
+        let uri = run_rebase_commit(
+            &jj,
+            dir.path(),
+            RebaseMode::Source,
+            &b_id,
+            RebaseInsert::Onto,
+            &root_id,
+        )
+        .expect("run_rebase_commit failed");
+        assert!(uri.starts_with("file://"), "uri should be file://");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
             content.starts_with("@  :"),
@@ -3772,24 +3784,56 @@ mod tests {
     }
 
     #[test]
-    fn run_rebase_with_empty_dest_reports_error() {
+    fn run_rebase_commit_revisions_insert_after() {
         let dir = tempdir().unwrap();
-        let jj = init_repo(dir.path());
-        let uri = run_rebase(&jj, dir.path(), "@", "")
-            .expect("run_rebase with empty dest should return a URI");
-        let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
-        assert!(
-            content.starts_with("MESSAGE: rebase: destination revision required"),
-            "expected error MESSAGE, got:\n{content}"
-        );
+        let (jj, b_id, root_id) = setup_rebase_chain(dir.path());
+        let uri = run_rebase_commit(
+            &jj,
+            dir.path(),
+            RebaseMode::Revisions,
+            &b_id,
+            RebaseInsert::After,
+            &root_id,
+        )
+        .expect("run_rebase_commit failed");
+        assert!(uri.starts_with("file://"), "uri should be file://");
     }
 
     #[test]
-    fn run_rebase_with_invalid_dest_reports_error() {
+    fn run_rebase_commit_branch_insert_before() {
+        let dir = tempdir().unwrap();
+        // Insert B before A (B slides between root and A).
+        let jj = init_repo(dir.path());
+        jj.describe_set("@", "commit A").unwrap();
+        let a_id = jj.change_ids("@").unwrap().first().cloned().unwrap();
+        jj.new_change("").unwrap();
+        jj.describe_set("@", "commit B").unwrap();
+        let b_id = jj.change_ids("@").unwrap().first().cloned().unwrap();
+        let uri = run_rebase_commit(
+            &jj,
+            dir.path(),
+            RebaseMode::Branch,
+            &b_id,
+            RebaseInsert::Before,
+            &a_id,
+        )
+        .expect("run_rebase_commit failed");
+        assert!(uri.starts_with("file://"), "uri should be file://");
+    }
+
+    #[test]
+    fn run_rebase_commit_with_invalid_dest_reports_error() {
         let dir = tempdir().unwrap();
         let jj = init_repo(dir.path());
-        let uri = run_rebase(&jj, dir.path(), "@", "not-a-real-rev")
-            .expect("run_rebase should still produce a URI on error");
+        let uri = run_rebase_commit(
+            &jj,
+            dir.path(),
+            RebaseMode::Source,
+            "@",
+            RebaseInsert::Onto,
+            "not-a-real-rev",
+        )
+        .expect("run_rebase_commit should still produce a URI on error");
         let content = std::fs::read_to_string(uri.strip_prefix("file://").unwrap()).unwrap();
         assert!(
             content.starts_with("MESSAGE: rebase @ to not-a-real-rev failed:"),

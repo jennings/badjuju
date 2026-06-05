@@ -503,9 +503,9 @@ fn lsp_execute_new_string_arg_succeeds() {
 
 #[test]
 fn lsp_execute_rebase_string_args_succeed() {
+    // Two-step rebase: first select source, then select destination.
     let dir = tempfile::tempdir().unwrap();
     init_jj_repo(dir.path());
-    // Three commits so `@-` rebases onto `@--` non-trivially.
     Command::new("jj")
         .args(["describe", "-m", "first"])
         .current_dir(dir.path())
@@ -526,11 +526,22 @@ fn lsp_execute_rebase_string_args_succeed() {
     let mut session = LspSession::start(dir.path());
     session.initialize(&root_uri);
 
-    let resp =
-        session.execute_command_with_args("badjuju.rebase", serde_json::json!(["@-", "@--"]));
+    // Step 1: select @- as source (--source mode).
+    let resp = session
+        .execute_command_with_args("badjuju.rebase.source", serde_json::json!(["source", "@-"]));
     assert!(
         resp.get("error").is_none(),
-        "rebase with string args returned error: {resp}"
+        "rebase.source returned error: {resp}"
+    );
+
+    // Step 2: rebase onto root (grandparent of @-).
+    let resp = session.execute_command_with_args(
+        "badjuju.rebase.commit",
+        serde_json::json!(["onto", "root()"]),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "rebase.commit returned error: {resp}"
     );
 }
 
@@ -887,15 +898,14 @@ fn lsp_code_action_on_log_commit_line_returns_seven_actions() {
         ("Describe commit", "badjuju.describe"),
         ("Show diff for", "badjuju.diff"),
         ("New child of", "badjuju.new"),
-        ("Rebase commit", "badjuju.client.rebasePrompt"),
         ("Bookmark", "badjuju.client.bookmarkPrompt"),
     ];
-    // 7 standard commit actions + 1 squash-flow action
+    // 6 standard commit actions + 4 pending-op actions (1 squash + 3 rebase source)
     assert_eq!(
         actions.len(),
-        expected.len() + 1,
-        "expected {} actions (7 commit + 1 squash), got {}: {actions:?}",
-        expected.len() + 1,
+        expected.len() + 4,
+        "expected {} actions (6 commit + 4 pending-op), got {}: {actions:?}",
+        expected.len() + 4,
         actions.len()
     );
     for (action, (title_prefix, command_name)) in actions.iter().zip(expected) {
@@ -914,8 +924,8 @@ fn lsp_code_action_on_log_commit_line_returns_seven_actions() {
         assert_eq!(args.len(), 1, "expected one argument");
         assert_eq!(args[0].as_str(), Some(change_id.as_str()));
     }
-    // Verify squash action is present
-    let squash_action = &actions[7];
+    // Verify squash action is present at position 6
+    let squash_action = &actions[6];
     assert_eq!(
         squash_action["title"].as_str(),
         Some("Squash from this revision")
@@ -1109,11 +1119,11 @@ fn lsp_code_action_on_status_commit_header_returns_commit_actions() {
     session.did_open(&status_uri, "jujutsu", &status_content);
 
     let actions = code_action_at(&mut session, &status_uri, commit_line);
-    // 7 standard commit actions + 1 squash-flow action
+    // 6 standard commit actions + 4 pending-op actions (1 squash + 3 rebase source)
     assert_eq!(
         actions.len(),
-        8,
-        "expected 8 commit actions (7 standard + 1 squash), got: {actions:?}"
+        10,
+        "expected 10 commit actions (6 standard + 4 pending-op), got: {actions:?}"
     );
     let first = &actions[0];
     assert!(
@@ -1124,8 +1134,8 @@ fn lsp_code_action_on_status_commit_header_returns_commit_actions() {
     assert_eq!(first["command"]["command"].as_str(), Some("badjuju.edit"));
     let args = first["command"]["arguments"].as_array().unwrap();
     assert_eq!(args[0].as_str(), Some(change_id.as_str()));
-    // Verify squash action is present at position 7
-    let squash = &actions[7];
+    // Verify squash action is present at position 6
+    let squash = &actions[6];
     assert_eq!(squash["title"].as_str(), Some("Squash from this revision"));
     assert_eq!(
         squash["command"]["command"].as_str(),
@@ -2241,8 +2251,8 @@ fn lsp_squash_cancel_does_not_rewrite_status_buffer() {
     let resp = session.execute_command_with_args("badjuju.squash.commit", serde_json::json!(["@"]));
     assert!(resp.get("error").is_none(), "squash.commit failed: {resp}");
 
-    let resp = session.execute_command_with_args("badjuju.squash.cancel", serde_json::json!([]));
-    assert!(resp.get("error").is_none(), "squash.cancel failed: {resp}");
+    let resp = session.execute_command_with_args("badjuju.cancel", serde_json::json!([]));
+    assert!(resp.get("error").is_none(), "cancel failed: {resp}");
 
     let after = read_file(&status_uri);
     assert_eq!(
@@ -2322,7 +2332,7 @@ fn lsp_squash_commit_destination_selection_opens_squash_window() {
 #[test]
 fn lsp_code_action_with_pending_squash_shows_cancel() {
     // When squash.commit is pending, code actions on a commit row must show
-    // "Cancel pending squash" (badjuju.squash.cancel) instead of "Squash from
+    // "Cancel pending operation" (badjuju.cancel) instead of "Squash from
     // this revision" (badjuju.squash.commit).
     let dir = tempfile::tempdir().unwrap();
     init_jj_repo(dir.path());
@@ -2364,12 +2374,12 @@ fn lsp_code_action_with_pending_squash_shows_cancel() {
 
     let cancel_action = actions
         .iter()
-        .find(|a| a["title"].as_str() == Some("Cancel pending squash"))
-        .expect("expected 'Cancel pending squash' action when pending");
+        .find(|a| a["title"].as_str() == Some("Cancel pending operation"))
+        .expect("expected 'Cancel pending operation' action when pending");
     assert_eq!(
         cancel_action["command"]["command"].as_str(),
-        Some("badjuju.squash.cancel"),
-        "Cancel pending squash should invoke badjuju.squash.cancel"
+        Some("badjuju.cancel"),
+        "Cancel pending operation should invoke badjuju.cancel"
     );
 }
 
