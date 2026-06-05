@@ -4,10 +4,10 @@ Bad Juju produces diffs in two flavors, distinguished by URI scheme
 (or filename, on file-based clients):
 
 - **Change diff** — pinned to a change ID. Auto-refreshes when the
-  change is amended. This is what `badjuju.diff` / `D` opens.
+  change is amended. This is what `badjuju.diff` / `d` opens.
 - **Commit diff** — pinned to an immutable commit ID. The view is
   frozen to that exact snapshot. Opened via `badjuju.diff.commit`
-  (`Ctrl+Shift+D` in VS Code).
+  (`D` in VS Code, Neovim, and Emacs).
 
 ## Filenames and URIs
 

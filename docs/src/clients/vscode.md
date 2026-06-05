@@ -94,8 +94,9 @@ Set `badjuju.keymapProfile` to choose:
 | `e` | Edit commit at cursor |
 | `b` | Bookmark |
 | `r` | Rebase |
-| `d` | Describe |
-| `D` | Diff commit |
+| `d` | Diff (change) |
+| `D` | Diff (commit, pinned) |
+| `c w` | Describe commit at cursor |
 | `s` | Squash file at cursor |
 | `U`, `Ctrl+K U` | Unsquash file at cursor |
 | `a` | Abandon |

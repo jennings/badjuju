@@ -132,14 +132,14 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
     },
     KeymapEntry {
         key: "d",
-        action: "badjuju.describe",
-        description: "describe commit at cursor",
+        action: "badjuju.diff",
+        description: "diff change at cursor (updates on amend)",
         windows: &["status", "log"],
     },
     KeymapEntry {
         key: "D",
-        action: "badjuju.diff",
-        description: "diff commit at cursor",
+        action: "badjuju.diff.commit",
+        description: "diff commit at cursor (pinned, immutable)",
         windows: &["status", "log"],
     },
     KeymapEntry {

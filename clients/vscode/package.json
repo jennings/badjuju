@@ -320,7 +320,7 @@
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
-        "command": "badjuju.describe.open",
+        "command": "badjuju.diff.cursor",
         "key": "d",
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
@@ -435,30 +435,18 @@
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
-        "command": "badjuju.describe.open",
+        "command": "badjuju.diff.cursor",
         "key": "d",
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
-        "command": "badjuju.diff.cursor",
+        "command": "badjuju.diff.cursor.commit",
         "key": "shift+d",
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
         "command": "badjuju.diff.cursor.commit",
-        "key": "ctrl+shift+d",
-        "mac": "cmd+shift+d",
-        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
-      },
-      {
-        "command": "badjuju.diff.cursor",
         "key": "shift+d",
-        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
-      },
-      {
-        "command": "badjuju.diff.cursor.commit",
-        "key": "ctrl+shift+d",
-        "mac": "cmd+shift+d",
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {

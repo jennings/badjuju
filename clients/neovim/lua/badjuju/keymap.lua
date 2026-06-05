@@ -300,10 +300,10 @@ function M.setup_for_buffer(bufnr)
         'badjuju: edit commit at cursor (move @)')
       nmap(bufnr, 'b', status_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
       nmap(bufnr, 'r', status_rebase, 'badjuju: rebase commit at cursor to destination')
-      nmap(bufnr, 'd', function() run_at_cursor_split('badjuju.describe') end,
-        'badjuju: describe commit at cursor in a split')
-      nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff') end,
+      nmap(bufnr, 'd', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: show change diff at cursor (updates on amend)')
+      nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff.commit') end,
+        'badjuju: show commit diff at cursor (pinned, immutable)')
       nmap(bufnr, '=', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: show change diff at cursor (updates on amend)')
       nmap(bufnr, 's', run_squash_commit, 'badjuju: select squash source or destination')
@@ -384,10 +384,10 @@ function M.setup_for_buffer(bufnr)
         'badjuju: edit commit at cursor (move @)')
       nmap(bufnr, 'b', log_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
       nmap(bufnr, 'r', log_rebase, 'badjuju: rebase commit at cursor to destination')
-      nmap(bufnr, 'd', function() run_at_cursor_split('badjuju.describe') end,
-        'badjuju: describe commit at cursor in a split')
-      nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff') end,
+      nmap(bufnr, 'd', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: show change diff at cursor (updates on amend)')
+      nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff.commit') end,
+        'badjuju: show commit diff at cursor (pinned, immutable)')
       nmap(bufnr, 's', run_squash_commit, 'badjuju: select squash source or destination')
       nmap(bufnr, 'S', function()
         if pending_squash then run_squash_cancel() end

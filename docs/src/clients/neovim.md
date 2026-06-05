@@ -127,8 +127,9 @@ Two built-in profiles, plus `"none"` to disable defaults. Set
 | `e`      | Edit commit at cursor (move @) |
 | `b`      | Bookmark manager |
 | `r`      | Rebase commit at cursor |
-| `d`      | Describe commit at cursor |
-| `D`      | Diff commit at cursor |
+| `d`      | Diff change at cursor (updates on amend) |
+| `D`      | Diff commit at cursor (pinned, immutable) |
+| `c w`    | Describe commit at cursor |
 | `s`      | Squash file at cursor into parent |
 | `U`      | Unsquash file at cursor |
 | `a`      | Abandon commit at cursor |
@@ -145,8 +146,9 @@ Two built-in profiles, plus `"none"` to disable defaults. Set
 | `e`      | Edit commit at cursor (move @) |
 | `b`      | Bookmark manager |
 | `r`      | Rebase commit at cursor |
-| `d`      | Describe commit at cursor |
-| `D`      | Diff commit at cursor |
+| `d`      | Diff change at cursor (updates on amend) |
+| `D`      | Diff commit at cursor (pinned, immutable) |
+| `c w`    | Describe commit at cursor |
 | `a`      | Abandon commit at cursor |
 | `<CR>`   | Apply revset shortcut on cursor line |
 | `q`      | Close window |
