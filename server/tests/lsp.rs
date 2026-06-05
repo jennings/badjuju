@@ -944,6 +944,91 @@ fn lsp_code_action_on_log_commit_line_returns_seven_actions() {
 }
 
 #[test]
+fn lsp_log_file_refreshes_after_mutation() {
+    // After opening a file-log buffer, running a mutation (badjuju.new) should
+    // refresh the file on disk so subsequent reads see the new commit history.
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    std::fs::write(dir.path().join("alpha.txt"), "v1\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "first"])
+        .current_dir(dir.path())
+        .output()
+        .expect("describe failed");
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let resp =
+        session.execute_command_with_args("badjuju.log.file", serde_json::json!(["alpha.txt"]));
+    let uri = resp["result"]
+        .as_str()
+        .expect("expected URI in result")
+        .to_string();
+    let before = read_file(&uri);
+    session.did_open(&uri, "jujutsu", &before);
+
+    // Mutation: jj new (creates a new empty change on top of @). Use _acked
+    // so the server's `apply_edit` to the open file-log buffer doesn't block
+    // waiting for an acknowledgement.
+    let resp = session.execute_command_acked("badjuju.new", serde_json::json!([]));
+    assert!(
+        resp.get("error").is_none(),
+        "badjuju.new returned error: {resp}"
+    );
+
+    // The disk content gets re-rendered. With ..@ now reaching the new @ the
+    // headers are unchanged but the OUTPUT body is regenerated.
+    let after = read_file(&uri);
+    assert!(
+        after.starts_with("FILE: alpha.txt\nREVSET: ..@\n"),
+        "headers should still be present after refresh:\n{after}"
+    );
+}
+
+#[test]
+fn lsp_log_file_writes_file_history_buffer() {
+    let dir = tempfile::tempdir().unwrap();
+    init_jj_repo(dir.path());
+    // Put alpha.txt on a real commit so the file-history view has output.
+    std::fs::write(dir.path().join("alpha.txt"), "v1\n").unwrap();
+    Command::new("jj")
+        .args(["describe", "-m", "add alpha"])
+        .current_dir(dir.path())
+        .output()
+        .expect("describe failed");
+
+    let root_uri = format!("file://{}", dir.path().display());
+    let mut session = LspSession::start(dir.path());
+    session.initialize(&root_uri);
+
+    let resp =
+        session.execute_command_with_args("badjuju.log.file", serde_json::json!(["alpha.txt"]));
+    assert!(
+        resp.get("error").is_none(),
+        "badjuju.log.file returned error: {resp}"
+    );
+    let uri = resp["result"]
+        .as_str()
+        .expect("expected URI in result")
+        .to_string();
+    assert!(
+        uri.ends_with("/.jj/badjuju/file/alpha.txt.jujutsu"),
+        "unexpected URI shape: {uri}"
+    );
+    let content = read_file(&uri);
+    assert!(
+        content.starts_with("FILE: alpha.txt\nREVSET: ..@\n"),
+        "missing FILE/REVSET headers:\n{content}"
+    );
+    assert!(
+        content.contains("add alpha"),
+        "commit description should appear in file-log buffer:\n{content}"
+    );
+}
+
+#[test]
 fn lsp_code_action_on_status_file_line_returns_squash_unsquash() {
     let dir = tempfile::tempdir().unwrap();
     init_jj_repo(dir.path());
@@ -976,6 +1061,7 @@ fn lsp_code_action_on_status_file_line_returns_squash_unsquash() {
     let expected: &[(&str, &str)] = &[
         ("Squash readme.txt", "badjuju.squash"),
         ("Unsquash readme.txt", "badjuju.unsquash"),
+        ("Log readme.txt", "badjuju.log.file"),
     ];
     assert_eq!(
         actions.len(),

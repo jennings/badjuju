@@ -14,5 +14,6 @@
 - [Reference](./reference/index.md)
   - [Status buffer](./reference/status-buffer.md)
   - [Log buffer](./reference/log-buffer.md)
+  - [Log file buffer](./reference/log-file-buffer.md)
   - [Diff buffer](./reference/diff-buffer.md)
   - [Hunk edit buffer](./reference/hunk-edit-buffer.md)

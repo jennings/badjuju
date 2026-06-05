@@ -93,6 +93,15 @@ fn parse_file_uri(uri: &str) -> std::result::Result<FileUriParts<'_>, String> {
     })
 }
 
+/// Parse a `badjuju-filelog:` URI and percent-decode the path component.
+/// Accepts both the canonical three-slash form
+/// (`badjuju-filelog:///<path>`) and the one-slash form
+/// (`badjuju-filelog:/<path>`); VS Code's `Uri.toString()` normalizes
+/// empty-authority URIs to the latter.
+fn parse_filelog_uri(uri: &str) -> std::result::Result<String, String> {
+    commands::filelog_uri_to_path(uri).ok_or_else(|| format!("unsupported URI scheme: {uri}"))
+}
+
 /// Custom notification: `workspace/textDocumentContent/refresh`.
 enum WorkspaceTextDocumentContentRefresh {}
 impl tower_lsp::lsp_types::notification::Notification for WorkspaceTextDocumentContentRefresh {
@@ -110,6 +119,7 @@ use crate::workspace::find_workspace_root;
 pub const COMMANDS: &[&str] = &[
     "badjuju.status",
     "badjuju.log",
+    "badjuju.log.file",
     "badjuju.describe",
     "badjuju.diff",
     "badjuju.diff.commit",
@@ -157,6 +167,9 @@ struct State {
     /// Open diff buffers: URI → DiffTarget (Change or Commit). Used to refresh
     /// change-mode diffs after mutations and to clean up files on close.
     open_diffs: HashMap<String, DiffTarget>,
+    /// Open file-history buffers: URI → FileLogTarget. Refreshed after
+    /// mutations so the per-file `jj log -p` view stays current.
+    open_file_logs: HashMap<String, commands::FileLogTarget>,
     /// True when the client declared `workspace.textDocumentContent` capability.
     /// When true, diffs are served as virtual `badjuju-diff://` URIs; otherwise
     /// the server writes physical `diff-{change,commit}-*.jujutsu` files.
@@ -192,6 +205,7 @@ impl Default for State {
             open_status_uri: None,
             open_log_uri: None,
             open_diffs: HashMap::new(),
+            open_file_logs: HashMap::new(),
             virtual_diffs_enabled: false,
             pending_squash_source: None,
             open_squash_window: None,
@@ -247,9 +261,13 @@ impl Backend {
     }
 
     async fn refresh_open_diffs(&self, jj: &Jj, workspace: &std::path::Path) {
-        let (open_diffs, virtual_diffs_enabled) = {
+        let (open_diffs, open_file_logs, virtual_diffs_enabled) = {
             let state = self.state.read().await;
-            (state.open_diffs.clone(), state.virtual_diffs_enabled)
+            (
+                state.open_diffs.clone(),
+                state.open_file_logs.clone(),
+                state.virtual_diffs_enabled,
+            )
         };
         if virtual_diffs_enabled {
             for (uri, target) in &open_diffs {
@@ -265,6 +283,19 @@ impl Backend {
             let refreshed = commands::refresh_change_diffs(jj, workspace, &open_diffs);
             for (uri, content) in refreshed {
                 apply_edit_if_open(&self.client, &self.state, &uri, &content).await;
+            }
+        }
+        for (uri, target) in &open_file_logs {
+            if virtual_diffs_enabled {
+                self.client
+                    .send_notification::<WorkspaceTextDocumentContentRefresh>(
+                        TextDocumentContentRefreshParams { uri: uri.clone() },
+                    )
+                    .await;
+            } else if let Ok((file_uri, _, content)) =
+                commands::run_log_file_with_content(jj, workspace, &target.path, &target.revset)
+            {
+                apply_edit_if_open(&self.client, &self.state, &file_uri, &content).await;
             }
         }
     }
@@ -356,6 +387,17 @@ impl Backend {
         } else if uri.starts_with("badjuju-file:") {
             let parts = parse_file_uri(uri).map_err(lsp_err)?;
             commands::file_content_at_commit(&jj, parts.commit_id, parts.path).map_err(lsp_err)?
+        } else if uri.starts_with("badjuju-filelog:") {
+            let _ = parse_filelog_uri(uri).map_err(lsp_err)?;
+            let target = self
+                .state
+                .read()
+                .await
+                .open_file_logs
+                .get(uri)
+                .cloned()
+                .ok_or_else(|| lsp_err(format!("no open file-log buffer for URI: {uri}")))?;
+            commands::filelog_content(&jj, &target).map_err(lsp_err)?
         } else {
             return Err(lsp_err(format!("unsupported URI scheme: {uri}")));
         };
@@ -637,6 +679,26 @@ fn spawn_op_head_watcher(
                             apply_edit_if_open(&client, &state, &uri, &content).await;
                         }
                     }
+                    // Refresh open file-log buffers.
+                    let open_file_logs = state.read().await.open_file_logs.clone();
+                    for (uri, target) in &open_file_logs {
+                        if virtual_diffs_enabled {
+                            client
+                                .send_notification::<WorkspaceTextDocumentContentRefresh>(
+                                    TextDocumentContentRefreshParams { uri: uri.clone() },
+                                )
+                                .await;
+                        } else if let Ok((file_uri, _, content)) =
+                            commands::run_log_file_with_content(
+                                &jj,
+                                &workspace,
+                                &target.path,
+                                &target.revset,
+                            )
+                        {
+                            apply_edit_if_open(&client, &state, &file_uri, &content).await;
+                        }
+                    }
                     // Refresh open squash window if any.
                     let open_squash_window = state.read().await.open_squash_window.clone();
                     if let Some(window) = open_squash_window {
@@ -916,6 +978,7 @@ fn file_actions(uri: &str, line: usize, file: &str) -> Vec<CodeActionOrCommand> 
     vec![
         make(format!("Squash {file}"), "badjuju.squash"),
         make(format!("Unsquash {file}"), "badjuju.unsquash"),
+        make(format!("Log {file}"), "badjuju.log.file"),
     ]
 }
 
@@ -1456,6 +1519,14 @@ impl LanguageServer for Backend {
                 let _ = std::fs::remove_file(path);
             }
         }
+        if state.open_file_logs.remove(&uri).is_some() {
+            // For physical (file://) file-log buffers, drop the on-disk file
+            // so it doesn't reappear as a stale buffer on next workspace open.
+            // Virtual `badjuju-filelog://` URIs have no disk artifact.
+            if let Some(path) = commands::path_from_uri(&uri) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
         if matches!(BufferKind::from_uri(&uri), Some(BufferKind::Squash)) {
             if state
                 .open_squash_window
@@ -1511,14 +1582,36 @@ impl LanguageServer for Backend {
             return;
         };
 
-        let filename = params
-            .text_document
-            .uri
-            .to_file_path()
-            .ok()
+        let path_buf = params.text_document.uri.to_file_path().ok();
+        let filename = path_buf
+            .as_ref()
             .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
+        let is_file_log_buffer = path_buf
+            .as_ref()
+            .map(|p| p.starts_with(workspace.join(".jj").join("badjuju").join("file")))
+            .unwrap_or(false);
 
         drop(state);
+
+        if is_file_log_buffer {
+            match commands::on_log_file_save(&jj, &workspace, &text) {
+                Ok(new_uri) => {
+                    if let Some(target) = commands::parse_log_file_header(&text) {
+                        self.state
+                            .write()
+                            .await
+                            .open_file_logs
+                            .insert(new_uri, target);
+                    }
+                }
+                Err(e) => {
+                    self.client
+                        .log_message(MessageType::ERROR, format!("log-file save failed: {e}"))
+                        .await;
+                }
+            }
+            return;
+        }
 
         match filename.as_deref() {
             Some("describe.jujutsu") => {
@@ -1652,6 +1745,34 @@ impl LanguageServer for Backend {
                     .unwrap_or_else(|| arg.and_then(|v| v.as_str()).unwrap_or("").to_string());
                 let uri = commands::run_log(&jj, &workspace, &revset).map_err(lsp_err)?;
                 self.state.write().await.preopen_marks.insert(uri.clone());
+                Ok(Some(serde_json::Value::String(uri)))
+            }
+            "badjuju.log.file" => {
+                let path = commands::resolve_file_arg(params.arguments.first(), |uri| {
+                    documents
+                        .get(uri)
+                        .cloned()
+                        .or_else(|| read_uri_from_disk(uri))
+                })
+                .map_err(lsp_err)?;
+                let revset = params
+                    .arguments
+                    .get(1)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let (uri, target) = if virtual_diffs_enabled {
+                    commands::run_log_file_virtual(&path, &revset).map_err(lsp_err)?
+                } else {
+                    commands::run_log_file(&jj, &workspace, &path, &revset).map_err(lsp_err)?
+                };
+                {
+                    let mut state = self.state.write().await;
+                    state.open_file_logs.insert(uri.clone(), target);
+                    if !virtual_diffs_enabled {
+                        state.preopen_marks.insert(uri.clone());
+                    }
+                }
                 Ok(Some(serde_json::Value::String(uri)))
             }
             "badjuju.describe" => {
@@ -2292,6 +2413,74 @@ mod tests {
     #[test]
     fn parse_file_uri_unknown_segment_errors() {
         assert!(parse_file_uri("badjuju-file:///change/abc/file.rs").is_err());
+    }
+
+    #[test]
+    fn commands_include_log_file() {
+        assert!(COMMANDS.contains(&"badjuju.log.file"));
+    }
+
+    #[test]
+    fn file_actions_includes_log_action() {
+        let actions = file_actions("file:///x/.jj/badjuju/status.jujutsu", 5, "alpha.txt");
+        let titles: Vec<String> = actions
+            .into_iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(act) => Some(act.title),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            titles.iter().any(|t| t == "Log alpha.txt"),
+            "expected 'Log alpha.txt' action; got: {titles:?}"
+        );
+    }
+
+    #[test]
+    fn file_actions_log_action_uses_log_file_command() {
+        let actions = file_actions("file:///x/.jj/badjuju/status.jujutsu", 5, "alpha.txt");
+        let log_cmd = actions
+            .into_iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(act) => Some(act),
+                _ => None,
+            })
+            .find(|a| a.title == "Log alpha.txt")
+            .expect("expected Log action");
+        let cmd = log_cmd.command.expect("expected command");
+        assert_eq!(cmd.command, "badjuju.log.file");
+        let args = cmd.arguments.expect("expected arguments");
+        assert_eq!(args.len(), 1);
+        assert_eq!(
+            args[0]
+                .get("cursor")
+                .and_then(|c| c.get("line"))
+                .and_then(|l| l.as_u64()),
+            Some(5)
+        );
+    }
+
+    #[test]
+    fn parse_filelog_uri_three_slash() {
+        assert_eq!(
+            parse_filelog_uri("badjuju-filelog:///server/src/jj.rs").unwrap(),
+            "server/src/jj.rs"
+        );
+    }
+
+    #[test]
+    fn parse_filelog_uri_one_slash() {
+        // VS Code normalizes empty-authority URIs to scheme:/path.
+        assert_eq!(
+            parse_filelog_uri("badjuju-filelog:/alpha.txt").unwrap(),
+            "alpha.txt"
+        );
+    }
+
+    #[test]
+    fn parse_filelog_uri_wrong_scheme_errors() {
+        assert!(parse_filelog_uri("file:///foo").is_err());
+        assert!(parse_filelog_uri("badjuju-diff:///foo").is_err());
     }
 
     #[test]

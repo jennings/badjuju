@@ -70,6 +70,12 @@ For file rows in the status buffer:
 | ------ | ----------- |
 | Squash `<file>` | Move file from `@` into parent |
 | Unsquash `<file>` | Pull file from parent back into `@` |
+| Log `<file>` | Open the [log file buffer](../reference/log-file-buffer.md) for this path |
+
+The **Log `<file>`** action opens
+`.jj/badjuju/file/<path>.jujutsu` on demand. Helix doesn't auto-open
+files returned by code actions, so open it manually after invoking
+the action.
 
 For squash-window rows:
 

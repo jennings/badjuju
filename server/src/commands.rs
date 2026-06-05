@@ -549,6 +549,216 @@ pub fn run_log_with_content(
     Ok((file_uri(&path), content))
 }
 
+/// Default revset for the file-history buffer when none is specified.
+const DEFAULT_FILE_LOG_REVSET: &str = "..@";
+
+/// State of an open file-history buffer (`badjuju.log.file`).
+///
+/// Tracked server-side per workspace-relative path so the URI is stable
+/// across re-invocations; the revset is stored separately so editing the
+/// `REVSET:` header in a physical buffer routes back here on save.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileLogTarget {
+    pub path: String,
+    pub revset: String,
+}
+
+/// Render the body of a file-history buffer: `FILE:` / `REVSET:` headers,
+/// shortcut lines, the `jj log -p` output for the file, and the `log`
+/// command-reference block. Matches the shape of [`run_log_with_content`].
+pub fn filelog_content(jj: &Jj, target: &FileLogTarget) -> Result<String, CommandError> {
+    let revset = if target.revset.is_empty() {
+        DEFAULT_FILE_LOG_REVSET
+    } else {
+        target.revset.as_str()
+    };
+    let output = jj.log_file(revset, &target.path)?;
+    Ok(format!(
+        "FILE: {}\nREVSET: {}\n{}\n\nOUTPUT:\n\n{}\n\n{}",
+        target.path,
+        revset,
+        render_log_shortcuts(),
+        output.trim_end(),
+        jj.command_reference().log(),
+    ))
+}
+
+/// Run `badjuju.log.file` in virtual-delivery mode. Returns a
+/// `badjuju-filelog:///<urlencoded-path>` URI and the `FileLogTarget` the
+/// server should track. The content is fetched by the client via
+/// `workspace/textDocumentContent`; nothing is written to disk.
+pub fn run_log_file_virtual(
+    path: &str,
+    revset: &str,
+) -> Result<(String, FileLogTarget), CommandError> {
+    let revset = if revset.is_empty() {
+        DEFAULT_FILE_LOG_REVSET.to_string()
+    } else {
+        revset.to_string()
+    };
+    let uri = format!("badjuju-filelog:///{}", encode_filelog_path(path));
+    Ok((
+        uri,
+        FileLogTarget {
+            path: path.to_string(),
+            revset,
+        },
+    ))
+}
+
+/// Run `badjuju.log.file` in file-based delivery mode. Writes the buffer to
+/// `<workspace>/.jj/badjuju/file/<path>.jujutsu`, creating parent directories
+/// as needed, and returns its `file://` URI along with the target.
+pub fn run_log_file(
+    jj: &Jj,
+    workspace: &Path,
+    path: &str,
+    revset: &str,
+) -> Result<(String, FileLogTarget), CommandError> {
+    run_log_file_with_content(jj, workspace, path, revset).map(|(uri, target, _)| (uri, target))
+}
+
+/// Same as [`run_log_file`], but additionally returns the rendered content so
+/// callers (notably [`super::Backend::refresh_open_artifacts`]) can ship it via
+/// `workspace/applyEdit` without re-reading the file.
+pub fn run_log_file_with_content(
+    jj: &Jj,
+    workspace: &Path,
+    path: &str,
+    revset: &str,
+) -> Result<(String, FileLogTarget, String), CommandError> {
+    let revset = if revset.is_empty() {
+        DEFAULT_FILE_LOG_REVSET.to_string()
+    } else {
+        revset.to_string()
+    };
+    let target = FileLogTarget {
+        path: path.to_string(),
+        revset,
+    };
+    let content = filelog_content(jj, &target)?;
+    let dir = badjuju_dir(workspace)?;
+    let file_path = filelog_disk_path(&dir, path);
+    if let Some(parent) = file_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&file_path, &content)?;
+    Ok((file_uri(&file_path), target, content))
+}
+
+/// Compute the on-disk path for a file-log buffer:
+/// `<.jj/badjuju>/file/<repo-relative-path>.jujutsu`.
+fn filelog_disk_path(badjuju_dir: &Path, repo_rel: &str) -> PathBuf {
+    let mut p = badjuju_dir.join("file");
+    p.push(repo_rel);
+    let mut filename = p.file_name().map(|s| s.to_os_string()).unwrap_or_default();
+    filename.push(".jujutsu");
+    p.set_file_name(filename);
+    p
+}
+
+/// Parse the leading `FILE:` and `REVSET:` headers from a file-history buffer.
+/// Returns `None` when either header is missing or empty.
+pub fn parse_log_file_header(content: &str) -> Option<FileLogTarget> {
+    let mut lines = content.lines();
+    let file = lines.next()?.strip_prefix("FILE:")?.trim().to_string();
+    let revset = lines.next()?.strip_prefix("REVSET:")?.trim().to_string();
+    if file.is_empty() || revset.is_empty() {
+        return None;
+    }
+    Some(FileLogTarget { path: file, revset })
+}
+
+/// On file-log buffer save (file-based clients only): re-parse the `FILE:` /
+/// `REVSET:` headers and regenerate the buffer in place. Returns the URI of
+/// the rewritten file. No-ops the headers when they can't be parsed.
+pub fn on_log_file_save(jj: &Jj, workspace: &Path, content: &str) -> Result<String, CommandError> {
+    let Some(target) = parse_log_file_header(content) else {
+        return Err(CommandError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "log-file buffer missing FILE: / REVSET: headers",
+        )));
+    };
+    let (uri, _) = run_log_file(jj, workspace, &target.path, &target.revset)?;
+    Ok(uri)
+}
+
+/// Resolve the `path` argument for `badjuju.log.file`. Accepts a literal
+/// workspace-relative string (from CLI / direct invocation) or a cursor-form
+/// `{cursor:{uri,line}}` object pointing at a file row in `status.jujutsu`.
+pub fn resolve_file_arg<F>(
+    arg: Option<&serde_json::Value>,
+    doc_lookup: F,
+) -> std::result::Result<String, CursorResolveError>
+where
+    F: FnOnce(&str) -> Option<String>,
+{
+    if let Some(s) = arg.and_then(|v| v.as_str()) {
+        return Ok(s.to_string());
+    }
+    let Some(cp) = parse_cursor_arg(arg)? else {
+        return Err(CursorResolveError::InvalidArg);
+    };
+    let _kind = BufferKind::from_uri(&cp.uri)
+        .ok_or_else(|| CursorResolveError::UnsupportedBuffer(cp.uri.clone()))?;
+    let content =
+        doc_lookup(&cp.uri).ok_or_else(|| CursorResolveError::DocNotFound(cp.uri.clone()))?;
+    cursor::file_at_line(&content, cp.line).ok_or(CursorResolveError::NoFileAtCursor)
+}
+
+/// Inverse of the URI builder in [`run_log_file_virtual`]: decode the path
+/// component of a `badjuju-filelog:` URI. Accepts both `badjuju-filelog:///…`
+/// (canonical) and `badjuju-filelog:/…` (VS Code's empty-authority shape).
+pub fn filelog_uri_to_path(uri: &str) -> Option<String> {
+    let rest = uri
+        .strip_prefix("badjuju-filelog:///")
+        .or_else(|| uri.strip_prefix("badjuju-filelog:/"))?;
+    if rest.is_empty() {
+        return None;
+    }
+    Some(decode_filelog_path(rest))
+}
+
+/// Percent-encode a workspace-relative path for use in a `badjuju-filelog:`
+/// URI. Encodes everything outside the unreserved set
+/// (`ALPHA / DIGIT / "-" / "." / "_" / "~"`); keeps `/` as the path separator.
+fn encode_filelog_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for b in path.bytes() {
+        let unreserved = b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/');
+        if unreserved {
+            out.push(b as char);
+        } else {
+            out.push('%');
+            out.push_str(&format!("{b:02X}"));
+        }
+    }
+    out
+}
+
+/// Reverse of [`encode_filelog_path`]: decode `%XX` sequences. Lone `%` or
+/// non-hex following a `%` is passed through verbatim so the caller never
+/// silently drops user input.
+fn decode_filelog_path(encoded: &str) -> String {
+    let bytes = encoded.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                out.push((hi * 16 + lo) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// A single unified-diff hunk inside a squash window buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hunk {
@@ -4486,5 +4696,251 @@ STACK:
 ";
         let absent = "9999999999999999";
         assert!(find_change_id_line(content, absent).is_none());
+    }
+
+    // --- File-log buffer tests (badjuju.log.file) ------------------------
+
+    #[test]
+    fn filelog_content_renders_headers_and_patch() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("alpha.txt"), "hello\n").unwrap();
+        jj.describe_set("@", "add alpha").unwrap();
+        let target = FileLogTarget {
+            path: "alpha.txt".to_string(),
+            revset: "..@".to_string(),
+        };
+        let content = filelog_content(&jj, &target).expect("filelog_content failed");
+        assert!(
+            content.starts_with("FILE: alpha.txt\nREVSET: ..@\n"),
+            "expected FILE/REVSET headers; got:\n{content}"
+        );
+        assert!(
+            content.contains("OUTPUT:"),
+            "expected OUTPUT marker in:\n{content}"
+        );
+        assert!(
+            content.contains("alpha.txt"),
+            "expected diff to mention alpha.txt in:\n{content}"
+        );
+        assert!(
+            content.contains("add alpha"),
+            "expected commit description in:\n{content}"
+        );
+        assert!(
+            content.contains("COMMAND REFERENCE:"),
+            "expected command reference block in:\n{content}"
+        );
+    }
+
+    #[test]
+    fn filelog_content_uses_provided_revset() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("alpha.txt"), "first\n").unwrap();
+        jj.describe_set("@", "first commit").unwrap();
+        jj.new_change("").unwrap();
+        std::fs::write(dir.path().join("alpha.txt"), "second\n").unwrap();
+        jj.describe_set("@", "second commit").unwrap();
+
+        let target = FileLogTarget {
+            path: "alpha.txt".to_string(),
+            revset: "@".to_string(),
+        };
+        let content = filelog_content(&jj, &target).expect("filelog_content failed");
+        assert!(
+            content.contains("REVSET: @\n"),
+            "header should reflect requested revset:\n{content}"
+        );
+        assert!(
+            content.contains("second commit"),
+            "expected @ commit description present:\n{content}"
+        );
+        assert!(
+            !content.contains("first commit"),
+            "expected restricted revset to exclude older commit:\n{content}"
+        );
+    }
+
+    #[test]
+    fn filelog_content_errors_on_invalid_revset() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("alpha.txt"), "hi\n").unwrap();
+        let target = FileLogTarget {
+            path: "alpha.txt".to_string(),
+            revset: "not-a-real-revset!!!".to_string(),
+        };
+        let result = filelog_content(&jj, &target);
+        assert!(matches!(result, Err(CommandError::Jj(_))));
+    }
+
+    #[test]
+    fn run_log_file_writes_to_jj_badjuju_file_path() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("alpha.txt"), "hi\n").unwrap();
+        let (uri, target) =
+            run_log_file(&jj, dir.path(), "alpha.txt", "..@").expect("run_log_file failed");
+        assert!(uri.starts_with("file://"));
+        let path = path_from_uri(&uri).expect("uri decodes");
+        let expected = dir
+            .path()
+            .join(".jj")
+            .join("badjuju")
+            .join("file")
+            .join("alpha.txt.jujutsu");
+        assert_eq!(path, expected, "expected exact on-disk location");
+        assert_eq!(target.path, "alpha.txt");
+        assert_eq!(target.revset, "..@");
+    }
+
+    #[test]
+    fn run_log_file_creates_parent_dirs() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::create_dir_all(dir.path().join("server").join("src")).unwrap();
+        std::fs::write(
+            dir.path().join("server").join("src").join("jj.rs"),
+            "// hi\n",
+        )
+        .unwrap();
+        let (uri, _) =
+            run_log_file(&jj, dir.path(), "server/src/jj.rs", "..@").expect("run_log_file failed");
+        let path = path_from_uri(&uri).expect("uri decodes");
+        assert!(path.exists(), "expected on-disk file at {}", path.display());
+        let expected = dir
+            .path()
+            .join(".jj")
+            .join("badjuju")
+            .join("file")
+            .join("server")
+            .join("src")
+            .join("jj.rs.jujutsu");
+        assert_eq!(path, expected);
+    }
+
+    #[test]
+    fn run_log_file_virtual_returns_filelog_uri() {
+        let (uri, target) =
+            run_log_file_virtual("server/src/jj.rs", "..@").expect("run_log_file_virtual failed");
+        assert_eq!(uri, "badjuju-filelog:///server/src/jj.rs");
+        assert_eq!(target.path, "server/src/jj.rs");
+        assert_eq!(target.revset, "..@");
+    }
+
+    #[test]
+    fn run_log_file_virtual_defaults_revset_when_empty() {
+        let (_, target) = run_log_file_virtual("x.txt", "").expect("run_log_file_virtual failed");
+        assert_eq!(target.revset, "..@");
+    }
+
+    #[test]
+    fn parse_filelog_uri_decodes_path() {
+        // Spaces, `#`, `?` are percent-encoded; `/` is preserved as separator.
+        let encoded = encode_filelog_path("dir with space/x#a?b.txt");
+        assert!(
+            !encoded.contains(' '),
+            "spaces should be encoded; got: {encoded}"
+        );
+        assert!(
+            !encoded.contains('#') && !encoded.contains('?'),
+            "# and ? should be encoded; got: {encoded}"
+        );
+        assert!(encoded.contains('/'), "/ should be preserved: {encoded}");
+        let uri = format!("badjuju-filelog:///{encoded}");
+        let decoded = filelog_uri_to_path(&uri).expect("filelog_uri_to_path failed");
+        assert_eq!(decoded, "dir with space/x#a?b.txt");
+    }
+
+    #[test]
+    fn parse_filelog_uri_accepts_one_slash_form() {
+        // VS Code normalizes empty-authority URIs to single-slash.
+        let decoded = filelog_uri_to_path("badjuju-filelog:/server/src/jj.rs")
+            .expect("filelog_uri_to_path failed");
+        assert_eq!(decoded, "server/src/jj.rs");
+    }
+
+    #[test]
+    fn parse_filelog_uri_rejects_unknown_scheme() {
+        assert!(filelog_uri_to_path("file:///foo").is_none());
+        assert!(filelog_uri_to_path("badjuju-diff:///foo").is_none());
+    }
+
+    #[test]
+    fn on_log_file_save_reparses_headers() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        std::fs::write(dir.path().join("alpha.txt"), "hi\n").unwrap();
+        // Open at default revset, then save with an edited REVSET header.
+        let (uri, _) = run_log_file(&jj, dir.path(), "alpha.txt", "..@").unwrap();
+        let mut edited = std::fs::read_to_string(path_from_uri(&uri).unwrap()).unwrap();
+        // Replace the REVSET header with `@`.
+        edited = edited.replacen("REVSET: ..@", "REVSET: @", 1);
+        let new_uri = on_log_file_save(&jj, dir.path(), &edited).expect("on_log_file_save failed");
+        // Same target path → same on-disk URI.
+        assert_eq!(new_uri, uri);
+        let content = std::fs::read_to_string(path_from_uri(&new_uri).unwrap()).unwrap();
+        assert!(
+            content.starts_with("FILE: alpha.txt\nREVSET: @\n"),
+            "expected refreshed buffer to honor edited REVSET:\n{content}"
+        );
+    }
+
+    #[test]
+    fn on_log_file_save_errors_when_headers_missing() {
+        let dir = tempdir().unwrap();
+        let jj = init_repo(dir.path());
+        let result = on_log_file_save(&jj, dir.path(), "no headers here\n");
+        assert!(matches!(result, Err(CommandError::Io(_))));
+    }
+
+    #[test]
+    fn parse_log_file_header_returns_target() {
+        let content = "FILE: server/src/jj.rs\nREVSET: ..@\nJJ: Mutable: ...";
+        let target = parse_log_file_header(content).expect("expected headers");
+        assert_eq!(target.path, "server/src/jj.rs");
+        assert_eq!(target.revset, "..@");
+    }
+
+    #[test]
+    fn parse_log_file_header_returns_none_when_file_empty() {
+        assert!(parse_log_file_header("FILE: \nREVSET: ..@\n").is_none());
+    }
+
+    #[test]
+    fn parse_log_file_header_returns_none_when_revset_empty() {
+        assert!(parse_log_file_header("FILE: x.txt\nREVSET: \n").is_none());
+    }
+
+    #[test]
+    fn resolve_file_arg_accepts_string() {
+        let arg = serde_json::Value::String("alpha.txt".to_string());
+        let path = resolve_file_arg(Some(&arg), |_| None).expect("expected ok");
+        assert_eq!(path, "alpha.txt");
+    }
+
+    #[test]
+    fn resolve_file_arg_accepts_cursor_form_on_status_file_row() {
+        // A status buffer URI is required for BufferKind::from_uri to succeed.
+        let status_uri = "file:///tmp/repo/.jj/badjuju/status.jujutsu";
+        let status_content = "STATUS:\n\nWorking copy  (@) : abc\nParent commit (@-): def\n\nWORKING COPY CHANGES (1 file):\nM alpha.txt\n\nSTACK: @\n\n@  abcd1234 cdef5678 desc\n";
+        // Line 6 (0-indexed) is `M alpha.txt`.
+        let arg = serde_json::json!({ "cursor": { "uri": status_uri, "line": 6 } });
+        let path = resolve_file_arg(Some(&arg), |uri| {
+            if uri == status_uri {
+                Some(status_content.to_string())
+            } else {
+                None
+            }
+        })
+        .expect("expected ok");
+        assert_eq!(path, "alpha.txt");
+    }
+
+    #[test]
+    fn resolve_file_arg_no_arg_returns_invalid_arg() {
+        let result = resolve_file_arg(None, |_| None);
+        assert!(matches!(result, Err(CursorResolveError::InvalidArg)));
     }
 }

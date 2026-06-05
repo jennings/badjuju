@@ -58,6 +58,12 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         windows: &["status"],
     },
     KeymapEntry {
+        key: "l f",
+        action: "badjuju.log.file",
+        description: "log for file at cursor",
+        windows: &["status"],
+    },
+    KeymapEntry {
         key: "s",
         action: "badjuju.squash.commit",
         description: "select squash source or destination",
@@ -299,6 +305,12 @@ static VIM_ENTRIES: &[KeymapEntry] = &[
         key: "ll",
         action: "badjuju.log",
         description: "open log",
+        windows: &["status"],
+    },
+    KeymapEntry {
+        key: "l f",
+        action: "badjuju.log.file",
+        description: "log for file at cursor",
         windows: &["status"],
     },
     KeymapEntry {

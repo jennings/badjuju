@@ -113,6 +113,14 @@ separate file (`diff-change-<id>.jujutsu` or
 `diff-commit-<id>.jujutsu`), so you can compare two revisions side by
 side.
 
+## Viewing a single file's history
+
+For the commits that touched one file, place the cursor on a file row
+in the status buffer and press `l f` (Magit/Vim profile) or pick
+**Log `<file>`** from the Helix code-action menu. Bad Juju opens a
+per-file buffer showing `jj log -r ..@ -p` restricted to that path —
+see the [log file buffer reference](../reference/log-file-buffer.md).
+
 ## Refreshing and closing buffers
 
 Bad Juju auto-refreshes open status, log, and diff buffers when a `jj`

@@ -18,6 +18,34 @@ pub struct Jj {
     command_reference: Arc<CommandReference>,
 }
 
+/// Pin the per-commit template so a user's `templates.log` override doesn't
+/// change the shape of bad-juju's log buffers (which the clients parse).
+/// Single-line layout: change_id, commit_id, description, (time author),
+/// tags, bookmarks, conflict/divergent flags. Description appears before
+/// metadata so folded entries show the useful context first. time_ago is
+/// abbreviated to e.g. `4h` within a week, `YYMMDD` after.
+const LOG_TEMPLATE: &str = concat!(
+    r#"separate(" ","#,
+    r#"  change_id.shortest(8),"#,
+    r#"  commit_id.shortest(8),"#,
+    r#"  if(!description, "(empty)", description.first_line()),"#,
+    r#"  "(" ++ separate(" ","#,
+    r#"    if(commit_timestamp(self).before("1 week ago"),"#,
+    r#"      commit_timestamp(self).format("%y%m%d"),"#,
+    r#"      commit_timestamp(self).ago().replace("#,
+    r#"        regex:" ((m)illi(s)econds?|(sec)onds?|(min)utes?|(h)ours?|(d)ays?|(w)eeks?) ago","#,
+    r#"        "$2$3$4$5$6$7$8""#,
+    r#"      ),"#,
+    r#"    ),"#,
+    r#"    author.email(),"#,
+    r#"  ) ++ ")","#,
+    r#"  tags,"#,
+    r#"  bookmarks,"#,
+    r#"  if(conflict, "conflict"),"#,
+    r#"  if(divergent, "divergent"),"#,
+    r#") ++ "\n""#,
+);
+
 /// Remove `jj log --stat` per-commit summary lines like
 /// `N files changed, X insertions(+), Y deletions(-)`. The per-file stat
 /// lines (`<path> | <count> <+/->`) carry the same information and stay.
@@ -119,34 +147,6 @@ impl Jj {
     }
 
     pub fn log_with_stat(&self, revset: &str, stat: bool) -> Result<String, JjError> {
-        // Pin the per-commit and graph-node templates so a user's
-        // `templates.log` / `templates.log_node` overrides don't change the
-        // shape of bad-juju's log buffers (which the clients parse).
-        // Single-line layout: change_id, commit_id, description, (time author),
-        // tags, bookmarks, conflict/divergent flags. Description appears
-        // before metadata so folded entries show the useful context first.
-        // time_ago is abbreviated to e.g. `4h` within a week, `YYMMDD` after.
-        let template = concat!(
-            r#"separate(" ","#,
-            r#"  change_id.shortest(8),"#,
-            r#"  commit_id.shortest(8),"#,
-            r#"  if(!description, "(empty)", description.first_line()),"#,
-            r#"  "(" ++ separate(" ","#,
-            r#"    if(commit_timestamp(self).before("1 week ago"),"#,
-            r#"      commit_timestamp(self).format("%y%m%d"),"#,
-            r#"      commit_timestamp(self).ago().replace("#,
-            r#"        regex:" ((m)illi(s)econds?|(sec)onds?|(min)utes?|(h)ours?|(d)ays?|(w)eeks?) ago","#,
-            r#"        "$2$3$4$5$6$7$8""#,
-            r#"      ),"#,
-            r#"    ),"#,
-            r#"    author.email(),"#,
-            r#"  ) ++ ")","#,
-            r#"  tags,"#,
-            r#"  bookmarks,"#,
-            r#"  if(conflict, "conflict"),"#,
-            r#"  if(divergent, "divergent"),"#,
-            r#") ++ "\n""#,
-        );
         let mut args: Vec<&str> = vec![
             "--config",
             "templates.log_node=builtin_log_node",
@@ -154,7 +154,7 @@ impl Jj {
             "--revisions",
             revset,
             "--template",
-            template,
+            LOG_TEMPLATE,
         ];
         if stat {
             args.push("--stat");
@@ -165,6 +165,24 @@ impl Jj {
         } else {
             Ok(raw)
         }
+    }
+
+    /// `jj log --revisions <revset> --template <LOG_TEMPLATE> --patch -- <path>`.
+    /// Used by the file-history buffer (`badjuju.log.file`) to render the
+    /// commits that touched a single path, each followed by its inline diff.
+    pub fn log_file(&self, revset: &str, path: &str) -> Result<String, JjError> {
+        self.run(&[
+            "--config",
+            "templates.log_node=builtin_log_node",
+            "log",
+            "--revisions",
+            revset,
+            "--template",
+            LOG_TEMPLATE,
+            "--patch",
+            "--",
+            path,
+        ])
     }
 
     pub fn describe_get(&self, revision: &str) -> Result<String, JjError> {
@@ -1342,6 +1360,32 @@ mod tests {
             .file_show("hello.txt", &commit_id)
             .expect("file_show failed");
         assert_eq!(out, "hello world\n");
+    }
+
+    #[test]
+    fn log_file_returns_patch_for_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        std::fs::write(dir.path().join("alpha.txt"), "hello\n").unwrap();
+        jj.describe_set("@", "add alpha").unwrap();
+        let out = jj.log_file("..@", "alpha.txt").expect("log_file failed");
+        assert!(
+            out.contains("alpha.txt"),
+            "expected diff to mention alpha.txt; got:\n{out}"
+        );
+        assert!(
+            out.contains("add alpha"),
+            "expected description from log template; got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn log_file_invalid_revset_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let jj = init_jj_repo(dir.path());
+        std::fs::write(dir.path().join("alpha.txt"), "hello\n").unwrap();
+        let result = jj.log_file("not-a-real-revset!!!", "alpha.txt");
+        assert!(matches!(result, Err(JjError::JjFailed { .. })));
     }
 
     #[test]
