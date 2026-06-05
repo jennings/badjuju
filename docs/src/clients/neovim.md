@@ -131,9 +131,9 @@ Two built-in profiles, plus `"none"` to disable defaults. Set
 | `D`      | Diff commit at cursor (pinned, immutable) |
 | `c w`    | Describe commit at cursor |
 | `s`      | Squash file at cursor into parent |
-| `U`      | Unsquash file at cursor |
+| `u`      | Unsquash file at cursor |
 | `a`      | Abandon commit at cursor |
-| `u`      | Undo |
+| `U`      | Undo |
 | `=`      | Toggle `--stat` in STACK section |
 | `q`      | Close window |
 | `?`      | Show key binding help |
@@ -150,6 +150,7 @@ Two built-in profiles, plus `"none"` to disable defaults. Set
 | `D`      | Diff commit at cursor (pinned, immutable) |
 | `c w`    | Describe commit at cursor |
 | `a`      | Abandon commit at cursor |
+| `U`      | Undo |
 | `<CR>`   | Apply revset shortcut on cursor line |
 | `q`      | Close window |
 | `?`      | Show key binding help |

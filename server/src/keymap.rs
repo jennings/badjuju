@@ -103,7 +103,7 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         key: "U",
         action: "badjuju.undo",
         description: "jj undo",
-        windows: &["status"],
+        windows: &["status", "log"],
     },
     KeymapEntry {
         key: "b",

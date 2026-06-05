@@ -380,6 +380,7 @@ function M.setup_for_buffer(bufnr)
       for _, m in ipairs(LOG_MAPS) do
         map_cmd(bufnr, m[1], m[2], m[3])
       end
+      nmap(bufnr, 'U', '<Cmd>JJUndo<CR>', 'badjuju: undo')
       nmap(bufnr, 'e', function() run_at_cursor_split('badjuju.edit') end,
         'badjuju: edit commit at cursor (move @)')
       nmap(bufnr, 'b', log_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
