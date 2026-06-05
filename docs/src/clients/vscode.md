@@ -105,6 +105,18 @@ Set `badjuju.keymapProfile` to choose:
 | `q` | Close |
 | `?` | Help |
 
+#### Squash window (`.jj/badjuju/squash/*.jujutsu`)
+
+| Key | Action |
+| --- | ------ |
+| `s` | Toggle hunk / file between SELECTED and REMAINING |
+| `e` | Edit hunk before squashing |
+| `a` | Select all changes |
+| `A` | Deselect all changes |
+| `u` | Undo |
+| `Tab` | Toggle fold |
+| `q` | Close |
+
 #### `describe.jujutsu`
 
 | Key | Action |

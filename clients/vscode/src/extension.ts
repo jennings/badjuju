@@ -636,6 +636,28 @@ export async function activate(context: ExtensionContext) {
         );
       }
     }),
+    commands.registerCommand("badjuju.squash.edit_hunk.cursor", async () => {
+      const editor = window.activeTextEditor;
+      if (!editor) return;
+      try {
+        const result = await client.sendRequest("workspace/executeCommand", {
+          command: "badjuju.squash.edit_hunk",
+          arguments: [
+            {
+              cursor: {
+                uri: editor.document.uri.toString(),
+                line: editor.selection.active.line,
+              },
+            },
+          ],
+        });
+        await openServerResult(result as string);
+      } catch (e) {
+        window.showInformationMessage(
+          `squash.edit_hunk: ${(e as Error).message}`,
+        );
+      }
+    }),
     commands.registerCommand("badjuju.undo.open", async () => {
       const result = await client.sendRequest("workspace/executeCommand", {
         command: "badjuju.undo",

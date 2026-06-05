@@ -178,6 +178,11 @@
         "title": "Deselect all changes for squash"
       },
       {
+        "command": "badjuju.squash.edit_hunk.cursor",
+        "category": "jj",
+        "title": "Edit hunk at cursor before squashing"
+      },
+      {
         "command": "badjuju.undo.open",
         "category": "jj",
         "title": "Undo last operation (jj undo)"
@@ -760,6 +765,16 @@
         "command": "badjuju.squash.select_none.run",
         "key": "shift+a",
         "when": "badjuju.keymapProfile == 'magit' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.squash.edit_hunk.cursor",
+        "key": "e",
+        "when": "badjuju.keymapProfile == 'magit' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "editor.toggleFold",
+        "key": "tab",
+        "when": "badjuju.keymapProfile == 'magit' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus && !editorHasSelection"
       },
       {
         "command": "badjuju.undo.open",
