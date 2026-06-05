@@ -46,6 +46,11 @@ or committing, you MUST run `redo test` and `redo check`, and confirm all tests
 pass with no warnings. Never close an issue or commit with a failing or skipped
 test.
 
+**Test runs should finish in under 5 minutes.** If `redo test` or `redo check`
+has been running longer than 5 minutes, something is wrong — kill the task,
+investigate the cause (hung subprocess, infinite loop, runaway test fixture),
+and surface what you found before retrying. Do not just wait it out.
+
 ### Rust testing conventions
 
 - All pure logic lives in modules (`jj.rs`, `commands.rs`, `workspace.rs`) with `#[cfg(test)]` blocks at the bottom of the same file.
