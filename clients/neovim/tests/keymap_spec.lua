@@ -122,6 +122,22 @@ describe('keymap.setup_for_buffer', function()
     assert.is_false(has_buffer_map(buf, 'A'), 'A should not be bound by badjuju on status.jujutsu')
   end)
 
+  it('binds bookmark chord bc/bm/bd/bt/bf on status.jujutsu (magit)', function()
+    local buf = open_named('.jj/badjuju/status.jujutsu')
+    for _, chord in ipairs({ 'bc', 'bm', 'bd', 'bt', 'bf' }) do
+      assert.is_true(has_buffer_map(buf, chord),
+        'expected status.jujutsu map for bookmark chord ' .. chord)
+    end
+  end)
+
+  it('binds bookmark chord bc/bm/bd/bt/bf on log.jujutsu (magit)', function()
+    local buf = open_named('.jj/badjuju/log.jujutsu')
+    for _, chord in ipairs({ 'bc', 'bm', 'bd', 'bt', 'bf' }) do
+      assert.is_true(has_buffer_map(buf, chord),
+        'expected log.jujutsu map for bookmark chord ' .. chord)
+    end
+  end)
+
   it('does NOT bind A on log.jujutsu (magit profile) — defer to editor native', function()
     local buf = open_named('.jj/badjuju/log.jujutsu')
     assert.is_false(has_buffer_map(buf, 'A'), 'A should not be bound by badjuju on log.jujutsu')

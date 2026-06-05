@@ -46,6 +46,38 @@ local function run_at_cursor_split(server_command)
   require('badjuju').execute(server_command, { cursor_arg() }, { split = 'h' })
 end
 
+--- Prompt for a bookmark name (or `name@remote` for track) and invoke
+--- badjuju.bookmark with the given sub-action. For create/move, the cursor
+--- form is shipped so the server resolves the revision; other actions get an
+--- empty rev (the server ignores it).
+---@param sub_action 'create'|'move'|'delete'|'track'|'forget'
+local function bookmark_chord(sub_action)
+  local arg = cursor_arg()
+  local prompt = sub_action == 'track' and 'Bookmark (e.g. main@origin): ' or 'Bookmark name: '
+  vim.ui.input({ prompt = prompt }, function(bname)
+    if not bname or bname == '' then return end
+    local rev = (sub_action == 'create' or sub_action == 'move') and arg or ''
+    require('badjuju').execute('badjuju.bookmark', { sub_action, bname, rev })
+  end)
+end
+
+--- Install the five bookmark sub-action chord bindings under the given prefix.
+--- `<prefix>c` = create, `m` = move, `d` = delete, `t` = track, `f` = forget.
+---@param bufnr integer
+---@param prefix string  'b' for the magit profile, 'bb' for vim
+local function map_bookmark_chords(bufnr, prefix)
+  nmap(bufnr, prefix .. 'c', function() bookmark_chord('create') end,
+    'badjuju: create bookmark')
+  nmap(bufnr, prefix .. 'm', function() bookmark_chord('move') end,
+    'badjuju: move bookmark')
+  nmap(bufnr, prefix .. 'd', function() bookmark_chord('delete') end,
+    'badjuju: delete bookmark')
+  nmap(bufnr, prefix .. 't', function() bookmark_chord('track') end,
+    'badjuju: track bookmark')
+  nmap(bufnr, prefix .. 'f', function() bookmark_chord('forget') end,
+    'badjuju: forget bookmark')
+end
+
 --- Run a file-scoped status command. The cursor position is shipped to the
 --- server, which resolves both the file and the revision from the same line
 --- of status.jujutsu. A server-side "no file at cursor" error surfaces through
@@ -239,22 +271,9 @@ function M.setup_for_buffer(bufnr)
   local name = vim.api.nvim_buf_get_name(bufnr)
 
   if name:match('/%.jj/badjuju/status%.jujutsu$') then
-    -- Shared helpers used by both profiles. Both send a cursor-form arg so
-    -- the server resolves the revision; create/move on a non-commit line
-    -- surfaces a server-side error rather than the old client-side check.
-    local function status_bookmark()
-      local arg = cursor_arg()
-      local ACTIONS = { 'create', 'move', 'delete', 'track', 'forget' }
-      vim.ui.select(ACTIONS, { prompt = 'jj bookmark: ' }, function(sub_action)
-        if not sub_action then return end
-        local prompt = sub_action == 'track' and 'Bookmark (e.g. main@origin): ' or 'Bookmark name: '
-        vim.ui.input({ prompt = prompt }, function(bname)
-          if not bname or bname == '' then return end
-          local rev = (sub_action == 'create' or sub_action == 'move') and arg or ''
-          require('badjuju').execute('badjuju.bookmark', { sub_action, bname, rev })
-        end)
-      end)
-    end
+    -- Shared helper used by both profiles. Sends a cursor-form arg so the
+    -- server resolves the revision; rebase on a non-commit line surfaces a
+    -- server-side error rather than the old client-side check.
     local function status_rebase()
       local arg = cursor_arg()
       vim.ui.input({ prompt = 'Rebase to: ' }, function(dest)
@@ -280,7 +299,7 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'pp', '<Cmd>JJPush<CR>', 'badjuju: git push')
       nmap(bufnr, 'PP', '<Cmd>JJPush!<CR>', 'badjuju: git push --force-with-lease')
       nmap(bufnr, 'UU', '<Cmd>JJUndo<CR>', 'badjuju: undo')
-      nmap(bufnr, 'bb', status_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
+      map_bookmark_chords(bufnr, 'bb')
       nmap(bufnr, 'rr', status_rebase, 'badjuju: rebase commit at cursor to destination')
       nmap(bufnr, 'ee', function() run_at_cursor_split('badjuju.edit') end,
         'badjuju: edit commit at cursor (move @)')
@@ -300,7 +319,7 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'P', '<Cmd>JJPush!<CR>', 'badjuju: git push --force-with-lease')
       nmap(bufnr, 'e', function() run_at_cursor_split('badjuju.edit') end,
         'badjuju: edit commit at cursor (move @)')
-      nmap(bufnr, 'b', status_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
+      map_bookmark_chords(bufnr, 'b')
       nmap(bufnr, 'r', status_rebase, 'badjuju: rebase commit at cursor to destination')
       nmap(bufnr, 'd', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: show change diff at cursor (updates on amend)')
@@ -334,21 +353,8 @@ function M.setup_for_buffer(bufnr)
     nmap(bufnr, 'gd', vim.lsp.buf.definition, 'badjuju: go to definition')
     nmap(bufnr, '<CR>', ret_dispatch, 'badjuju: apply revset shortcut or goto definition')
   elseif name:match('/%.jj/badjuju/log%.jujutsu$') then
-    -- Both helpers send cursor-form args; the server returns an LSP error if
-    -- the cursor isn't on a commit (surfaced via badjuju.execute's error path).
-    local function log_bookmark()
-      local arg = cursor_arg()
-      local ACTIONS = { 'create', 'move', 'delete', 'track', 'forget' }
-      vim.ui.select(ACTIONS, { prompt = 'jj bookmark: ' }, function(sub_action)
-        if not sub_action then return end
-        local prompt = sub_action == 'track' and 'Bookmark (e.g. main@origin): ' or 'Bookmark name: '
-        vim.ui.input({ prompt = prompt }, function(bname)
-          if not bname or bname == '' then return end
-          local rev = (sub_action == 'create' or sub_action == 'move') and arg or ''
-          require('badjuju').execute('badjuju.bookmark', { sub_action, bname, rev })
-        end)
-      end)
-    end
+    -- Sends cursor-form args; the server returns an LSP error if the cursor
+    -- isn't on a commit (surfaced via badjuju.execute's error path).
     local function log_rebase()
       local arg = cursor_arg()
       vim.ui.input({ prompt = 'Rebase to: ' }, function(dest)
@@ -358,7 +364,7 @@ function M.setup_for_buffer(bufnr)
     end
 
     if profile == 'vim' then
-      nmap(bufnr, 'bb', log_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
+      map_bookmark_chords(bufnr, 'bb')
       nmap(bufnr, 'rr', log_rebase, 'badjuju: rebase commit at cursor to destination')
       nmap(bufnr, 'ee', function() run_at_cursor_split('badjuju.edit') end,
         'badjuju: edit commit at cursor (move @)')
@@ -386,7 +392,7 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'U', '<Cmd>JJUndo<CR>', 'badjuju: undo')
       nmap(bufnr, 'e', function() run_at_cursor_split('badjuju.edit') end,
         'badjuju: edit commit at cursor (move @)')
-      nmap(bufnr, 'b', log_bookmark, 'badjuju: bookmark (create / move / delete / track / forget)')
+      map_bookmark_chords(bufnr, 'b')
       nmap(bufnr, 'r', log_rebase, 'badjuju: rebase commit at cursor to destination')
       nmap(bufnr, 'd', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: show change diff at cursor (updates on amend)')
