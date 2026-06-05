@@ -396,6 +396,7 @@ function M.setup_for_buffer(bufnr)
       'badjuju: commit transient: reword commit at cursor')
     nmap(bufnr, 'cn', '<Cmd>JJNew<CR>', 'badjuju: commit transient: new child commit')
     nmap(bufnr, '<CR>', ret_dispatch, 'badjuju: apply revset shortcut or goto definition')
+    nmap(bufnr, 'q', '<Cmd>bdelete<CR>', 'badjuju: close buffer')
     nmap(bufnr, '?', function() show_help('log') end, 'badjuju: show help')
     -- Code actions intentionally unbound in the magit profile — use your
     -- editor's native binding (e.g. vim.lsp.buf.code_action). The vim profile

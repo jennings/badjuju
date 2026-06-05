@@ -95,10 +95,20 @@ describe('keymap.setup_for_buffer', function()
 
   it('does NOT install status-only maps on log.jujutsu', function()
     local buf = open_named('.jj/badjuju/log.jujutsu')
-    for _, key in ipairs({ 'n', 'L', 'q', '=', 'u' }) do
+    for _, key in ipairs({ 'n', 'L', '=', 'u' }) do
       local found = has_buffer_map(buf, key)
       assert.is_false(found, 'log.jujutsu should not bind ' .. key)
     end
+  end)
+
+  it('q on log.jujutsu maps to bdelete (closes buffer, not editor)', function()
+    local buf = open_named('.jj/badjuju/log.jujutsu')
+    local found, m = has_buffer_map(buf, 'q')
+    assert.is_true(found, 'expected log.jujutsu map for q')
+    assert.is_truthy(
+      m.rhs and m.rhs:lower():match('bdelete'),
+      'q should invoke bdelete on log, got rhs=' .. tostring(m.rhs)
+    )
   end)
 
   it('does NOT bind A on status.jujutsu (magit profile) — defer to editor native', function()
