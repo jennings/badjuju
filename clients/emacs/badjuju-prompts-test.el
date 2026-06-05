@@ -7,33 +7,6 @@
 (require 'test-helpers)
 (require 'badjuju-prompts)
 
-;;; Rebase
-
-(ert-deftest badjuju-prompts-test/rebase-outside-buffer ()
-  (badjuju-test--with-captured-run
-    (badjuju-test--with-mock-input '("main")
-      (with-temp-buffer (badjuju-rebase))))
-  (should (equal badjuju-test-calls '(("badjuju.rebase" ("@" "main"))))))
-
-(ert-deftest badjuju-prompts-test/rebase-empty-dest-noop ()
-  (badjuju-test--with-captured-run
-    (badjuju-test--with-mock-input '("")
-      (with-temp-buffer (badjuju-rebase))))
-  (should (null badjuju-test-calls)))
-
-(ert-deftest badjuju-prompts-test/rebase-in-buffer-uses-cursor ()
-  (badjuju-test--with-captured-run
-    (badjuju-test--with-mock-input '("main")
-      (with-temp-buffer
-        (setq buffer-file-name "/tmp/x.jujutsu")
-        (badjuju-status-mode)
-        (badjuju-rebase))))
-  (should (equal (caar badjuju-test-calls) "badjuju.rebase"))
-  (let ((args (cadar badjuju-test-calls)))
-    (should (= (length args) 2))
-    (should (plist-member (car args) :cursor))
-    (should (equal (cadr args) "main"))))
-
 ;;; Bookmark
 
 (ert-deftest badjuju-prompts-test/bookmark-create-with-cursor ()

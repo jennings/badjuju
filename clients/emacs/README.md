@@ -160,11 +160,17 @@ active bindings for that buffer type.
 | `D` | Diff commit at cursor (change mode, updates on amend) |
 | `e` | Edit commit at cursor (move `@`) |
 | `a` | Abandon commit at cursor |
-| `s` | Select squash source or destination |
-| `S` | Cancel pending squash / squash file at cursor |
+| `s` | Select squash source or destination (two-step) |
+| `S` | Squash file at cursor into parent |
 | `u` | Unsquash file at cursor |
 | `U` | Undo last operation |
-| `r` | Rebase to destination |
+| `r s` | Mark rebase source (`--source`) |
+| `r r` | Mark rebase source (`--revisions`) |
+| `r b` | Mark rebase source (`--branch`) |
+| `r o` | Execute rebase onto cursor |
+| `r A` | Execute rebase insert-after cursor |
+| `r B` | Execute rebase insert-before cursor |
+| `x` | Cancel pending squash or rebase |
 | `b` | Bookmark (create / move / delete / track / forget) |
 | `f` | `jj git fetch` |
 | `p` | `jj git push` |
@@ -188,10 +194,16 @@ active bindings for that buffer type.
 | `D` | Diff commit at cursor |
 | `e` | Edit commit at cursor (move `@`) |
 | `a` | Abandon commit at cursor |
-| `s` | Select squash source or destination |
-| `S` | Cancel pending squash |
+| `s` | Select squash source or destination (two-step) |
+| `S` | Squash file at cursor into parent |
 | `U` | Undo last operation |
-| `r` | Rebase to destination |
+| `r s` | Mark rebase source (`--source`) |
+| `r r` | Mark rebase source (`--revisions`) |
+| `r b` | Mark rebase source (`--branch`) |
+| `r o` | Execute rebase onto cursor |
+| `r A` | Execute rebase insert-after cursor |
+| `r B` | Execute rebase insert-before cursor |
+| `x` | Cancel pending squash or rebase |
 | `b` | Bookmark management |
 | `R` | Refresh |
 | `RET` | Apply revset shortcut (on `JJ:` line) / go to definition |

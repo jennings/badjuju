@@ -8,10 +8,11 @@
 ;; Status & log buffers (#39):
 ;;   g / R   refresh           n   new
 ;;   d       diff (change)     D   diff (commit-pinned)
-;;   s       squash source     S   squash cancel / squash file
+;;   s       squash source     S   squash file at cursor
 ;;   u       unsquash          U   undo
 ;;   a       abandon           e   edit (move @)
-;;   r       rebase            b   bookmark
+;;   r s/r/b rebase source     r o/A/B  rebase dest
+;;   x       cancel pending    b   bookmark
 ;;   f       fetch             p   push        P   push --force
 ;;   L       log (status only) q   bury        TAB fold toggle
 ;;   ?       help popup
@@ -41,11 +42,6 @@
 (require 'badjuju-commands)
 (require 'badjuju-prompts)
 (require 'badjuju-transient)
-
-;;; Module-level squash state
-
-(defvar badjuju--pending-squash nil
-  "Non-nil when a squash source has been selected and we await the destination.")
 
 ;;; Help popup
 
@@ -118,37 +114,42 @@ Otherwise: invoke `xref-find-definitions' (go-to-definition)."
 
 (defun badjuju--run-squash-commit ()
   "Begin or complete a commit-to-commit squash at point."
-  (let ((after-fn (lambda (result-uri)
-                    (setq badjuju--pending-squash
-                          (not (and (stringp result-uri)
-                                    (string-match "/squash/" result-uri)))))))
-    (badjuju-commands-run "badjuju.squash.commit"
-                          (list (badjuju-commands-cursor-arg)))))
+  (badjuju-commands-run "badjuju.squash.commit"
+                        (list (badjuju-commands-cursor-arg))))
 
-(defun badjuju--run-squash-cancel ()
-  "Cancel a pending squash selection."
-  (setq badjuju--pending-squash nil)
-  (badjuju-commands-run "badjuju.squash.cancel" nil))
+(defun badjuju--run-squash-file ()
+  "Squash file at cursor into parent.
+When the server returns RequiresParentSelection, prompt to pick the parent."
+  (let ((cursor-arg (badjuju-commands-cursor-arg)))
+    (badjuju-commands-run-with-handler
+     "badjuju.squash"
+     (list cursor-arg)
+     (lambda (err)
+       (let* ((data    (plist-get err :data))
+              (code    (and (listp data) (plist-get data :code)))
+              (file    (and (listp data) (plist-get data :file)))
+              (cands   (and (listp data) (plist-get data :candidates))))
+         (if (and (stringp code) (string= code "RequiresParentSelection")
+                  cands file)
+             (badjuju-squash-with-parent-prompt file (append cands nil))
+           (user-error "badjuju squash: %s" (plist-get err :message))))))))
 
-(defun badjuju--run-squash-or-cancel ()
-  "Cancel pending squash if active; otherwise squash file at cursor.
-When the server returns RequiresParentSelection (multiple parents), prompt
-the user to pick the target parent."
-  (if badjuju--pending-squash
-      (badjuju--run-squash-cancel)
-    (let ((cursor-arg (badjuju-commands-cursor-arg)))
-      (badjuju-commands-run-with-handler
-       "badjuju.squash"
-       (list cursor-arg)
-       (lambda (err)
-         (let* ((data    (plist-get err :data))
-                (code    (and (listp data) (plist-get data :code)))
-                (file    (and (listp data) (plist-get data :file)))
-                (cands   (and (listp data) (plist-get data :candidates))))
-           (if (and (stringp code) (string= code "RequiresParentSelection")
-                    cands file)
-               (badjuju-squash-with-parent-prompt file (append cands nil))
-             (user-error "badjuju squash: %s" (plist-get err :message)))))))))
+;;; Rebase helpers
+
+(defun badjuju--run-rebase-source (mode)
+  "Mark rebase source with MODE (\"source\", \"revisions\", or \"branch\")."
+  (badjuju-commands-run "badjuju.rebase.source"
+                        (list mode (badjuju-commands-cursor-arg))))
+
+(defun badjuju--run-rebase-commit (insert)
+  "Execute pending rebase with INSERT position (\"onto\", \"after\", \"before\")."
+  (badjuju-commands-run "badjuju.rebase.commit"
+                        (list insert (badjuju-commands-cursor-arg))))
+
+(defun badjuju--run-cancel ()
+  "Cancel a pending squash or rebase selection."
+  (badjuju-commands-run "badjuju.cancel"
+                        (list (badjuju-commands-cursor-arg))))
 
 ;;; Status & log keymaps (#39)
 
@@ -176,14 +177,22 @@ the user to pick the target parent."
   (define-key map (kbd "L")       #'badjuju-log)
   ;; Squash / unsquash (swapped per #47: u=unsquash, U=undo)
   (define-key map (kbd "s")       #'badjuju--run-squash-commit)
-  (define-key map (kbd "S")       #'badjuju--run-squash-or-cancel)
+  (define-key map (kbd "S")       #'badjuju--run-squash-file)
   (define-key map (kbd "u")       #'badjuju-unsquash)
   (define-key map (kbd "U")       #'badjuju-undo)
+  ;; Rebase chords (two-step: first pick source+mode, then destination+insert)
+  (define-key map (kbd "r s")     (lambda () (interactive) (badjuju--run-rebase-source "source")))
+  (define-key map (kbd "r r")     (lambda () (interactive) (badjuju--run-rebase-source "revisions")))
+  (define-key map (kbd "r b")     (lambda () (interactive) (badjuju--run-rebase-source "branch")))
+  (define-key map (kbd "r o")     (lambda () (interactive) (badjuju--run-rebase-commit "onto")))
+  (define-key map (kbd "r A")     (lambda () (interactive) (badjuju--run-rebase-commit "after")))
+  (define-key map (kbd "r B")     (lambda () (interactive) (badjuju--run-rebase-commit "before")))
+  ;; Cancel pending operation (squash or rebase)
+  (define-key map (kbd "x")       #'badjuju--run-cancel)
   ;; Remote / bookmark
   (define-key map (kbd "f")       #'badjuju-fetch)
   (define-key map (kbd "p")       #'badjuju-push)
   (define-key map (kbd "P")       (lambda () (interactive) (badjuju-push t)))
-  (define-key map (kbd "r")       #'badjuju-rebase)
   (define-key map (kbd "b")       #'badjuju-bookmark)
   ;; Commit transient
   (define-key map (kbd "c")       #'badjuju-commit)
@@ -206,16 +215,21 @@ the user to pick the target parent."
   ;; Commit operations
   (define-key map (kbd "e")       #'badjuju-edit)
   (define-key map (kbd "a")       #'badjuju-abandon)
-  ;; Squash (squash source selection / cancel pending)
+  ;; Squash
   (define-key map (kbd "s")       #'badjuju--run-squash-commit)
-  (define-key map (kbd "S")       (lambda ()
-                                    (interactive)
-                                    (when badjuju--pending-squash
-                                      (badjuju--run-squash-cancel))))
+  (define-key map (kbd "S")       #'badjuju--run-squash-file)
   ;; Undo (no unsquash in log context)
   (define-key map (kbd "U")       #'badjuju-undo)
+  ;; Rebase chords (two-step: first pick source+mode, then destination+insert)
+  (define-key map (kbd "r s")     (lambda () (interactive) (badjuju--run-rebase-source "source")))
+  (define-key map (kbd "r r")     (lambda () (interactive) (badjuju--run-rebase-source "revisions")))
+  (define-key map (kbd "r b")     (lambda () (interactive) (badjuju--run-rebase-source "branch")))
+  (define-key map (kbd "r o")     (lambda () (interactive) (badjuju--run-rebase-commit "onto")))
+  (define-key map (kbd "r A")     (lambda () (interactive) (badjuju--run-rebase-commit "after")))
+  (define-key map (kbd "r B")     (lambda () (interactive) (badjuju--run-rebase-commit "before")))
+  ;; Cancel pending operation (squash or rebase)
+  (define-key map (kbd "x")       #'badjuju--run-cancel)
   ;; Remote / bookmark
-  (define-key map (kbd "r")       #'badjuju-rebase)
   (define-key map (kbd "b")       #'badjuju-bookmark)
   ;; Commit transient
   (define-key map (kbd "c")       #'badjuju-commit)

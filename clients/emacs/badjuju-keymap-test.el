@@ -93,30 +93,30 @@ defvar) is the only reason the bindings survive `define-derived-mode'."
         (badjuju--ret-dispatch))
       (should xref-called))))
 
-;;; Squash state machine
+;;; Squash file and cancel
 
-(ert-deftest badjuju-keymap-test/squash-cancel-clears-state ()
+(ert-deftest badjuju-keymap-test/cancel-calls-badjuju-cancel ()
   (badjuju-test--with-captured-run
-    (let ((badjuju--pending-squash t))
-      (badjuju--run-squash-cancel)
-      (should-not badjuju--pending-squash)))
-  (should (equal (caar badjuju-test-calls) "badjuju.squash.cancel")))
+    (with-temp-buffer
+      (setq buffer-file-name "/tmp/x.jujutsu")
+      (badjuju-status-mode)
+      (badjuju--run-cancel)))
+  (should (equal (caar badjuju-test-calls) "badjuju.cancel"))
+  (let ((args (cadar badjuju-test-calls)))
+    (should (= (length args) 1))
+    (should (plist-member (car args) :cursor))))
 
-(ert-deftest badjuju-keymap-test/squash-or-cancel-when-pending-cancels ()
-  (let ((badjuju--pending-squash t)
-        cancel-calls)
-    (cl-letf (((symbol-function 'badjuju--run-squash-cancel)
-               (lambda () (setq cancel-calls 1)
-                 (setq badjuju--pending-squash nil))))
-      (with-temp-buffer
-        (badjuju-status-mode)
-        (badjuju--run-squash-or-cancel)))
-    (should (= cancel-calls 1))))
+(ert-deftest badjuju-keymap-test/squash-file-calls-badjuju-squash ()
+  (badjuju-test--with-captured-run
+    (with-temp-buffer
+      (setq buffer-file-name "/tmp/x.jujutsu")
+      (badjuju-status-mode)
+      (badjuju--run-squash-file)))
+  (should (equal (caar badjuju-test-calls) "badjuju.squash")))
 
-(ert-deftest badjuju-keymap-test/squash-or-cancel-requires-parent-prompts ()
+(ert-deftest badjuju-keymap-test/squash-file-requires-parent-prompts ()
   "When the server returns RequiresParentSelection, the parent prompt fires."
-  (let ((badjuju--pending-squash nil)
-        prompted)
+  (let (prompted)
     (cl-letf (((symbol-function 'badjuju-commands-run-with-handler)
                (lambda (_cmd _args on-error)
                  (funcall on-error
@@ -133,8 +133,58 @@ defvar) is the only reason the bindings survive `define-derived-mode'."
       (with-temp-buffer
         (setq buffer-file-name "/tmp/x.jujutsu")
         (badjuju-status-mode)
-        (badjuju--run-squash-or-cancel))
+        (badjuju--run-squash-file))
       (should (equal prompted '("src/x.rs" 2))))))
+
+;;; Rebase chord bindings
+
+(ert-deftest badjuju-keymap-test/status-rebase-chords-bound ()
+  "All six rebase chord keys must be bound in the status map."
+  (dolist (key '("r s" "r r" "r b" "r o" "r A" "r B"))
+    (should (functionp (lookup-key badjuju-status-mode-map (kbd key))))))
+
+(ert-deftest badjuju-keymap-test/status-x-is-cancel ()
+  (should (eq (lookup-key badjuju-status-mode-map (kbd "x"))
+              #'badjuju--run-cancel)))
+
+(ert-deftest badjuju-keymap-test/log-rebase-chords-bound ()
+  "All six rebase chord keys must be bound in the log map."
+  (dolist (key '("r s" "r r" "r b" "r o" "r A" "r B"))
+    (should (functionp (lookup-key badjuju-log-mode-map (kbd key))))))
+
+(ert-deftest badjuju-keymap-test/log-x-is-cancel ()
+  (should (eq (lookup-key badjuju-log-mode-map (kbd "x"))
+              #'badjuju--run-cancel)))
+
+(ert-deftest badjuju-keymap-test/rebase-source-modes ()
+  "Each rebase source mode lands in badjuju.rebase.source with the right mode."
+  (dolist (mode '("source" "revisions" "branch"))
+    (let ((badjuju-test-calls nil))
+      (badjuju-test--with-captured-run
+        (with-temp-buffer
+          (setq buffer-file-name "/tmp/x.jujutsu")
+          (badjuju-status-mode)
+          (badjuju--run-rebase-source mode)))
+      (should (equal (caar badjuju-test-calls) "badjuju.rebase.source"))
+      (let ((args (cadar badjuju-test-calls)))
+        (should (= (length args) 2))
+        (should (equal (car args) mode))
+        (should (plist-member (cadr args) :cursor))))))
+
+(ert-deftest badjuju-keymap-test/rebase-commit-inserts ()
+  "Each rebase commit insert mode lands in badjuju.rebase.commit with the right insert."
+  (dolist (insert '("onto" "after" "before"))
+    (let ((badjuju-test-calls nil))
+      (badjuju-test--with-captured-run
+        (with-temp-buffer
+          (setq buffer-file-name "/tmp/x.jujutsu")
+          (badjuju-status-mode)
+          (badjuju--run-rebase-commit insert)))
+      (should (equal (caar badjuju-test-calls) "badjuju.rebase.commit"))
+      (let ((args (cadar badjuju-test-calls)))
+        (should (= (length args) 2))
+        (should (equal (car args) insert))
+        (should (plist-member (cadr args) :cursor))))))
 
 ;;; fold-toggle dispatch
 

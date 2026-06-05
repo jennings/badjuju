@@ -5,7 +5,6 @@
 ;; Minibuffer prompts for commands that need extra input beyond what the
 ;; cursor can resolve.
 ;;
-;; badjuju-rebase    — destination prompt via read-string
 ;; badjuju-bookmark  — sub-action + name + revision via completing-read
 ;; badjuju-squash    — RequiresParentSelection multi-parent disambiguation
 ;;
@@ -14,19 +13,6 @@
 ;;; Code:
 
 (require 'badjuju-commands)
-
-;;; Rebase prompt
-
-;;;###autoload
-(defun badjuju-rebase ()
-  "Rebase the revision at point to a prompted destination."
-  (interactive)
-  (let ((dest (read-string "Rebase to: ")))
-    (when (and dest (not (string= dest "")))
-      (badjuju-commands-run "badjuju.rebase"
-                            (if (derived-mode-p 'badjuju-mode)
-                                (list (badjuju-commands-cursor-arg) dest)
-                              (list "@" dest))))))
 
 ;;; Bookmark prompt
 
