@@ -32,8 +32,8 @@ The `STACK:` line is a revset expression — by default
 copy, every commit you can still rewrite, and two layers of immutable
 ancestors for context.
 
-If `--stat` is toggled on (`=` in most clients), each commit's line is
-followed by a per-file change summary.
+Some clients support `--stat` rendering server-side; when enabled, each
+commit's line is followed by a per-file change summary.
 
 ### `COMMAND REFERENCE:` section
 

@@ -143,6 +143,12 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         windows: &["status", "log"],
     },
     KeymapEntry {
+        key: "=",
+        action: "badjuju.diff",
+        description: "diff change at cursor (alias for d)",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
         key: "a",
         action: "badjuju.abandon",
         description: "abandon commit at cursor",

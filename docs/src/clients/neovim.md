@@ -100,7 +100,6 @@ require('badjuju').setup({
 | `:JJRefresh` | Refresh the badjuju buffer at the cursor |
 | `:JJSquash [file] [revision]` | Squash a file into its parent |
 | `:JJUnsquash [file] [revision]` | Unsquash a file from parent into child |
-| `:JJToggleStat` | Toggle `--stat` in the log/status stack |
 | `:JJUndo` | Run `jj undo` and refresh |
 | `:JJAbandon [revision]` | Abandon a revision (defaults to `@`) |
 
@@ -134,7 +133,7 @@ Two built-in profiles, plus `"none"` to disable defaults. Set
 | `u`      | Unsquash file at cursor |
 | `a`      | Abandon commit at cursor |
 | `U`      | Undo |
-| `=`      | Toggle `--stat` in STACK section |
+| `=`      | Diff (alias for `d`) |
 | `q`      | Close window |
 | `?`      | Show key binding help |
 
@@ -151,6 +150,7 @@ Two built-in profiles, plus `"none"` to disable defaults. Set
 | `c w`    | Describe commit at cursor |
 | `a`      | Abandon commit at cursor |
 | `U`      | Undo |
+| `=`      | Diff (alias for `d`) |
 | `<CR>`   | Apply revset shortcut on cursor line |
 | `q`      | Close window |
 | `?`      | Show key binding help |

@@ -63,7 +63,6 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type
 | `badjuju.describe.finalize` | jj: Finalize commit description | Save and close describe buffer |
 | `badjuju.squash.file` | jj: Squash file at cursor | Move file under cursor into parent |
 | `badjuju.unsquash.file` | jj: Unsquash file at cursor | Pull file back from parent |
-| `badjuju.toggleStat.open` | jj: Toggle --stat | Toggle file-count in STACK |
 | `badjuju.rebase.prompt` | jj: Rebase to destination | Prompt and rebase |
 | `badjuju.bookmark.prompt` | jj: Bookmark | Interactive bookmark manager |
 | `badjuju.log.applyShortcut` | jj: Apply revset shortcut | Follow revset link in log |
@@ -101,7 +100,7 @@ Set `badjuju.keymapProfile` to choose:
 | `u`, `Ctrl+K u` | Unsquash file at cursor |
 | `a` | Abandon |
 | `U` | Undo |
-| `=` | Toggle --stat |
+| `=` | Diff (alias for `d`) |
 | `q` | Close |
 | `?` | Help |
 

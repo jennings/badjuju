@@ -460,6 +460,16 @@
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
+        "command": "badjuju.diff.cursor",
+        "key": "=",
+        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.diff.cursor",
+        "key": "=",
+        "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
         "command": "badjuju.refresh.open",
         "key": "shift+r",
         "when": "badjuju.keymapProfile == 'magit' && resourceFilename == 'diff.jujutsu' && resourceLangId == jujutsu && editorTextFocus"

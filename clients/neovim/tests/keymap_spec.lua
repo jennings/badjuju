@@ -95,10 +95,16 @@ describe('keymap.setup_for_buffer', function()
 
   it('does NOT install status-only maps on log.jujutsu', function()
     local buf = open_named('.jj/badjuju/log.jujutsu')
-    for _, key in ipairs({ 'n', 'L', '=', 'u' }) do
+    for _, key in ipairs({ 'n', 'L', 'u' }) do
       local found = has_buffer_map(buf, key)
       assert.is_false(found, 'log.jujutsu should not bind ' .. key)
     end
+  end)
+
+  it('installs = on log.jujutsu as diff alias', function()
+    local buf = open_named('.jj/badjuju/log.jujutsu')
+    local found = has_buffer_map(buf, '=')
+    assert.is_true(found, 'expected log.jujutsu map for = (diff alias)')
   end)
 
   it('q on log.jujutsu maps to bdelete (closes buffer, not editor)', function()
