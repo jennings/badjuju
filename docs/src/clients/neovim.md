@@ -128,7 +128,8 @@ Two built-in profiles, plus `"none"` to disable defaults. Set
 | `r`      | Rebase commit at cursor |
 | `d`      | Diff change at cursor (updates on amend) |
 | `D`      | Diff commit at cursor (pinned, immutable) |
-| `c w`    | Describe commit at cursor |
+| `c w`    | Commit transient → reword (describe) commit at cursor |
+| `c n`    | Commit transient → new child commit |
 | `s`      | Squash file at cursor into parent |
 | `u`      | Unsquash file at cursor |
 | `a`      | Abandon commit at cursor |
@@ -147,7 +148,8 @@ Two built-in profiles, plus `"none"` to disable defaults. Set
 | `r`      | Rebase commit at cursor |
 | `d`      | Diff change at cursor (updates on amend) |
 | `D`      | Diff commit at cursor (pinned, immutable) |
-| `c w`    | Describe commit at cursor |
+| `c w`    | Commit transient → reword (describe) commit at cursor |
+| `c n`    | Commit transient → new child commit |
 | `a`      | Abandon commit at cursor |
 | `U`      | Undo |
 | `=`      | Diff (alias for `d`) |

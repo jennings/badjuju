@@ -105,17 +105,48 @@ static MAGIT_ENTRIES: &[KeymapEntry] = &[
         description: "jj undo",
         windows: &["status", "log"],
     },
+    // Bookmark chord
     KeymapEntry {
-        key: "b",
+        key: "b c",
         action: "badjuju.bookmark",
-        description: "bookmark (create / move / delete / track / forget)",
+        description: "create bookmark",
         windows: &["status", "log"],
     },
-    // Status + log
     KeymapEntry {
-        key: "c",
-        action: "(transient)",
-        description: "commit transient (c w = reword, c n = new)",
+        key: "b m",
+        action: "badjuju.bookmark",
+        description: "move bookmark",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "b d",
+        action: "badjuju.bookmark",
+        description: "delete bookmark",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "b t",
+        action: "badjuju.bookmark",
+        description: "track bookmark",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "b f",
+        action: "badjuju.bookmark",
+        description: "forget bookmark",
+        windows: &["status", "log"],
+    },
+    // Commit chord
+    KeymapEntry {
+        key: "c n",
+        action: "badjuju.new",
+        description: "new commit",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "c w",
+        action: "badjuju.describe",
+        description: "describe commit (reword)",
         windows: &["status", "log"],
     },
     KeymapEntry {

@@ -106,10 +106,12 @@ for a popup of active bindings in the current buffer.
 | Key | Action |
 | --- | ------ |
 | `n` | New child change |
-| `c w` | Reword (describe) commit at cursor |
-| `c n` | New child of commit at cursor |
-| `d` | Describe commit at cursor |
-| `D` | Diff commit at cursor (change mode, updates on amend) |
+| `c` | Commit transient (reword / new child) |
+| `c w` | Commit transient → reword (describe) commit at cursor |
+| `c n` | Commit transient → new child commit |
+| `d` | Diff change at cursor (updates on amend) |
+| `D` | Diff commit at cursor (pinned, immutable) |
+| `=` | Diff (alias for `d`) |
 | `e` | Edit commit at cursor (move `@`) |
 | `a` | Abandon commit at cursor |
 | `s` | Select squash source or destination |
@@ -137,10 +139,12 @@ eglot-managed buffers).
 
 | Key | Action |
 | --- | ------ |
-| `c w` | Reword commit at cursor |
-| `c n` | New child of commit at cursor |
-| `d` | Describe commit at cursor |
-| `D` | Diff commit at cursor |
+| `c` | Commit transient (reword / new child) |
+| `c w` | Commit transient → reword (describe) commit at cursor |
+| `c n` | Commit transient → new child commit |
+| `d` | Diff change at cursor (updates on amend) |
+| `D` | Diff commit at cursor (pinned, immutable) |
+| `=` | Diff (alias for `d`) |
 | `e` | Edit commit at cursor |
 | `a` | Abandon commit at cursor |
 | `s` | Select squash source or destination |

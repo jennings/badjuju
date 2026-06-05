@@ -95,7 +95,8 @@ Set `badjuju.keymapProfile` to choose:
 | `r` | Rebase |
 | `d` | Diff (change) |
 | `D` | Diff (commit, pinned) |
-| `c w` | Describe commit at cursor |
+| `c w` | Commit transient → reword (describe) commit at cursor |
+| `c n` | Commit transient → new child commit |
 | `s` | Squash file at cursor |
 | `u`, `Ctrl+K u` | Unsquash file at cursor |
 | `a` | Abandon |
