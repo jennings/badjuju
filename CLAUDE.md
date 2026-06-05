@@ -68,6 +68,40 @@ and surface what you found before retrying. Do not just wait it out.
 | New `commands::on_*_save` function | State change is applied, no-op case is safe |
 | New `workspace` logic | Discovery from subdirectory, returns `None` outside any repo |
 | New LSP capability | `COMMANDS` list includes the new command name |
+| Editing a shared client LSP-response path (e.g. `M.execute`) | Every command class that uses it: side-effect-free responses **and** state-changing responses. See "Touching shared client code" below. |
+
+### Touching shared client code
+
+A single edit to `clients/neovim/lua/badjuju/init.lua` (`M.execute`,
+`populate_virtual_buf`, the `workspace/textDocumentContent/refresh`
+handler) or the equivalent VS Code dispatch path can silently regress
+every command that flows through it. Issue #72 is the canonical
+example: a fold-preservation short-circuit added for *one* command
+(`badjuju.squash.commit` source selection) broke buffer refresh for
+*every* other state-changing command that returns the status URI
+(`bookmark`, `refresh`, `abandon`, `undo`, `push`, `fetch`, `edit`,
+`rebase`, `new`, `next`, `prev`, `unsquash`).
+
+When editing any shared response handler:
+
+1. **Enumerate the two classes** of commands that flow through it:
+   - **Refocus-only** — the server returns a URI but does NOT rewrite
+     the file on disk (e.g. `badjuju.squash.commit` source selection,
+     `badjuju.squash.cancel`).
+   - **State-changing** — the server rewrites the file on disk and
+     returns its URI.
+2. **Add a test for at least one command from each class.** Iterate
+   over a hard-coded list of state-changing command names and assert
+   the post-response behavior (e.g. `checktime` fires) so adding a
+   new state-changing command later is one line in the list, and a
+   future shortcut that lumps the two classes together fails *every*
+   entry at once instead of staying invisible until a user reports it.
+3. **Avoid URI-only heuristics for branching.** "If the result URI ==
+   current buffer URI" is not a proxy for "the server did nothing" —
+   most state-changing commands also return the current buffer's URI.
+   When the two classes need different behavior, plumb an explicit
+   signal from the call site or use a property of the response that
+   actually distinguishes them (e.g. mtime, not URI identity).
 
 ### Checking for warnings
 

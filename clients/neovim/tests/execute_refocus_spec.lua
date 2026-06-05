@@ -84,8 +84,25 @@ local function set_current_buffer_to_path(path)
   return vim.uri_from_fname(vim.api.nvim_buf_get_name(0))
 end
 
+local function checktime_was_called(calls)
+  for _, c in ipairs(calls.cmd) do
+    if type(c) == 'string' and c == 'checktime' then
+      return true
+    end
+  end
+  return false
+end
+
 describe('badjuju.execute refocus short-circuit', function()
-  it('skips show_document and checktime when result URI matches current buffer', function()
+  it('skips show_document but calls checktime when result URI matches current buffer', function()
+    -- Same-URI response: the server returned the URI of the buffer the user
+    -- is already in. show_document would re-fire BufReadPost and collapse
+    -- folds, so it must be skipped. But checktime MUST still fire so the
+    -- buffer reloads when the server actually rewrote the file (which is
+    -- the case for almost every mutating command — bookmark, refresh,
+    -- abandon, undo, push, fetch, edit, rebase, new, next, prev, unsquash).
+    -- Regression test for #72: pressing bc/bm/bd or R in the status buffer
+    -- did nothing because this branch returned without calling checktime.
     local tmp = vim.fn.tempname() .. '-refocus' .. counter
     local status_uri = set_current_buffer_to_path(tmp .. '/.jj/badjuju/status.jujutsu')
 
@@ -93,16 +110,25 @@ describe('badjuju.execute refocus short-circuit', function()
 
     assert.are.equal(0, #calls.show_doc,
       'show_document should NOT be called for refocus-of-current-buffer')
-    -- Walk cmd_calls and verify no 'checktime' string was passed.
-    for _, c in ipairs(calls.cmd) do
-      assert.is_falsy(
-        type(c) == 'string' and c == 'checktime',
-        'vim.cmd should NOT have been called with checktime'
-      )
-    end
-    -- after callback still fires with the result URI.
+    assert.is_true(checktime_was_called(calls),
+      'vim.cmd("checktime") MUST be called so a server-rewritten status buffer reloads')
     assert.are.equal(1, #calls.after, 'after callback should fire exactly once')
     assert.are.equal(status_uri, calls.after[1])
+  end)
+
+  it('does NOT call checktime when result URI is the describe buffer', function()
+    -- describe.jujutsu is the one buffer where checktime is unsafe: the user
+    -- may be editing an unsaved commit message, and reloading would discard
+    -- their draft. The exclusion matches the same-buffer-different-uri branch
+    -- below.
+    local tmp = vim.fn.tempname() .. '-refocus' .. counter
+    local describe_uri = set_current_buffer_to_path(tmp .. '/.jj/badjuju/describe.jujutsu')
+
+    local calls = run_execute({ result_uri = describe_uri })
+
+    assert.is_false(checktime_was_called(calls),
+      'checktime must NOT fire when the result URI is describe.jujutsu')
+    assert.are.equal(0, #calls.show_doc)
   end)
 
   it('does NOT short-circuit when split is requested', function()
@@ -137,4 +163,44 @@ describe('badjuju.execute refocus short-circuit', function()
     assert.are.equal(1, #calls.after)
     assert.are.equal(squash_uri, calls.after[1])
   end)
+end)
+
+-- Regression test for #72. Every state-changing badjuju command invoked from
+-- status.jujutsu returns the status URI as its result. The client used to
+-- short-circuit on a same-URI match and skip checktime, which left the
+-- status buffer stale on disk reloads. This spec enumerates every such
+-- command and asserts that M.execute calls checktime for each. Adding a new
+-- mutating command that returns the status URI should require no new test
+-- here — but if M.execute's same-URI branch ever regresses, every entry
+-- here fails at once, making the broken contract impossible to miss.
+describe('badjuju.execute refresh-after-mutation (#72)', function()
+  local STATE_CHANGING_COMMANDS = {
+    'badjuju.bookmark',
+    'badjuju.refresh',
+    'badjuju.abandon',
+    'badjuju.undo',
+    'badjuju.push',
+    'badjuju.fetch',
+    'badjuju.edit',
+    'badjuju.rebase',
+    'badjuju.new',
+    'badjuju.next',
+    'badjuju.prev',
+    'badjuju.unsquash',
+  }
+
+  for _, command in ipairs(STATE_CHANGING_COMMANDS) do
+    it(command .. ' triggers checktime when run from status.jujutsu', function()
+      local tmp = vim.fn.tempname() .. '-mutate' .. counter
+      local status_uri = set_current_buffer_to_path(tmp .. '/.jj/badjuju/status.jujutsu')
+
+      local calls = run_execute({
+        command = command,
+        result_uri = status_uri,
+      })
+
+      assert.is_true(checktime_was_called(calls),
+        command .. ': checktime must fire so the status buffer reloads the new content')
+    end)
+  end
 end)

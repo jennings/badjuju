@@ -232,16 +232,23 @@ function M.execute(command, arguments, opts)
       return
     end
     vim.schedule(function()
-      -- Refocus-only responses: commands like badjuju.squash.commit (source
-      -- selection) and badjuju.squash.cancel return the cursor's URI to let
-      -- the client refocus its existing buffer. When that URI matches the
-      -- buffer the user is already in and no split was requested, opening it
-      -- via show_document + checktime is at best a no-op — and at worst
-      -- triggers a BufReadPost that re-runs ftplugin/jujutsu.lua, which
-      -- closes every user-opened fold. Skip the open path; still fire `after`.
+      -- Same-URI responses: many commands return the URI of the buffer the
+      -- user is already in (e.g. badjuju.bookmark, badjuju.refresh,
+      -- badjuju.abandon, … all return the status URI when invoked from
+      -- status.jujutsu). show_document on an already-focused buffer re-fires
+      -- BufReadPost and re-runs ftplugin/jujutsu.lua, which closes every
+      -- user-opened fold. So skip show_document — but still call checktime
+      -- so the buffer reloads when the server actually rewrote the file.
+      --
+      -- checktime is mtime-gated, so it is a no-op for refocus-only commands
+      -- like badjuju.squash.commit (source selection) and badjuju.squash.cancel
+      -- that deliberately leave the file untouched.
       local opens_window = opts and (opts.split == 'h' or opts.split == 'v')
       local current_uri = vim.uri_from_fname(vim.api.nvim_buf_get_name(0))
       if not opens_window and result == current_uri then
+        if not result:match('/describe%.jujutsu$') then
+          pcall(vim.cmd, 'checktime')
+        end
         if opts and opts.after then
           opts.after(result)
         end
