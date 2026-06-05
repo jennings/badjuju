@@ -185,10 +185,12 @@ navigation:
 | `nn` | New change |
 | `ll` | Open log |
 | `dd` | Describe commit at cursor |
-| `D`  | Diff commit at cursor |
+| `d`  | Diff change at cursor (updates on amend) |
+| `D`  | Diff commit at cursor (pinned, immutable) |
+| `=`  | Diff (alias for `d`) |
 | `ss` | Squash file at cursor |
-| `uu` | Undo |
-| `UU` | Unsquash file at cursor |
+| `uu` | Unsquash file at cursor |
+| `UU` | Undo |
 | `aa` | Abandon commit at cursor |
 | … | (`ee`, `bb`, `rr`, `ff`, `pp`, `PP` follow the same convention) |
 

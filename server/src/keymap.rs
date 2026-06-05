@@ -347,13 +347,51 @@ static VIM_ENTRIES: &[KeymapEntry] = &[
         key: "UU",
         action: "badjuju.undo",
         description: "jj undo",
-        windows: &["status"],
+        windows: &["status", "log"],
     },
     // Status + log
+    // Bookmark chord
     KeymapEntry {
-        key: "bb",
+        key: "bb c",
         action: "badjuju.bookmark",
-        description: "bookmark (create / move / delete / track / forget)",
+        description: "create bookmark",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "bb m",
+        action: "badjuju.bookmark",
+        description: "move bookmark",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "bb d",
+        action: "badjuju.bookmark",
+        description: "delete bookmark",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "bb t",
+        action: "badjuju.bookmark",
+        description: "track bookmark",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "bb f",
+        action: "badjuju.bookmark",
+        description: "forget bookmark",
+        windows: &["status", "log"],
+    },
+    // Commit chord
+    KeymapEntry {
+        key: "c n",
+        action: "badjuju.new",
+        description: "new commit",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "c w",
+        action: "badjuju.describe",
+        description: "describe commit (reword)",
         windows: &["status", "log"],
     },
     KeymapEntry {
@@ -375,9 +413,21 @@ static VIM_ENTRIES: &[KeymapEntry] = &[
         windows: &["status", "log"],
     },
     KeymapEntry {
-        key: "D",
+        key: "d",
         action: "badjuju.diff",
-        description: "diff commit at cursor",
+        description: "diff change at cursor (updates on amend)",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "D",
+        action: "badjuju.diff.commit",
+        description: "diff commit at cursor (pinned, immutable)",
+        windows: &["status", "log"],
+    },
+    KeymapEntry {
+        key: "=",
+        action: "badjuju.diff",
+        description: "diff change at cursor (alias for d)",
         windows: &["status", "log"],
     },
     KeymapEntry {

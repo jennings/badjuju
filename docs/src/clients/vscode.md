@@ -127,9 +127,10 @@ Set `badjuju.keymapProfile` to choose:
 
 ### `vim` profile
 
-Doubled letters: `nn`, `ll`, `dd`, `D`, `ss`, `uu`, `UU`, `aa`, `ee`,
-`bb`, `rr`, `ff`, `pp`, `PP`. `=`, `q`, `?` are unchanged. See the
-in-repo `clients/vscode/README.md` for the complete table.
+Doubled letters: `nn`, `ll`, `dd`, `ss`, `uu`, `UU`, `aa`, `ee`,
+`bb`, `rr`, `ff`, `pp`, `PP`. Single-key bindings: `D` (diff commit),
+`=` (diff change, alias for `D`'s change-mode sibling), `q`, `?`. See
+the in-repo `clients/vscode/README.md` for the complete table.
 
 ## Settings
 

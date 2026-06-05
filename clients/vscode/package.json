@@ -590,14 +590,13 @@
         "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
-        "command": "badjuju.diff.cursor",
+        "command": "badjuju.diff.cursor.commit",
         "key": "shift+d",
         "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
-        "command": "badjuju.diff.cursor.commit",
-        "key": "ctrl+shift+d",
-        "mac": "cmd+shift+d",
+        "command": "badjuju.diff.cursor",
+        "key": "=",
         "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'status.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
@@ -641,14 +640,18 @@
         "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
-        "command": "badjuju.diff.cursor",
+        "command": "badjuju.diff.cursor.commit",
         "key": "shift+d",
         "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
-        "command": "badjuju.diff.cursor.commit",
-        "key": "ctrl+shift+d",
-        "mac": "cmd+shift+d",
+        "command": "badjuju.diff.cursor",
+        "key": "=",
+        "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.undo.open",
+        "key": "shift+u shift+u",
         "when": "badjuju.keymapProfile == 'vim' && resourceFilename == 'log.jujutsu' && resourceLangId == jujutsu && editorTextFocus"
       },
       {
@@ -810,6 +813,16 @@
         "command": "badjuju.squash.select_none.run",
         "key": "shift+a",
         "when": "badjuju.keymapProfile == 'vim' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "badjuju.squash.edit_hunk.cursor",
+        "key": "e",
+        "when": "badjuju.keymapProfile == 'vim' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus"
+      },
+      {
+        "command": "editor.toggleFold",
+        "key": "tab",
+        "when": "badjuju.keymapProfile == 'vim' && resourcePath =~ /\\/squash\\// && resourceLangId == jujutsu && editorTextFocus && vim.mode == 'Normal'"
       },
       {
         "command": "badjuju.undo.open",

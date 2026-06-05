@@ -290,6 +290,8 @@ function M.setup_for_buffer(bufnr)
         'badjuju: show change diff at cursor (updates on amend)')
       nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff.commit') end,
         'badjuju: show commit diff at cursor (pinned, immutable)')
+      nmap(bufnr, '=', function() run_at_cursor_split('badjuju.diff') end,
+        'badjuju: show change diff at cursor (alias for d)')
       nmap(bufnr, 'aa', '<Cmd>JJAbandon<CR>', 'badjuju: abandon revision')
     else
       for _, m in ipairs(STATUS_MAPS) do
@@ -366,7 +368,10 @@ function M.setup_for_buffer(bufnr)
         'badjuju: show change diff at cursor (updates on amend)')
       nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff.commit') end,
         'badjuju: show commit diff at cursor (pinned, immutable)')
+      nmap(bufnr, '=', function() run_at_cursor_split('badjuju.diff') end,
+        'badjuju: show change diff at cursor (alias for d)')
       nmap(bufnr, 'aa', '<Cmd>JJAbandon<CR>', 'badjuju: abandon revision')
+      nmap(bufnr, 'UU', '<Cmd>JJUndo<CR>', 'badjuju: undo')
       nmap(bufnr, 'ss', run_squash_commit, 'badjuju: select squash source or destination')
       nmap(bufnr, 'SS', function()
         if pending_squash then run_squash_cancel() end
