@@ -323,13 +323,11 @@ function M.setup_for_buffer(bufnr)
     nmap(bufnr, '<Tab>', 'za', 'badjuju: toggle fold at cursor')
     nmap(bufnr, 'q', '<Cmd>bdelete<CR>', 'badjuju: close buffer')
     nmap(bufnr, '?', function() show_help('status') end, 'badjuju: show help')
-    -- Open the LSP code-action menu for the current cursor line. Server emits
-    -- actions for commit headers (edit/abandon/describe/diff/new/rebase/bookmark)
-    -- and file lines (squash/unsquash).
+    -- Code actions intentionally unbound in the magit profile — use your
+    -- editor's native binding (e.g. vim.lsp.buf.code_action). The vim profile
+    -- keeps <leader>a for convenience.
     if profile == 'vim' then
       nmap(bufnr, '<leader>a', vim.lsp.buf.code_action, 'badjuju: code actions menu')
-    else
-      nmap(bufnr, 'A', vim.lsp.buf.code_action, 'badjuju: code actions menu')
     end
     nmap(bufnr, 'gd', vim.lsp.buf.definition, 'badjuju: go to definition')
     nmap(bufnr, '<CR>', ret_dispatch, 'badjuju: apply revset shortcut or goto definition')
@@ -399,10 +397,11 @@ function M.setup_for_buffer(bufnr)
     nmap(bufnr, 'cn', '<Cmd>JJNew<CR>', 'badjuju: commit transient: new child commit')
     nmap(bufnr, '<CR>', ret_dispatch, 'badjuju: apply revset shortcut or goto definition')
     nmap(bufnr, '?', function() show_help('log') end, 'badjuju: show help')
+    -- Code actions intentionally unbound in the magit profile — use your
+    -- editor's native binding (e.g. vim.lsp.buf.code_action). The vim profile
+    -- keeps <leader>a for convenience.
     if profile == 'vim' then
       nmap(bufnr, '<leader>a', vim.lsp.buf.code_action, 'badjuju: code actions menu')
-    else
-      nmap(bufnr, 'A', vim.lsp.buf.code_action, 'badjuju: code actions menu')
     end
     nmap(bufnr, 'gd', vim.lsp.buf.definition, 'badjuju: go to definition')
   elseif name:match('/%.jj/badjuju/diff%.jujutsu$')

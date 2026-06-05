@@ -101,14 +101,14 @@ describe('keymap.setup_for_buffer', function()
     end
   end)
 
-  it('installs code-action binding A on status.jujutsu (magit profile)', function()
+  it('does NOT bind A on status.jujutsu (magit profile) — defer to editor native', function()
     local buf = open_named('.jj/badjuju/status.jujutsu')
-    assert.is_true(has_buffer_map(buf, 'A'), 'expected A map on status.jujutsu')
+    assert.is_false(has_buffer_map(buf, 'A'), 'A should not be bound by badjuju on status.jujutsu')
   end)
 
-  it('installs code-action binding A on log.jujutsu (magit profile)', function()
+  it('does NOT bind A on log.jujutsu (magit profile) — defer to editor native', function()
     local buf = open_named('.jj/badjuju/log.jujutsu')
-    assert.is_true(has_buffer_map(buf, 'A'), 'expected A map on log.jujutsu')
+    assert.is_false(has_buffer_map(buf, 'A'), 'A should not be bound by badjuju on log.jujutsu')
   end)
 
   it('q on status.jujutsu maps to bdelete (closes buffer, not editor)', function()

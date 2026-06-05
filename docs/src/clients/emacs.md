@@ -126,9 +126,12 @@ for a popup of active bindings in the current buffer.
 | `TAB` | Toggle fold at cursor |
 | `RET` | Go to definition |
 | `gd` | Go to definition |
-| `A` / `M-RET` | Code actions at cursor |
 | `?` | Show help popup |
 | `q` | Bury buffer |
+
+Code actions intentionally have no default binding — use the global
+`M-x eglot-code-actions` (Emacs binds it to `C-c C-a` by default in
+eglot-managed buffers).
 
 ### Log buffer
 
@@ -148,7 +151,6 @@ for a popup of active bindings in the current buffer.
 | `R` | Refresh |
 | `RET` | Apply revset shortcut on a `JJ:` line / go to definition |
 | `gd` | Go to definition |
-| `A` / `M-RET` | Code actions |
 | `?` | Show help popup |
 | `q` | Bury buffer |
 
@@ -158,7 +160,6 @@ for a popup of active bindings in the current buffer.
 | --- | ------ |
 | `R` | Refresh |
 | `RET` / `gd` | Go to definition |
-| `A` / `M-RET` | Code actions |
 | `?` | Show help popup |
 | `q` | Bury buffer |
 

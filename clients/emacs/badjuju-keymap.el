@@ -14,12 +14,16 @@
 ;;   r       rebase            b   bookmark
 ;;   f       fetch             p   push        P   push --force
 ;;   L       log (status only) q   bury        TAB fold toggle
-;;   A / M-RET  code actions   ?   help popup
+;;   ?       help popup
 ;;   c       commit transient  =   diff (same as d)
+;;
+;; Code actions intentionally do NOT have a default binding here — use
+;; the editor's native binding (Emacs: `M-x eglot-code-actions`, or
+;; whatever you've bound it to globally).
 ;;
 ;; Diff buffers (#39):
 ;;   g / R   refresh           q   bury
-;;   ?       help popup        M-RET  code actions
+;;   ?       help popup
 ;;   gd      goto definition
 ;;
 ;; Squash buffers (#41):
@@ -183,10 +187,9 @@ the user to pick the target parent."
   (define-key map (kbd "b")       #'badjuju-bookmark)
   ;; Commit transient
   (define-key map (kbd "c")       #'badjuju-commit)
-  ;; Help / code actions
+  ;; Help
   (define-key map (kbd "?")       (lambda () (interactive) (badjuju--show-help "status")))
-  (define-key map (kbd "A")       #'eglot-code-actions)
-  (define-key map (kbd "M-RET")   #'eglot-code-actions)
+  ;; Code actions intentionally unbound here — use `M-x eglot-code-actions'.
   ;; xref-find-definitions: available via RET (below) and the global M-. binding.
   ;; `gd' (vim-style) can't coexist with `g' as a non-prefix command.
   (define-key map (kbd "RET")     #'xref-find-definitions))
@@ -216,10 +219,9 @@ the user to pick the target parent."
   (define-key map (kbd "b")       #'badjuju-bookmark)
   ;; Commit transient
   (define-key map (kbd "c")       #'badjuju-commit)
-  ;; Help / code actions
+  ;; Help
   (define-key map (kbd "?")       (lambda () (interactive) (badjuju--show-help "log")))
-  (define-key map (kbd "A")       #'eglot-code-actions)
-  (define-key map (kbd "M-RET")   #'eglot-code-actions)
+  ;; Code actions intentionally unbound here — use `M-x eglot-code-actions'.
   ;; xref-find-definitions: available via the global M-. binding.
   ;; `gd' (vim-style) can't coexist with `g' as a non-prefix command.
   (define-key map (kbd "RET")     #'badjuju--ret-dispatch))
@@ -229,8 +231,7 @@ the user to pick the target parent."
   (define-key map (kbd "R")     #'badjuju-refresh)
   (define-key map (kbd "q")     #'bury-buffer)
   (define-key map (kbd "?")     (lambda () (interactive) (badjuju--show-help "diff")))
-  (define-key map (kbd "A")     #'eglot-code-actions)
-  (define-key map (kbd "M-RET") #'eglot-code-actions)
+  ;; Code actions intentionally unbound here — use `M-x eglot-code-actions'.
   ;; xref-find-definitions: available via RET (below) and the global M-. binding.
   ;; `gd' (vim-style) can't coexist with `g' as a non-prefix command.
   (define-key map (kbd "RET")   #'xref-find-definitions))

@@ -64,8 +64,10 @@ The diff buffer has a minimal key map:
 | `q` | Close window |
 | `?` | Show key binding help |
 
-Emacs additionally maps `RET` / `gd` to go-to-definition and
-`A` / `M-RET` to code actions.
+Emacs additionally maps `RET` / `gd` to go-to-definition. Code
+actions intentionally have no badjuju-specific binding in any client —
+use your editor's native binding (`M-x eglot-code-actions` in Emacs,
+`vim.lsp.buf.code_action` in Neovim, `Cmd+.` / `Ctrl+.` in VS Code).
 
 ## Auto-refresh
 
