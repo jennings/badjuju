@@ -66,3 +66,57 @@ describe(':JJLog default revset round-trip', function()
     assert.are.same({}, got.arguments)
   end)
 end)
+
+describe(':JJLogFile command', function()
+  before_each(reset)
+
+  local function capture(file_path, ...)
+    local original = badjuju.execute
+    local captured = {}
+    badjuju.execute = function(cmd, args)
+      captured.command = cmd
+      captured.arguments = args
+    end
+    vim.cmd.enew()
+    if file_path then
+      vim.api.nvim_buf_set_name(0, file_path)
+    end
+    local ok, err = pcall(function(...)
+      vim.cmd.JJLogFile(...)
+    end, ...)
+    badjuju.execute = original
+    assert.is_true(ok, tostring(err))
+    return captured
+  end
+
+  it('sends the workspace-relative path when invoked from a regular file', function()
+    local tmp = vim.fn.tempname() .. '/alpha.txt'
+    local got = capture(tmp)
+    assert.are.equal('badjuju.log.file', got.command)
+    -- The first arg should be the relative path string.
+    assert.is_string(got.arguments[1])
+    assert.is_truthy(
+      got.arguments[1]:match('alpha%.txt$'),
+      'expected path ending in alpha.txt, got: ' .. tostring(got.arguments[1])
+    )
+  end)
+
+  it('appends the user-supplied revset when provided', function()
+    local tmp = vim.fn.tempname() .. '/alpha.txt'
+    local got = capture(tmp, 'trunk()..@')
+    assert.are.equal('badjuju.log.file', got.command)
+    assert.are.equal('trunk()..@', got.arguments[2])
+  end)
+
+  it('sends cursor-form from a status.jujutsu buffer', function()
+    local tmp = vim.fn.tempname() .. '/.jj/badjuju/status.jujutsu'
+    -- enew + set name + the JJLogFile command path. The user command's
+    -- cursor branch only fires when the buffer name ends in /status.jujutsu.
+    local got = capture(tmp)
+    assert.are.equal('badjuju.log.file', got.command)
+    local arg = got.arguments[1]
+    assert.is_table(arg, 'first arg should be a cursor-form table, got: ' .. vim.inspect(arg))
+    assert.is_table(arg.cursor, 'arg.cursor should be a table')
+    assert.is_truthy(arg.cursor.uri:match('/status%.jujutsu$'))
+  end)
+end)

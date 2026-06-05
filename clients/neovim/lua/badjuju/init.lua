@@ -2,6 +2,7 @@ local M = {}
 
 local DIFF_SCHEME = 'badjuju-diff'
 local FILE_SCHEME = 'badjuju-file'
+local FILELOG_SCHEME = 'badjuju-filelog'
 
 --- Populate a buffer with content fetched via workspace/textDocumentContent.
 --- The handler is scheme-agnostic — it forwards whatever URI it receives.
@@ -91,6 +92,12 @@ function M.setup(opts)
     callback = function(args)
       -- nil filetype → infer from the URI's encoded path so .rs maps to rust, etc.
       populate_virtual_buf(args.buf, args.file, nil)
+    end,
+  })
+  vim.api.nvim_create_autocmd('BufReadCmd', {
+    pattern = FILELOG_SCHEME .. '://*',
+    callback = function(args)
+      populate_virtual_buf(args.buf, args.file, 'jujutsu')
     end,
   })
 
@@ -245,8 +252,11 @@ function M.execute(command, arguments, opts)
       elseif opts and opts.split == 'v' then
         vim.cmd('vsplit')
       end
-      -- Virtual diff URIs: open as a nofile buffer populated via BufReadCmd.
-      if result:sub(1, #DIFF_SCHEME + 3) == DIFF_SCHEME .. '://' then
+      -- Virtual diff / filelog URIs: open as a nofile buffer populated via BufReadCmd.
+      if
+        result:sub(1, #DIFF_SCHEME + 3) == DIFF_SCHEME .. '://'
+        or result:sub(1, #FILELOG_SCHEME + 3) == FILELOG_SCHEME .. '://'
+      then
         vim.cmd('edit ' .. vim.fn.fnameescape(result))
         if opts and opts.after then
           opts.after(result)

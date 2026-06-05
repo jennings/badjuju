@@ -94,6 +94,7 @@ require('badjuju').setup({
 | ------- | ----------- |
 | `:JJStatus` | Open `.jj/badjuju/status.jujutsu` |
 | `:JJLog [revset]` | Open the log; defaults to `@` |
+| `:JJLogFile [revset]` | Open the per-file log for the current buffer's file; defaults to `..@` |
 | `:JJDescribe [revision]` | Edit a commit message (defaults to `@`) |
 | `:JJDiff [revision]` | Open a diff (defaults to `@`) |
 | `:JJNew` | Create a new change |
@@ -120,6 +121,7 @@ Two built-in profiles, plus `"none"` to disable defaults. Set
 | `R`      | Refresh |
 | `n`      | New change |
 | `L`      | Open log |
+| `l f`    | Open the per-file log for the file at cursor |
 | `f`      | Git fetch |
 | `p`      | Git push |
 | `P`      | Git push --force-with-lease |

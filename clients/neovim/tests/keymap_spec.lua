@@ -130,6 +130,12 @@ describe('keymap.setup_for_buffer', function()
     end
   end)
 
+  it('binds lf chord on status.jujutsu for badjuju.log.file', function()
+    local buf = open_named('.jj/badjuju/status.jujutsu')
+    assert.is_true(has_buffer_map(buf, 'lf'),
+      'expected status.jujutsu map for lf chord (log file at cursor)')
+  end)
+
   it('binds bookmark chord bc/bm/bd/bt/bf on log.jujutsu (magit)', function()
     local buf = open_named('.jj/badjuju/log.jujutsu')
     for _, chord in ipairs({ 'bc', 'bm', 'bd', 'bt', 'bf' }) do
@@ -314,6 +320,29 @@ describe('revision-scoped hotkeys send cursor-form', function()
       end
     )
   end
+
+  it('status.jujutsu lf sends cursor-form for badjuju.log.file', function()
+    local captured, restore = capture_execute()
+    local buf = setup_buffer('.jj/badjuju/status.jujutsu', {
+      'STATUS:',
+      '',
+      'Working copy changes:',
+      'M src/main.rs',
+    })
+    vim.api.nvim_win_set_cursor(0, { 4, 0 })
+
+    local cb = find_callback(buf, 'lf')
+    assert.is_not_nil(cb, 'expected callback for lf')
+    cb()
+    restore()
+
+    assert.are.equal(1, #captured)
+    assert.are.equal('badjuju.log.file', captured[1].command)
+    local arg = captured[1].args[1]
+    assert.is_table(arg.cursor, 'arg.cursor should be a table')
+    assert.are.equal(3, arg.cursor.line, 'cursor line is 0-indexed (row 4 -> 3)')
+    assert.is_truthy(arg.cursor.uri:match('/status%.jujutsu$'))
+  end)
 
   for _, case in ipairs({
     { key = 's', server_command = 'badjuju.squash.commit' },

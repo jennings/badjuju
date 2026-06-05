@@ -46,6 +46,27 @@ function M.register_all()
     badjuju.execute('badjuju.log', arguments)
   end)
 
+  cmd('JJLogFile', { nargs = '?' }, function(args)
+    -- Default to the file the user is currently visiting. Inside a
+    -- status.jujutsu buffer, prefer the file under the cursor (ship the
+    -- cursor-form arg and let the server resolve it).
+    local name = vim.api.nvim_buf_get_name(0)
+    local arguments
+    if name:match('/%.jj/badjuju/status%.jujutsu$') then
+      local cursor_line = vim.api.nvim_win_get_cursor(0)[1] - 1
+      arguments = { { cursor = { uri = vim.uri_from_fname(name), line = cursor_line } } }
+    else
+      if name == '' then
+        vim.notify('badjuju: buffer is not visiting a file', vim.log.levels.ERROR)
+        return
+      end
+      local rel = vim.fn.fnamemodify(name, ':.')
+      arguments = { rel }
+    end
+    if args.args ~= '' then table.insert(arguments, args.args) end
+    badjuju.execute('badjuju.log.file', arguments)
+  end)
+
   cmd('JJDescribe', { nargs = '?' }, function(args)
     local revision = args.args ~= '' and args.args or nil
     badjuju.execute('badjuju.describe', revision and { revision } or {})

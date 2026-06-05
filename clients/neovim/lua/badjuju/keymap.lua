@@ -87,6 +87,13 @@ local function run_file_scoped(server_command)
   require('badjuju').execute(server_command, { cursor_arg() })
 end
 
+--- Open the per-file history buffer (`badjuju.log.file`) for the file under
+--- the cursor in a horizontal split. The cursor position is shipped so the
+--- server resolves the file from the same line of status.jujutsu.
+local function run_log_file()
+  require('badjuju').execute('badjuju.log.file', { cursor_arg() }, { split = 'h' })
+end
+
 --- Run badjuju.squash with multi-parent disambiguation via vim.ui.select.
 --- If the server returns RequiresParentSelection, shows a picker and retries
 --- with badjuju.squash.into.
@@ -312,6 +319,7 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, '=', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: show change diff at cursor (alias for d)')
       nmap(bufnr, 'aa', '<Cmd>JJAbandon<CR>', 'badjuju: abandon revision')
+      nmap(bufnr, 'lf', run_log_file, 'badjuju: log for file at cursor')
     else
       for _, m in ipairs(STATUS_MAPS) do
         map_cmd(bufnr, m[1], m[2], m[3])
@@ -337,6 +345,7 @@ function M.setup_for_buffer(bufnr)
       end, 'badjuju: cancel pending squash / squash file at cursor')
       nmap(bufnr, 'u', function() run_file_scoped('badjuju.unsquash') end,
         'badjuju: unsquash file at cursor from parent into child')
+      nmap(bufnr, 'lf', run_log_file, 'badjuju: log for file at cursor')
     end
     nmap(bufnr, 'cw', function() run_at_cursor_split('badjuju.describe') end,
       'badjuju: commit transient: reword commit at cursor')
