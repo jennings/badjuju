@@ -182,7 +182,7 @@ describe('badjuju.execute refresh-after-mutation (#72)', function()
     'badjuju.push',
     'badjuju.fetch',
     'badjuju.edit',
-    'badjuju.rebase',
+    'badjuju.rebase.commit',
     'badjuju.new',
     'badjuju.next',
     'badjuju.prev',

@@ -1,8 +1,8 @@
 -- Client-side handlers for the prompt-requiring code actions the server
--- emits (`badjuju.client.rebasePrompt`, `badjuju.client.bookmarkPrompt`).
--- Server-side code actions can't know a rebase destination or bookmark name,
--- so the action ships a pre-resolved revision and the client prompts for the
--- missing piece before forwarding to the real server command.
+-- emits (`badjuju.client.bookmarkPrompt`).
+-- Server-side code actions can't know a bookmark name, so the action ships
+-- a pre-resolved revision and the client prompts for the missing piece before
+-- forwarding to the real server command.
 --
 -- Routing: vim.lsp.commands[name] is consulted by Neovim's LSP code-action
 -- pipeline before falling back to workspace/executeCommand. Registering here
@@ -12,16 +12,6 @@ local M = {}
 
 local function execute(command, arguments)
   require('badjuju').execute(command, arguments)
-end
-
---- Handle the `badjuju.client.rebasePrompt` code-action command. The first
---- argument is the source revision pre-resolved by the server.
-local function prompt_rebase(command, _ctx)
-  local revision = (command.arguments or {})[1] or '@'
-  vim.ui.input({ prompt = 'Rebase to: ' }, function(dest)
-    if not dest or dest == '' then return end
-    execute('badjuju.rebase', { revision, dest })
-  end)
 end
 
 --- Handle the `badjuju.client.bookmarkPrompt` code-action command. Prompts
@@ -47,7 +37,6 @@ end
 --- Install the client-side handlers in the global vim.lsp.commands table.
 --- Idempotent: overwrites any prior registration with the same name.
 function M.register()
-  vim.lsp.commands['badjuju.client.rebasePrompt'] = prompt_rebase
   vim.lsp.commands['badjuju.client.bookmarkPrompt'] = prompt_bookmark
 end
 

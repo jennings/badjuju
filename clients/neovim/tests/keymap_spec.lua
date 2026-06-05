@@ -23,9 +23,9 @@ local function has_buffer_map(bufnr, key)
 end
 
 describe('keymap.setup_for_buffer', function()
-  it('installs status.jujutsu maps including R/r/n/L/d/q/u/= and a', function()
+  it('installs status.jujutsu maps including R/n/L/d/q/u/= and a', function()
     local buf = open_named('.jj/badjuju/status.jujutsu')
-    for _, key in ipairs({ 'R', 'r', 'n', 'L', 'd', 'q', 'u', '=', 'a' }) do
+    for _, key in ipairs({ 'R', 'n', 'L', 'd', 'q', 'u', '=', 'a' }) do
       local found = has_buffer_map(buf, key)
       assert.is_true(found, 'expected status.jujutsu map for ' .. key)
     end
@@ -39,7 +39,7 @@ describe('keymap.setup_for_buffer', function()
 
   it('installs log.jujutsu maps for refresh, abandon, describe, diff, and undo', function()
     local buf = open_named('.jj/badjuju/log.jujutsu')
-    for _, key in ipairs({ 'R', 'r', 'a', 'd', 'D', 'U' }) do
+    for _, key in ipairs({ 'R', 'a', 'd', 'D', 'U' }) do
       local found = has_buffer_map(buf, key)
       assert.is_true(found, 'expected log.jujutsu map for ' .. key)
     end
@@ -136,12 +136,40 @@ describe('keymap.setup_for_buffer', function()
       'expected status.jujutsu map for lf chord (log file at cursor)')
   end)
 
+  it('binds rebase chord rs/rr/rb/ro/rA/rB on status.jujutsu (magit)', function()
+    local buf = open_named('.jj/badjuju/status.jujutsu')
+    for _, chord in ipairs({ 'rs', 'rr', 'rb', 'ro', 'rA', 'rB' }) do
+      assert.is_true(has_buffer_map(buf, chord),
+        'expected status.jujutsu map for rebase chord ' .. chord)
+    end
+  end)
+
+  it('binds x on status.jujutsu for cancel pending operation', function()
+    local buf = open_named('.jj/badjuju/status.jujutsu')
+    assert.is_true(has_buffer_map(buf, 'x'),
+      'expected status.jujutsu map for x (cancel pending operation)')
+  end)
+
   it('binds bookmark chord bc/bm/bd/bt/bf on log.jujutsu (magit)', function()
     local buf = open_named('.jj/badjuju/log.jujutsu')
     for _, chord in ipairs({ 'bc', 'bm', 'bd', 'bt', 'bf' }) do
       assert.is_true(has_buffer_map(buf, chord),
         'expected log.jujutsu map for bookmark chord ' .. chord)
     end
+  end)
+
+  it('binds rebase chord rs/rr/rb/ro/rA/rB on log.jujutsu (magit)', function()
+    local buf = open_named('.jj/badjuju/log.jujutsu')
+    for _, chord in ipairs({ 'rs', 'rr', 'rb', 'ro', 'rA', 'rB' }) do
+      assert.is_true(has_buffer_map(buf, chord),
+        'expected log.jujutsu map for rebase chord ' .. chord)
+    end
+  end)
+
+  it('binds x on log.jujutsu for cancel pending operation', function()
+    local buf = open_named('.jj/badjuju/log.jujutsu')
+    assert.is_true(has_buffer_map(buf, 'x'),
+      'expected log.jujutsu map for x (cancel pending operation)')
   end)
 
   it('does NOT bind A on log.jujutsu (magit profile) — defer to editor native', function()

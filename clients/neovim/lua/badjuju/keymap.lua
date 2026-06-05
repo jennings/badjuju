@@ -1,9 +1,5 @@
 local M = {}
 
---- Module-level pending-squash flag. Set to true after source selection,
---- cleared after destination selection or cancel.
-local pending_squash = false
-
 local function nmap(bufnr, key, rhs, desc)
   vim.keymap.set('n', key, rhs, {
     buffer = bufnr,
@@ -78,6 +74,32 @@ local function map_bookmark_chords(bufnr, prefix)
     'badjuju: forget bookmark')
 end
 
+--- Install the six rebase chord bindings under the given prefix.
+--- Source chords: `<prefix>s` = --source, `<prefix>r` = --revisions, `<prefix>b` = --branch.
+--- Dest chords: `<prefix>o` = --destination, `<prefix>A` = --insert-after, `<prefix>B` = --insert-before.
+---@param bufnr integer
+---@param prefix string  'r' for magit profile, 'rr' for vim profile
+local function map_rebase_chords(bufnr, prefix)
+  nmap(bufnr, prefix .. 's', function()
+    require('badjuju').execute('badjuju.rebase.source', { 'source', cursor_arg() })
+  end, 'badjuju: rebase --source from this commit')
+  nmap(bufnr, prefix .. 'r', function()
+    require('badjuju').execute('badjuju.rebase.source', { 'revisions', cursor_arg() })
+  end, 'badjuju: rebase --revisions from this commit')
+  nmap(bufnr, prefix .. 'b', function()
+    require('badjuju').execute('badjuju.rebase.source', { 'branch', cursor_arg() })
+  end, 'badjuju: rebase --branch from this commit')
+  nmap(bufnr, prefix .. 'o', function()
+    require('badjuju').execute('badjuju.rebase.commit', { 'onto', cursor_arg() })
+  end, 'badjuju: rebase onto this commit')
+  nmap(bufnr, prefix .. 'A', function()
+    require('badjuju').execute('badjuju.rebase.commit', { 'after', cursor_arg() })
+  end, 'badjuju: rebase --insert-after this commit')
+  nmap(bufnr, prefix .. 'B', function()
+    require('badjuju').execute('badjuju.rebase.commit', { 'before', cursor_arg() })
+  end, 'badjuju: rebase --insert-before this commit')
+end
+
 --- Run a file-scoped status command. The cursor position is shipped to the
 --- server, which resolves both the file and the revision from the same line
 --- of status.jujutsu. A server-side "no file at cursor" error surfaces through
@@ -121,22 +143,12 @@ end
 --- First call sets the source (pending state); second call sets the
 --- destination and opens the squash window.
 local function run_squash_commit()
-  require('badjuju').execute('badjuju.squash.commit', { cursor_arg() }, {
-    after = function(result_uri)
-      -- A squash URI contains /squash/ in the path; a status URI does not.
-      if result_uri:find('/squash/', 1, true) then
-        pending_squash = false
-      else
-        pending_squash = true
-      end
-    end,
-  })
+  require('badjuju').execute('badjuju.squash.commit', { cursor_arg() })
 end
 
---- Cancel a pending squash selection and return to the status view.
-local function run_squash_cancel()
-  pending_squash = false
-  require('badjuju').execute('badjuju.squash.cancel', {})
+--- Cancel any pending operation (squash or rebase).
+local function run_cancel()
+  require('badjuju').execute('badjuju.cancel', { cursor_arg() })
 end
 
 --- Toggle the hunk or file under the cursor between SELECTED and REMAINING.
@@ -278,28 +290,12 @@ function M.setup_for_buffer(bufnr)
   local name = vim.api.nvim_buf_get_name(bufnr)
 
   if name:match('/%.jj/badjuju/status%.jujutsu$') then
-    -- Shared helper used by both profiles. Sends a cursor-form arg so the
-    -- server resolves the revision; rebase on a non-commit line surfaces a
-    -- server-side error rather than the old client-side check.
-    local function status_rebase()
-      local arg = cursor_arg()
-      vim.ui.input({ prompt = 'Rebase to: ' }, function(dest)
-        if not dest or dest == '' then return end
-        require('badjuju').execute('badjuju.rebase', { arg, dest })
-      end)
-    end
-
     if profile == 'vim' then
       nmap(bufnr, 'nn', '<Cmd>JJNew<CR>', 'badjuju: new change')
       nmap(bufnr, 'll', '<Cmd>JJLog<CR>', 'badjuju: open log')
       nmap(bufnr, 'ss', run_squash_commit, 'badjuju: select squash source or destination')
-      nmap(bufnr, 'SS', function()
-        if pending_squash then
-          run_squash_cancel()
-        else
-          run_squash()
-        end
-      end, 'badjuju: cancel pending squash / squash file at cursor')
+      nmap(bufnr, 'SS', run_squash, 'badjuju: squash file at cursor')
+      nmap(bufnr, 'x', run_cancel, 'badjuju: cancel pending operation')
       nmap(bufnr, 'uu', function() run_file_scoped('badjuju.unsquash') end,
         'badjuju: unsquash file at cursor from parent into child')
       nmap(bufnr, 'ff', '<Cmd>JJFetch<CR>', 'badjuju: git fetch')
@@ -307,7 +303,7 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'PP', '<Cmd>JJPush!<CR>', 'badjuju: git push --force-with-lease')
       nmap(bufnr, 'UU', '<Cmd>JJUndo<CR>', 'badjuju: undo')
       map_bookmark_chords(bufnr, 'bb')
-      nmap(bufnr, 'rr', status_rebase, 'badjuju: rebase commit at cursor to destination')
+      map_rebase_chords(bufnr, 'rr')
       nmap(bufnr, 'ee', function() run_at_cursor_split('badjuju.edit') end,
         'badjuju: edit commit at cursor (move @)')
       nmap(bufnr, 'dd', function() run_at_cursor_split('badjuju.describe') end,
@@ -328,7 +324,7 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'e', function() run_at_cursor_split('badjuju.edit') end,
         'badjuju: edit commit at cursor (move @)')
       map_bookmark_chords(bufnr, 'b')
-      nmap(bufnr, 'r', status_rebase, 'badjuju: rebase commit at cursor to destination')
+      map_rebase_chords(bufnr, 'r')
       nmap(bufnr, 'd', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: show change diff at cursor (updates on amend)')
       nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff.commit') end,
@@ -336,13 +332,8 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, '=', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: show change diff at cursor (alias for d)')
       nmap(bufnr, 's', run_squash_commit, 'badjuju: select squash source or destination')
-      nmap(bufnr, 'S', function()
-        if pending_squash then
-          run_squash_cancel()
-        else
-          run_squash()
-        end
-      end, 'badjuju: cancel pending squash / squash file at cursor')
+      nmap(bufnr, 'S', run_squash, 'badjuju: squash file at cursor')
+      nmap(bufnr, 'x', run_cancel, 'badjuju: cancel pending operation')
       nmap(bufnr, 'u', function() run_file_scoped('badjuju.unsquash') end,
         'badjuju: unsquash file at cursor from parent into child')
       nmap(bufnr, 'lf', run_log_file, 'badjuju: log for file at cursor')
@@ -362,19 +353,9 @@ function M.setup_for_buffer(bufnr)
     nmap(bufnr, 'gd', vim.lsp.buf.definition, 'badjuju: go to definition')
     nmap(bufnr, '<CR>', ret_dispatch, 'badjuju: apply revset shortcut or goto definition')
   elseif name:match('/%.jj/badjuju/log%.jujutsu$') then
-    -- Sends cursor-form args; the server returns an LSP error if the cursor
-    -- isn't on a commit (surfaced via badjuju.execute's error path).
-    local function log_rebase()
-      local arg = cursor_arg()
-      vim.ui.input({ prompt = 'Rebase to: ' }, function(dest)
-        if not dest or dest == '' then return end
-        require('badjuju').execute('badjuju.rebase', { arg, dest })
-      end)
-    end
-
     if profile == 'vim' then
       map_bookmark_chords(bufnr, 'bb')
-      nmap(bufnr, 'rr', log_rebase, 'badjuju: rebase commit at cursor to destination')
+      map_rebase_chords(bufnr, 'rr')
       nmap(bufnr, 'ee', function() run_at_cursor_split('badjuju.edit') end,
         'badjuju: edit commit at cursor (move @)')
       nmap(bufnr, 'dd', function() run_at_cursor_split('badjuju.describe') end,
@@ -388,9 +369,7 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'aa', '<Cmd>JJAbandon<CR>', 'badjuju: abandon revision')
       nmap(bufnr, 'UU', '<Cmd>JJUndo<CR>', 'badjuju: undo')
       nmap(bufnr, 'ss', run_squash_commit, 'badjuju: select squash source or destination')
-      nmap(bufnr, 'SS', function()
-        if pending_squash then run_squash_cancel() end
-      end, 'badjuju: cancel pending squash')
+      nmap(bufnr, 'x', run_cancel, 'badjuju: cancel pending operation')
       for _, m in ipairs(LOG_MAPS) do
         if m[1] ~= 'a' then map_cmd(bufnr, m[1], m[2], m[3]) end
       end
@@ -402,7 +381,7 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, 'e', function() run_at_cursor_split('badjuju.edit') end,
         'badjuju: edit commit at cursor (move @)')
       map_bookmark_chords(bufnr, 'b')
-      nmap(bufnr, 'r', log_rebase, 'badjuju: rebase commit at cursor to destination')
+      map_rebase_chords(bufnr, 'r')
       nmap(bufnr, 'd', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: show change diff at cursor (updates on amend)')
       nmap(bufnr, 'D', function() run_at_cursor_split('badjuju.diff.commit') end,
@@ -410,9 +389,7 @@ function M.setup_for_buffer(bufnr)
       nmap(bufnr, '=', function() run_at_cursor_split('badjuju.diff') end,
         'badjuju: show change diff at cursor (alias for d)')
       nmap(bufnr, 's', run_squash_commit, 'badjuju: select squash source or destination')
-      nmap(bufnr, 'S', function()
-        if pending_squash then run_squash_cancel() end
-      end, 'badjuju: cancel pending squash')
+      nmap(bufnr, 'x', run_cancel, 'badjuju: cancel pending operation')
     end
     nmap(bufnr, 'cw', function() run_at_cursor_split('badjuju.describe') end,
       'badjuju: commit transient: reword commit at cursor')

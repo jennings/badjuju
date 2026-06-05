@@ -126,16 +126,23 @@ Two built-in profiles, plus `"none"` to disable defaults. Set
 | `p`      | Git push |
 | `P`      | Git push --force-with-lease |
 | `e`      | Edit commit at cursor (move @) |
-| `b`      | Bookmark manager |
-| `r`      | Rebase commit at cursor |
+| `b c/m/d/t/f` | Bookmark: create / move / delete / track / forget |
+| `r s`    | Mark rebase source (`jj rebase -s`) |
+| `r r`    | Mark rebase source (`jj rebase -r`) |
+| `r b`    | Mark rebase source (`jj rebase -b`) |
+| `r o`    | Rebase onto commit at cursor (`-d`) |
+| `r A`    | Insert after commit at cursor (`--insert-after`) |
+| `r B`    | Insert before commit at cursor (`--insert-before`) |
 | `d`      | Diff change at cursor (updates on amend) |
 | `D`      | Diff commit at cursor (pinned, immutable) |
 | `c w`    | Commit transient → reword (describe) commit at cursor |
 | `c n`    | Commit transient → new child commit |
-| `s`      | Squash file at cursor into parent |
+| `s`      | Select squash source or destination (two-step) |
+| `S`      | Squash file at cursor into parent |
 | `u`      | Unsquash file at cursor |
 | `a`      | Abandon commit at cursor |
 | `U`      | Undo |
+| `x`      | Cancel pending operation (squash or rebase) |
 | `=`      | Diff (alias for `d`) |
 | `q`      | Close window |
 | `?`      | Show key binding help |
@@ -146,14 +153,21 @@ Two built-in profiles, plus `"none"` to disable defaults. Set
 | -------- | ------ |
 | `R`      | Refresh |
 | `e`      | Edit commit at cursor (move @) |
-| `b`      | Bookmark manager |
-| `r`      | Rebase commit at cursor |
+| `b c/m/d/t/f` | Bookmark: create / move / delete / track / forget |
+| `r s`    | Mark rebase source (`jj rebase -s`) |
+| `r r`    | Mark rebase source (`jj rebase -r`) |
+| `r b`    | Mark rebase source (`jj rebase -b`) |
+| `r o`    | Rebase onto commit at cursor (`-d`) |
+| `r A`    | Insert after commit at cursor (`--insert-after`) |
+| `r B`    | Insert before commit at cursor (`--insert-before`) |
 | `d`      | Diff change at cursor (updates on amend) |
 | `D`      | Diff commit at cursor (pinned, immutable) |
 | `c w`    | Commit transient → reword (describe) commit at cursor |
 | `c n`    | Commit transient → new child commit |
+| `s`      | Select squash source or destination (two-step) |
 | `a`      | Abandon commit at cursor |
 | `U`      | Undo |
+| `x`      | Cancel pending operation (squash or rebase) |
 | `=`      | Diff (alias for `d`) |
 | `<CR>`   | Apply revset shortcut on cursor line |
 | `q`      | Close window |
@@ -182,19 +196,31 @@ Two-letter verb chords inspired by Fugitive. Most actions use doubled
 letters (`nn`, `dd`, etc.) to keep single keys free for text
 navigation:
 
-| Key | Action |
-| --- | ------ |
+| Key  | Action |
+| ---- | ------ |
 | `nn` | New change |
 | `ll` | Open log |
+| `ee` | Edit commit at cursor (move @) |
 | `dd` | Describe commit at cursor |
 | `d`  | Diff change at cursor (updates on amend) |
 | `D`  | Diff commit at cursor (pinned, immutable) |
 | `=`  | Diff (alias for `d`) |
-| `ss` | Squash file at cursor |
+| `bb c/m/d/t/f` | Bookmark: create / move / delete / track / forget |
+| `rr s` | Mark rebase source (`jj rebase -s`) |
+| `rr r` | Mark rebase source (`jj rebase -r`) |
+| `rr b` | Mark rebase source (`jj rebase -b`) |
+| `rr o` | Rebase onto commit at cursor (`-d`) |
+| `rr A` | Insert after commit at cursor (`--insert-after`) |
+| `rr B` | Insert before commit at cursor (`--insert-before`) |
+| `ss` | Select squash source or destination (two-step) |
+| `SS` | Squash file at cursor into parent |
 | `uu` | Unsquash file at cursor |
 | `UU` | Undo |
 | `aa` | Abandon commit at cursor |
-| … | (`ee`, `bb`, `rr`, `ff`, `pp`, `PP` follow the same convention) |
+| `x`  | Cancel pending operation (squash or rebase) |
+| `ff` | Git fetch |
+| `pp` | Git push |
+| `PP` | Git push --force-with-lease |
 
 Enable with:
 

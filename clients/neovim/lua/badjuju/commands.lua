@@ -141,7 +141,11 @@ function M.register_all()
       source = args.fargs[1]
       dest = args.fargs[2]
     end
-    badjuju.execute('badjuju.rebase', { source, dest })
+    badjuju.execute('badjuju.rebase.source', { 'source', source }, {
+      after = function()
+        badjuju.execute('badjuju.rebase.commit', { 'onto', dest })
+      end,
+    })
   end)
 end
 

@@ -241,7 +241,7 @@ function M.execute(command, arguments, opts)
       -- so the buffer reloads when the server actually rewrote the file.
       --
       -- checktime is mtime-gated, so it is a no-op for refocus-only commands
-      -- like badjuju.squash.commit (source selection) and badjuju.squash.cancel
+      -- like badjuju.squash.commit (source selection) and badjuju.cancel
       -- that deliberately leave the file untouched.
       local opens_window = opts and (opts.split == 'h' or opts.split == 'v')
       local current_uri = vim.uri_from_fname(vim.api.nvim_buf_get_name(0))
