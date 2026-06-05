@@ -65,33 +65,6 @@ suite("E2E: prompted commands and config propagation", () => {
     );
   });
 
-  // --- badjuju.rebase.prompt ---
-
-  test("badjuju.rebase.prompt: cancellation does not execute rebase", async () => {
-    const changeIdBefore = jj(ctx.repoPath, [
-      "log",
-      "-r@",
-      "--no-graph",
-      "-T",
-      "change_id.short()",
-    ]);
-    win.showInputBox = async () => undefined;
-    await vscode.commands.executeCommand("badjuju.rebase.prompt");
-    await new Promise((r) => setTimeout(r, 500));
-    const changeIdAfter = jj(ctx.repoPath, [
-      "log",
-      "-r@",
-      "--no-graph",
-      "-T",
-      "change_id.short()",
-    ]);
-    assert.strictEqual(
-      changeIdBefore,
-      changeIdAfter,
-      "Cancelling rebase prompt must not mutate the repo",
-    );
-  });
-
   // --- badjuju.bookmark.prompt ---
 
   test("badjuju.bookmark.prompt create: bookmark is created at @ revision", async () => {

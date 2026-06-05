@@ -63,7 +63,9 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type
 | `badjuju.describe.finalize` | jj: Finalize commit description | Save and close describe buffer |
 | `badjuju.squash.file` | jj: Squash file at cursor | Move file under cursor into parent |
 | `badjuju.unsquash.file` | jj: Unsquash file at cursor | Pull file back from parent |
-| `badjuju.rebase.prompt` | jj: Rebase to destination | Prompt and rebase |
+| `badjuju.rebase.source.cursor` | jj: Mark rebase source | Mark source + mode for two-step rebase |
+| `badjuju.rebase.commit.cursor` | jj: Execute pending rebase | Execute rebase to commit at cursor |
+| `badjuju.cancel.run` | jj: Cancel pending operation | Cancel pending squash or rebase |
 | `badjuju.bookmark.prompt` | jj: Bookmark | Interactive bookmark manager |
 | `badjuju.log.applyShortcut` | jj: Apply revset shortcut | Follow revset link in log |
 | `badjuju.help.open` | jj: Show hotkey help | Cheat sheet for current buffer |
@@ -92,12 +94,15 @@ Set `badjuju.keymapProfile` to choose:
 | `f` / `p` / `P` | Fetch / push / force push |
 | `e` | Edit commit at cursor |
 | `b` | Bookmark |
-| `r` | Rebase |
+| `r s` / `r r` / `r b` | Mark rebase source (--source / --revisions / --branch) |
+| `r o` / `r A` / `r B` | Execute rebase (onto / insert-after / insert-before) |
 | `d` | Diff (change) |
 | `D` | Diff (commit, pinned) |
 | `c w` | Commit transient → reword (describe) commit at cursor |
 | `c n` | Commit transient → new child commit |
-| `s` | Squash file at cursor |
+| `s` | Select squash source or destination (two-step) |
+| `S` | Squash file at cursor into parent |
+| `x` | Cancel pending operation (squash or rebase) |
 | `u`, `Ctrl+K u` | Unsquash file at cursor |
 | `a` | Abandon |
 | `U` | Undo |
@@ -127,10 +132,11 @@ Set `badjuju.keymapProfile` to choose:
 
 ### `vim` profile
 
-Doubled letters: `nn`, `ll`, `dd`, `ss`, `uu`, `UU`, `aa`, `ee`,
-`bb`, `rr`, `ff`, `pp`, `PP`. Single-key bindings: `D` (diff commit),
-`=` (diff change, alias for `D`'s change-mode sibling), `q`, `?`. See
-the in-repo `clients/vscode/README.md` for the complete table.
+Doubled letters: `nn`, `ll`, `dd`, `ss`, `SS`, `uu`, `UU`, `aa`, `ee`,
+`bb`, `ff`, `pp`, `PP`. Rebase chords use a three-key sequence: `r r s` /
+`r r r` / `r r b` for source, `r r o` / `r r A` / `r r B` for destination.
+`x` cancels any pending operation. Single-key bindings: `D`, `=`, `q`, `?`.
+See the in-repo `clients/vscode/README.md` for the complete table.
 
 ## Settings
 

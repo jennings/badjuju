@@ -39,10 +39,6 @@ declare const __BADJUJU_VERSION__: string;
 
 let client: LanguageClient;
 
-function setPendingSquash(value: boolean): void {
-  commands.executeCommand("setContext", "badjuju.pendingSquash", value);
-}
-
 class StatusContentProvider implements TextDocumentContentProvider {
   private readonly _onDidChange = new EventEmitter<Uri>();
   readonly onDidChange = this._onDidChange.event;
@@ -195,29 +191,6 @@ function cursorArgsForActiveEditor():
 }
 
 type RevisionArg = string | { cursor: { uri: string; line: number } };
-
-/**
- * Prompt for a rebase destination and execute `badjuju.rebase`. Shared
- * between the `badjuju.rebase.prompt` hotkey (which ships a cursor-form
- * source) and the `badjuju.client.rebasePrompt` code-action command (which
- * receives a pre-resolved source string from the server).
- */
-async function runRebasePrompt(source: RevisionArg): Promise<void> {
-  const dest = await window.showInputBox({
-    prompt: "Rebase to (destination revision):",
-    placeHolder: "e.g. main, @-, abc1234",
-  });
-  if (!dest) return;
-  try {
-    const result = await client.sendRequest("workspace/executeCommand", {
-      command: "badjuju.rebase",
-      arguments: [source, dest],
-    });
-    await openServerResult(result as string);
-  } catch (e) {
-    window.showInformationMessage(`rebase: ${(e as Error).message}`);
-  }
-}
 
 /**
  * Prompt for a bookmark name and execute `badjuju.bookmark`. Shared between
@@ -569,28 +542,20 @@ export async function activate(context: ExtensionContext) {
           command: "badjuju.squash.commit",
           arguments: args,
         });
-        const resultUri = result as string;
-        // Source selection returns the status URI; destination selection returns the squash URI.
-        if (isSquashFile(Uri.parse(resultUri))) {
-          setPendingSquash(false);
-        } else {
-          setPendingSquash(true);
-        }
-        await openServerResult(resultUri);
+        await openServerResult(result as string);
       } catch (e) {
         window.showInformationMessage(`squash.commit: ${(e as Error).message}`);
       }
     }),
-    commands.registerCommand("badjuju.squash.cancel.run", async () => {
+    commands.registerCommand("badjuju.cancel.run", async () => {
       try {
         const result = await client.sendRequest("workspace/executeCommand", {
-          command: "badjuju.squash.cancel",
+          command: "badjuju.cancel",
           arguments: [],
         });
-        setPendingSquash(false);
         await openServerResult(result as string);
       } catch (e) {
-        window.showInformationMessage(`squash.cancel: ${(e as Error).message}`);
+        window.showInformationMessage(`cancel: ${(e as Error).message}`);
       }
     }),
     commands.registerCommand("badjuju.squash.toggle.cursor", async () => {
@@ -758,13 +723,45 @@ export async function activate(context: ExtensionContext) {
       });
       await openServerResult(result as string);
     }),
-    commands.registerCommand("badjuju.rebase.prompt", async () => {
-      const cursorArgs = cursorArgsForActiveEditor();
-      // Cursor-form when in a jujutsu buffer; literal "@" otherwise. Server
-      // returns an LSP error if the cursor isn't on a commit line.
-      const source: RevisionArg = cursorArgs ? cursorArgs[0] : "@";
-      await runRebasePrompt(source);
-    }),
+    commands.registerCommand(
+      "badjuju.rebase.source.cursor",
+      async (args?: { mode?: string } | string) => {
+        const mode = typeof args === "string" ? args : (args?.mode ?? "source");
+        const cursorArgs = cursorArgsForActiveEditor();
+        const source: RevisionArg = cursorArgs ? cursorArgs[0] : "@";
+        try {
+          const result = await client.sendRequest("workspace/executeCommand", {
+            command: "badjuju.rebase.source",
+            arguments: [mode, source],
+          });
+          await openServerResult(result as string);
+        } catch (e) {
+          window.showInformationMessage(
+            `rebase.source: ${(e as Error).message}`,
+          );
+        }
+      },
+    ),
+    commands.registerCommand(
+      "badjuju.rebase.commit.cursor",
+      async (args?: { insert?: string } | string) => {
+        const insert =
+          typeof args === "string" ? args : (args?.insert ?? "onto");
+        const cursorArgs = cursorArgsForActiveEditor();
+        const dest: RevisionArg = cursorArgs ? cursorArgs[0] : "@";
+        try {
+          const result = await client.sendRequest("workspace/executeCommand", {
+            command: "badjuju.rebase.commit",
+            arguments: [insert, dest],
+          });
+          await openServerResult(result as string);
+        } catch (e) {
+          window.showInformationMessage(
+            `rebase.commit: ${(e as Error).message}`,
+          );
+        }
+      },
+    ),
     commands.registerCommand("badjuju.edit.cursor", async () => {
       const args = cursorArgsForActiveEditor() ?? [];
       try {
@@ -838,15 +835,8 @@ export async function activate(context: ExtensionContext) {
       await runBookmarkPrompt(picked.label, revision);
     }),
     // Client-side commands invoked by server-provided code actions. The server
-    // ships {command: "badjuju.client.rebasePrompt", arguments: [<revision>]}
-    // when a code action would need a destination/name that the server can't
-    // resolve on its own; the handler prompts and forwards to the server cmd.
-    commands.registerCommand(
-      "badjuju.client.rebasePrompt",
-      async (revision: string) => {
-        await runRebasePrompt(revision ?? "@");
-      },
-    ),
+    // ships {command: "badjuju.client.bookmarkPrompt", arguments: [<revision>]}
+    // when a code action needs a bookmark name that the server can't prompt for.
     commands.registerCommand(
       "badjuju.client.bookmarkPrompt",
       async (revision: string) => {
