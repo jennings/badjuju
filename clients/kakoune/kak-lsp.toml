@@ -3,9 +3,15 @@
 # Do NOT set initialization_options.virtualDiffs — kak-lsp does not implement
 # workspace/textDocumentContent, so the server must deliver diffs as physical
 # files under .jj/badjuju/.
+#
+# include_text_on_save: required for the save handlers to work correctly.
+# The server expects to receive the buffer text on textDocument/didSave for
+# describe.jujutsu, log.jujutsu, log-file-*.jujutsu, and hunk-edit-*.jujutsu.
+# Without this, :w triggers the save event but the server has no text to parse.
 
 [language.jujutsu]
 filetypes = ["jujutsu"]
 roots = [".jj"]
 command = "badjuju"
 args = ["lsp"]
+include_text_on_save = true
