@@ -1,0 +1,11 @@
+# Merge this snippet into ~/.config/kak-lsp/kak-lsp.toml.
+#
+# Do NOT set initialization_options.virtualDiffs — kak-lsp does not implement
+# workspace/textDocumentContent, so the server must deliver diffs as physical
+# files under .jj/badjuju/.
+
+[language.jujutsu]
+filetypes = ["jujutsu"]
+roots = [".jj"]
+command = "badjuju"
+args = ["lsp"]
