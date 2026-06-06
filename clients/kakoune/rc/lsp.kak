@@ -5,7 +5,7 @@
 #   - workspace/applyEdit for pushing state updates to open buffers
 
 hook global WinSetOption filetype=jujutsu %{
-    lsp-enable-window
+    try %{ lsp-enable-window }
 }
 
 # Execute a badjuju LSP command.

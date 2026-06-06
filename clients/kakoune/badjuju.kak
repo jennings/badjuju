@@ -8,7 +8,8 @@
 #       set-option global badjuju_keymap_profile magit
 #   }
 
-declare-option str badjuju_keymap_profile "magit"
+# Declare with try so users can set the option before sourcing this file.
+try %{ declare-option str badjuju_keymap_profile "magit" }
 
 evaluate-commands %sh{
     dir=$(dirname "$kak_source")/rc
