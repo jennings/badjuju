@@ -10,6 +10,7 @@
   - [Neovim](./clients/neovim.md)
   - [VS Code](./clients/vscode.md)
   - [Emacs](./clients/emacs.md)
+  - [Kakoune](./clients/kakoune.md)
   - [Other Editors](./clients/other.md)
 - [Reference](./reference/index.md)
   - [Status buffer](./reference/status-buffer.md)

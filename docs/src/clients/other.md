@@ -146,10 +146,11 @@ If your editor:
    elsewhere.
 
 Reading the [VS Code extension
-source](https://github.com/jennings/badjuju/tree/main/clients/vscode/src)
-and the [Helix `languages.toml`
-snippet](https://github.com/jennings/badjuju/blob/main/clients/helix/languages.toml)
-will give you a working template. If you build an integration for a
-new editor, please [open an
+source](https://github.com/jennings/badjuju/tree/main/clients/vscode/src),
+the [Helix `languages.toml`
+snippet](https://github.com/jennings/badjuju/blob/main/clients/helix/languages.toml),
+or the [Kakoune client](./kakoune.md) (which uses kak-lsp and exposes
+full command dispatch and keymaps) will give you a working template. If
+you build an integration for a new editor, please [open an
 issue](https://github.com/jennings/badjuju/issues) — we'd love to
 include it.
