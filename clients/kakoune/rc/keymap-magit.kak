@@ -11,6 +11,7 @@ declare-user-mode badjuju-status
 declare-user-mode badjuju-log
 declare-user-mode badjuju-diff
 declare-user-mode badjuju-squash
+declare-user-mode badjuju-hunk-edit
 declare-user-mode badjuju-describe
 
 # Nested modes for chord prefixes (bookmark / rebase / commit)
@@ -63,11 +64,14 @@ hook global WinSetOption filetype=jujutsu %{
             */\.jj/badjuju/log.jujutsu)
                 echo 'map window normal <space> ": enter-user-mode badjuju-log<ret>"'
                 ;;
-            */\.jj/badjuju/diff*.jujutsu)
-                echo 'map window normal <space> ": enter-user-mode badjuju-diff<ret>"'
-                ;;
             */\.jj/badjuju/squash/*)
                 echo 'map window normal <space> ": enter-user-mode badjuju-squash<ret>"'
+                ;;
+            */\.jj/badjuju/hunk-edit-*.jujutsu)
+                echo 'map window normal <space> ": enter-user-mode badjuju-hunk-edit<ret>"'
+                ;;
+            */\.jj/badjuju/diff-*.jujutsu|*/\.jj/badjuju/diff.jujutsu)
+                echo 'map window normal <space> ": enter-user-mode badjuju-diff<ret>"'
                 ;;
             */\.jj/badjuju/describe.jujutsu)
                 echo 'map window normal <space> ": enter-user-mode badjuju-describe<ret>"'
@@ -139,14 +143,35 @@ map global badjuju-diff '?' ': badjuju-help diff<ret>' \
 
 # --- squash window -----------------------------------------------------------
 
-map global badjuju-squash s ': JJSquashToggle<ret>'      -docstring 'toggle hunk/file at cursor'
-map global badjuju-squash a ': JJSquashSelectAll<ret>'   -docstring 'select all'
-map global badjuju-squash A ': JJSquashSelectNone<ret>'  -docstring 'deselect all'
-map global badjuju-squash q ': delete-buffer<ret>'       -docstring 'close buffer'
+map global badjuju-squash s ': JJSquashToggle<ret>'    -docstring 'toggle hunk/file at cursor'
+map global badjuju-squash e ': JJSquashEditHunk<ret>'  -docstring 'edit hunk before squashing'
+map global badjuju-squash a ': JJSquashSelectAll<ret>' -docstring 'select all'
+map global badjuju-squash A ': JJSquashSelectNone<ret>' -docstring 'deselect all'
+map global badjuju-squash q ': delete-buffer<ret>'     -docstring 'close buffer'
 map global badjuju-squash '?' ': badjuju-help squash<ret>' \
     -docstring 'show help'
 
+# --- hunk-edit-*.jujutsu -----------------------------------------------------
+
+map global badjuju-hunk-edit q ': delete-buffer<ret>' -docstring 'close buffer'
+map global badjuju-hunk-edit '?' ': badjuju-help hunk-edit<ret>' \
+    -docstring 'show help'
+
 # --- describe.jujutsu --------------------------------------------------------
+
+# Save-and-close / abort bindings for describe.jujutsu.
+# These are inserted directly on the window, not via the user-mode, so they
+# work without pressing <space> first.
+hook global WinSetOption filetype=jujutsu %{
+    evaluate-commands %sh{
+        case "$kak_buffile" in
+            */\.jj/badjuju/describe.jujutsu)
+                printf 'map window normal <c-c><c-c> ": write; delete-buffer<ret>"\n'
+                printf 'map window normal <c-c><c-k> ": delete-buffer!<ret>"\n'
+                ;;
+        esac
+    }
+}
 
 map global badjuju-describe '?' ': badjuju-help describe<ret>' \
     -docstring 'show help'

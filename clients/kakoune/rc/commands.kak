@@ -251,6 +251,15 @@ define-command -override JJSquashSelectNone \
     lsp-execute-command badjuju.squash.select_none %{[]}
 }
 
+define-command -override JJSquashEditHunk \
+    -docstring "Open the hunk-edit buffer for the hunk under the cursor" %{
+    evaluate-commands %sh{
+        line=$((kak_cursor_line - 1))
+        printf 'lsp-execute-command badjuju.squash.edit_hunk %%{[{"cursor":{"uri":"file://%s","line":%d}}]}\n' \
+            "$kak_buffile" "$line"
+    }
+}
+
 define-command -override JJSquashCommit \
     -docstring "Select squash source or destination (two-step commit-to-commit squash)" %{
     evaluate-commands %sh{
