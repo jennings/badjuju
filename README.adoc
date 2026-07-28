@@ -113,6 +113,12 @@ See link:clients/helix/README.md[] for the `languages.toml` snippet. Once
 hx "$(badjuju status)"
 ----
 
+Running a Steel-enabled Helix build (see
+https://github.com/helix-editor/helix/pull/8675[helix-editor/helix#8675])?
+link:clients/helix-steel/README.md[] adds named commands, auto-open after
+state-changing actions, and `RET` context dispatch on top of the plain
+setup above.
+
 == Prerequisites
 
 * https://www.rust-lang.org/tools/install[Rust toolchain] (edition 2024)
