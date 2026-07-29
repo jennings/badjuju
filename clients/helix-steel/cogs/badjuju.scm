@@ -329,7 +329,7 @@
 
 ;; Open a fresh scratch buffer named `title` containing `text`.
 (define (jj-show-scratch! title text)
-  (helix.static.new)
+  (helix.new)
   (set-scratch-buffer-name! title)
   (helix.static.insert_string text))
 
