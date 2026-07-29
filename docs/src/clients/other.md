@@ -127,6 +127,19 @@ new file path, open it manually:
 :open .jj/badjuju/squash/<from>-<to>.jujutsu
 ```
 
+### Steel plugin (optional, experimental)
+
+Running a Steel-enabled Helix build closes both gaps above: named commands
+for every `badjuju.*` operation, auto-open after state-changing actions, and
+`RET` context dispatch matching the Neovim/Emacs clients. Steel isn't in
+mainline Helix — [helix-editor/helix#8675](https://github.com/helix-editor/helix/pull/8675)
+is still open — so this means building
+[`mattwparas/helix`](https://github.com/mattwparas/helix) (branch
+`steel-event-system`) yourself rather than using a release binary. See
+[`clients/helix-steel/README.md`](https://github.com/jennings/badjuju/blob/main/clients/helix-steel/README.md)
+for setup and an honest accounting of what is and isn't tested against a
+real Steel-Helix build.
+
 ## Any other LSP-capable editor
 
 If your editor:

@@ -127,6 +127,42 @@ jobs:
         env:
           BADJUJU_E2E: '1'
 
+  helix-steel:
+    name: Helix (Steel)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Cache cargo bin
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-steel
+
+      - name: Install steel
+        # Installs the standalone `steel` interpreter, not a Steel-enabled
+        # Helix — see clients/helix-steel/README.md's "Testing" section for
+        # why a real Steel-Helix build isn't exercised here.
+        run: command -v steel || cargo install steel-interpreter
+
+      - name: Verify steel is installed
+        # Guard against silent skips: clients/helix-steel/test/run.sh exits 0
+        # when steel is missing on local machines. In CI we want a hard
+        # failure if the install step above didn't actually install it.
+        run: steel --version
+
+      - name: Install redo
+        run: |
+          git clone --depth 1 https://github.com/apenwarr/redo /tmp/redo
+          cd /tmp/redo && sudo DESTDIR= ./do install
+
+      - name: Run helix-steel plugin tests
+        run: redo clients/helix-steel/test
+
   typescript:
     name: TypeScript
     runs-on: ubuntu-latest

@@ -15,4 +15,5 @@ exact key bindings.
 - [**Kakoune**](./kakoune.md) — kak-lsp plugin with `:JJ*` commands
   and user-mode keymaps (`magit` or `vim` profile).
 - [**Other Editors**](./other.md) — Helix support via `languages.toml`
-  plus notes for any LSP-capable editor that can fire code actions.
+  (plus an optional Steel plugin for named commands and auto-open), and
+  notes for any LSP-capable editor that can fire code actions.
